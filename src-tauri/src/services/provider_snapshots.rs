@@ -118,11 +118,9 @@ mod tests {
                 Provider::CcMirror,
                 Provider::Codex,
                 Provider::Gemini,
-                Provider::Cursor,
                 Provider::OpenCode,
                 Provider::Kimi,
                 Provider::Qwen,
-                Provider::Copilot,
             ]
         );
         assert_eq!(snapshots.len(), Provider::all().len());

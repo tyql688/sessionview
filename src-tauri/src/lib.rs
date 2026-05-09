@@ -175,8 +175,13 @@ fn audit_trash_consistency(db: &db::Database) {
     let Ok(trash_dir) = trash_state::trash_dir() else {
         return;
     };
-    let meta_path = trash_state::trash_meta_path(&trash_dir);
-    let entries = trash_state::read_trash_meta(&meta_path);
+    let entries = match services::SessionLifecycleService::list_trash() {
+        Ok(entries) => entries,
+        Err(e) => {
+            log::warn!("trash audit: failed to list trash metadata: {e}");
+            return;
+        }
+    };
     if entries.is_empty() {
         return;
     }

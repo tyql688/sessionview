@@ -492,10 +492,6 @@ fn build_gemini_runtime() -> Option<Box<dyn SessionProvider>> {
     crate::providers::gemini::GeminiProvider::new().map(|p| Box::new(p) as Box<dyn SessionProvider>)
 }
 
-fn build_cursor_runtime() -> Option<Box<dyn SessionProvider>> {
-    crate::providers::cursor::CursorProvider::new().map(|p| Box::new(p) as Box<dyn SessionProvider>)
-}
-
 fn build_opencode_runtime() -> Option<Box<dyn SessionProvider>> {
     crate::providers::opencode::OpenCodeProvider::new()
         .map(|p| Box::new(p) as Box<dyn SessionProvider>)
@@ -514,11 +510,6 @@ fn build_qwen_runtime() -> Option<Box<dyn SessionProvider>> {
     crate::providers::qwen::QwenProvider::new().map(|p| Box::new(p) as Box<dyn SessionProvider>)
 }
 
-fn build_copilot_runtime() -> Option<Box<dyn SessionProvider>> {
-    crate::providers::copilot::CopilotProvider::new()
-        .map(|p| Box::new(p) as Box<dyn SessionProvider>)
-}
-
 fn provider_catalog() -> &'static [ProviderCatalogEntry] {
     &PROVIDER_CATALOG
 }
@@ -532,12 +523,10 @@ fn provider_entry(provider: &Provider) -> &'static ProviderCatalogEntry {
         Provider::Claude => &PROVIDER_CATALOG[0],
         Provider::Codex => &PROVIDER_CATALOG[1],
         Provider::Gemini => &PROVIDER_CATALOG[2],
-        Provider::Cursor => &PROVIDER_CATALOG[3],
-        Provider::OpenCode => &PROVIDER_CATALOG[4],
-        Provider::Kimi => &PROVIDER_CATALOG[5],
-        Provider::CcMirror => &PROVIDER_CATALOG[6],
-        Provider::Qwen => &PROVIDER_CATALOG[7],
-        Provider::Copilot => &PROVIDER_CATALOG[8],
+        Provider::OpenCode => &PROVIDER_CATALOG[3],
+        Provider::Kimi => &PROVIDER_CATALOG[4],
+        Provider::CcMirror => &PROVIDER_CATALOG[5],
+        Provider::Qwen => &PROVIDER_CATALOG[6],
     }
 }
 
@@ -545,19 +534,17 @@ fn provider_entry_for_key(key: &str) -> Option<&'static ProviderCatalogEntry> {
     provider_catalog().iter().find(|entry| entry.key == key)
 }
 
-static PROVIDER_KINDS: [Provider; 9] = [
+static PROVIDER_KINDS: [Provider; 7] = [
     Provider::Claude,
     Provider::Codex,
     Provider::Gemini,
-    Provider::Cursor,
     Provider::OpenCode,
     Provider::Kimi,
     Provider::CcMirror,
     Provider::Qwen,
-    Provider::Copilot,
 ];
 
-static PROVIDER_CATALOG: [ProviderCatalogEntry; 9] = [
+static PROVIDER_CATALOG: [ProviderCatalogEntry; 7] = [
     ProviderCatalogEntry {
         kind: Provider::Claude,
         key: "claude",
@@ -578,13 +565,6 @@ static PROVIDER_CATALOG: [ProviderCatalogEntry; 9] = [
         label: "Gemini",
         descriptor: &crate::providers::gemini::Descriptor,
         build_runtime: build_gemini_runtime,
-    },
-    ProviderCatalogEntry {
-        kind: Provider::Cursor,
-        key: "cursor",
-        label: "Cursor",
-        descriptor: &crate::providers::cursor::Descriptor,
-        build_runtime: build_cursor_runtime,
     },
     ProviderCatalogEntry {
         kind: Provider::OpenCode,
@@ -613,13 +593,6 @@ static PROVIDER_CATALOG: [ProviderCatalogEntry; 9] = [
         label: "Qwen Code",
         descriptor: &crate::providers::qwen::Descriptor,
         build_runtime: build_qwen_runtime,
-    },
-    ProviderCatalogEntry {
-        kind: Provider::Copilot,
-        key: "copilot",
-        label: "Copilot",
-        descriptor: &crate::providers::copilot::Descriptor,
-        build_runtime: build_copilot_runtime,
     },
 ];
 
@@ -849,14 +822,6 @@ mod tests {
                 Some(Provider::Gemini),
             ),
             (
-                "/home/user/.cursor/projects/slug/agent-transcripts/parent-id/parent-id.jsonl",
-                Some(Provider::Cursor),
-            ),
-            (
-                "/home/user/.cursor/projects/slug/agent-transcripts/parent-id/subagents/child-id.jsonl",
-                Some(Provider::Cursor),
-            ),
-            (
                 "/home/user/.local/share/opencode/opencode.db",
                 Some(Provider::OpenCode),
             ),
@@ -871,10 +836,6 @@ mod tests {
             (
                 "/home/user/.qwen/projects/-Users-user-myproject/chats/abc-123.jsonl",
                 Some(Provider::Qwen),
-            ),
-            (
-                "/home/user/.copilot/session-state/abc-def/events.jsonl",
-                Some(Provider::Copilot),
             ),
             ("/home/user/random/file.txt", None),
             // cc-mirror path should NOT match claude
@@ -996,7 +957,7 @@ mod tests {
         let provider = DummyProvider;
         let entry = TrashMeta {
             id: "s1".to_string(),
-            provider: "cursor".to_string(),
+            provider: "opencode".to_string(),
             title: "t".to_string(),
             original_path: "/tmp/store.db".to_string(),
             trashed_at: 0,
@@ -1050,7 +1011,7 @@ mod tests {
     fn test_infer_restore_action_moveback_when_trash_file_exists() {
         let entry = TrashMeta {
             id: "s1".to_string(),
-            provider: "legacy-cursor".to_string(),
+            provider: "legacy-provider".to_string(),
             title: "t".to_string(),
             original_path: "/tmp/agent-transcripts/s1/s1.jsonl".to_string(),
             trashed_at: 0,

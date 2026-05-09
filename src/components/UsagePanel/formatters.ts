@@ -6,11 +6,9 @@ export const SHORT_PROVIDER_LABELS: Record<string, string> = {
   "cc-mirror": "CC-Mirror",
   codex: "Codex",
   gemini: "Gemini",
-  cursor: "Cursor",
   opencode: "OpenCode",
   kimi: "Kimi",
   qwen: "Qwen",
-  copilot: "Copilot",
 } as const;
 
 export function fmtTokens(n: number): string {

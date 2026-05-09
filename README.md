@@ -50,7 +50,6 @@ CC Session currently supports:
 - Codex CLI
 - Gemini CLI
 - Kimi CLI
-- Cursor CLI
 - OpenCode
 - Qwen Code
 - CC-Mirror

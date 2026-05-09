@@ -32,13 +32,6 @@ pub fn parse_mcp_tool_name(name: &str) -> Option<McpToolMetadata> {
 }
 
 pub fn canonical_tool_name(provider: Provider, name: &str) -> String {
-    if provider == Provider::Cursor {
-        match name {
-            "SemanticSearch" | "WebSearch" => return "Search".to_string(),
-            "WebFetch" => return "Read".to_string(),
-            _ => {}
-        }
-    }
     if provider == Provider::Gemini && (name.contains("Agent") || name.contains("agent")) {
         return "Agent".to_string();
     }
@@ -684,23 +677,16 @@ mod tests {
     }
 
     #[test]
-    fn preserves_provider_specific_tool_aliases() {
-        for (provider, raw, canonical, category) in [
-            (Provider::Cursor, "SemanticSearch", "Search", "search"),
-            (Provider::Cursor, "WebSearch", "Search", "search"),
-            (Provider::Cursor, "WebFetch", "Read", "file"),
-            (Provider::Copilot, "sql", "SQL", "database"),
-        ] {
-            let metadata = build_tool_metadata(ToolCallFacts {
-                provider,
-                raw_name: raw,
-                input: None,
-                call_id: None,
-                assistant_id: None,
-            });
-            assert_eq!(metadata.canonical_name, canonical);
-            assert_eq!(metadata.category, category);
-        }
+    fn sql_tool_uses_database_category() {
+        let metadata = build_tool_metadata(ToolCallFacts {
+            provider: Provider::Claude,
+            raw_name: "sql",
+            input: None,
+            call_id: None,
+            assistant_id: None,
+        });
+        assert_eq!(metadata.canonical_name, "SQL");
+        assert_eq!(metadata.category, "database");
     }
 
     #[test]

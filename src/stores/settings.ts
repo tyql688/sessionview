@@ -22,12 +22,10 @@ const VALID_PROVIDERS: Provider[] = [
   "claude",
   "codex",
   "gemini",
-  "cursor",
   "opencode",
   "kimi",
   "cc-mirror",
   "qwen",
-  "copilot",
 ];
 
 function parseStoredStringArray<T extends string>(
@@ -46,16 +44,20 @@ function parseStoredStringArray<T extends string>(
       throw new Error(`${label} must be a JSON array`);
     }
 
-    const invalidValue = parsed.find(
-      (value) => typeof value !== "string" || !isValid(value),
-    );
+    const invalidValue = parsed.find((value) => typeof value !== "string");
     if (invalidValue !== undefined) {
       throw new Error(
         `invalid ${label} entry: ${JSON.stringify(invalidValue)}`,
       );
     }
 
-    return { value: parsed as T[], error: null };
+    const value = parsed.filter(isValid) as T[];
+    if (value.length !== parsed.length) {
+      console.warn(`Removed unsupported ${label} entries from localStorage`);
+      localStorage.setItem(storageKey, JSON.stringify(value));
+    }
+
+    return { value, error: null };
   } catch (error) {
     const message = `Failed to parse ${label}: ${errorMessage(error)}`;
     console.error(message, error);

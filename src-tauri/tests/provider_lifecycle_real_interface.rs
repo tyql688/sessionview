@@ -226,7 +226,6 @@ fn discover_cc_mirror_commands() -> Vec<String> {
 fn generate_real_sessions(root: &Path, run_id: &str) -> (Vec<SessionExpectation>, Vec<String>) {
     let claude_marker = format!("ccsession-real-{run_id}-claude");
     let codex_marker = format!("ccsession-real-{run_id}-codex");
-    let cursor_marker = format!("ccsession-real-{run_id}-cursor");
     let opencode_marker = format!("ccsession-real-{run_id}-opencode");
     let gemini_marker = format!("ccsession-real-{run_id}-gemini");
     let kimi_marker = format!("ccsession-real-{run_id}-kimi");
@@ -237,7 +236,6 @@ fn generate_real_sessions(root: &Path, run_id: &str) -> (Vec<SessionExpectation>
 
     let claude_dir = create_workspace(root, &claude_marker);
     let codex_dir = create_workspace(root, &codex_marker);
-    let cursor_dir = create_workspace(root, &cursor_marker);
     let opencode_dir = create_workspace(root, &opencode_marker);
     let gemini_dir = create_workspace(root, &gemini_marker);
     let kimi_dir = create_workspace(root, &kimi_marker);
@@ -249,7 +247,6 @@ fn generate_real_sessions(root: &Path, run_id: &str) -> (Vec<SessionExpectation>
     let markers = vec![
         claude_marker.clone(),
         codex_marker.clone(),
-        cursor_marker.clone(),
         opencode_marker.clone(),
         gemini_marker.clone(),
         kimi_marker.clone(),
@@ -317,22 +314,6 @@ fn generate_real_sessions(root: &Path, run_id: &str) -> (Vec<SessionExpectation>
                 format!("{codex_marker} Reply with OK only."),
             ],
             &codex_dir,
-        ),
-    );
-
-    register(
-        "cursor",
-        Provider::Cursor,
-        cursor_marker.clone(),
-        None,
-        run_cli(
-            "cursor",
-            &[
-                "agent".into(),
-                "--trust".into(),
-                format!("{cursor_marker} Reply with OK only."),
-            ],
-            &cursor_dir,
         ),
     );
 
@@ -681,11 +662,9 @@ fn assert_provider_snapshots<W: AsRef<Webview<MockRuntime>>>(webview: &W) {
             Provider::CcMirror,
             Provider::Codex,
             Provider::Gemini,
-            Provider::Cursor,
             Provider::OpenCode,
             Provider::Kimi,
             Provider::Qwen,
-            Provider::Copilot,
         ]
     );
 

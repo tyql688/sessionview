@@ -162,19 +162,19 @@ describe("buildTrashTree", () => {
     expect(tree[0].children[0].children[0].id).toBe("t1");
   });
 
-  it("does not treat cursor session ids as project names", () => {
+  it("does not treat codex session ids as project names", () => {
     const items = [
       makeTrashItem({
         id: "t1",
-        provider: "cursor",
+        provider: "codex",
         project_name: "",
         original_path:
-          "/Users/test/.cursor/projects/private-tmp-ccsession-cli-cursor/agent-transcripts/c9e8cdc7-c0c7-435d-9045-765c4c837308/c9e8cdc7-c0c7-435d-9045-765c4c837308.jsonl",
+          "/Users/test/.codex/sessions/2026/05/09/rollout-2026-05-09T12-00-00-abc123.jsonl",
       }),
     ];
 
     const tree = buildTrashTree(items, labels);
-    expect(tree[0].children[0].label).toBe("private-tmp-ccsession-cli-cursor");
+    expect(tree[0].children[0].label).toBe("Unknown");
   });
 
   it("falls back to unknown for kimi legacy entries", () => {

@@ -26,7 +26,15 @@
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: https://asset.localhost; font-src 'self' data:",
       "assetProtocol": {
         "enable": true,
-        "scope": ["$HOME/.claude/**", "$HOME/.codex/**", "$HOME/.gemini/**", "$HOME/.cursor/**", "$HOME/.local/share/opencode/**", "$HOME/.kimi/**", "$HOME/.cc-mirror/**", "$HOME/.qwen/**"]
+        "scope": [
+          "$HOME/.claude/**",
+          "$HOME/.codex/**",
+          "$HOME/.gemini/**",
+          "$HOME/.local/share/opencode/**",
+          "$HOME/.kimi/**",
+          "$HOME/.cc-mirror/**",
+          "$HOME/.qwen/**"
+        ]
       }
     }
   },

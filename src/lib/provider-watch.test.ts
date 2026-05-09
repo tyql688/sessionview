@@ -10,7 +10,6 @@ const ALL_PROVIDERS: Provider[] = [
   "claude",
   "codex",
   "gemini",
-  "cursor",
   "opencode",
   "kimi",
   "cc-mirror",

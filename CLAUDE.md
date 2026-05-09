@@ -20,7 +20,7 @@ npm run format:check          # Prettier check
 ```
 src/                       # Solid.js frontend (components, stores, i18n, lib, styles)
 src-tauri/src/
-  providers/               # claude/, codex/, gemini/, kimi/, cursor/, opencode/, qwen/, cc_mirror.rs
+  providers/               # claude/, codex/, gemini/, kimi/, opencode/, qwen/, cc_mirror.rs
   commands/                # sessions.rs, settings.rs, trash.rs, terminal.rs
   services/                # provider_snapshots.rs, session_lifecycle.rs, session_resolution.rs, source_sync.rs, image_cache.rs
   exporter/                # json.rs, markdown.rs, html.rs, templates.rs
@@ -119,14 +119,12 @@ Metadata via Bridge pattern: `Provider` enum → `ProviderDescriptor` (zero-size
 | Codex       | `~/.codex/sessions/**/*.jsonl`         | JSONL  | FS    |
 | Gemini      | `~/.gemini/tmp/*/chats/*.json`         | JSON   | Poll  |
 | Kimi CLI    | `~/.kimi/sessions/**/wire.jsonl`       | JSONL  | FS    |
-| Cursor CLI  | `~/.cursor/projects/*/agent-transcripts/**/*.jsonl` | JSONL | FS |
 | OpenCode    | `~/.local/share/opencode/opencode.db`  | SQLite | Poll  |
 | Qwen Code   | `~/.qwen/projects/*/chats/*.jsonl`     | JSONL  | FS    |
-| Copilot     | `~/.copilot/session-state/*/events.jsonl` | JSONL | FS   |
 | CC-Mirror   | `~/.cc-mirror/{variant}/config/projects/**/*.jsonl` | JSONL | FS |
 
 Tool names mapped to canonical set per provider: {Bash, Edit, Read, Write, Glob, Grep, Agent, Plan}.
-Resume: Claude `--resume`, Codex `resume`, Gemini `--resume`, Kimi `--session`, Cursor `--resume=`, OpenCode `-s`, Qwen `--resume`, Copilot `--resume=`.
+Resume: Claude `--resume`, Codex `resume`, Gemini `--resume`, Kimi `--session`, OpenCode `-s`, Qwen `--resume`.
 
 ## Testing
 
@@ -141,7 +139,7 @@ Resume: Claude `--resume`, Codex `resume`, Gemini `--resume`, Kimi `--session`, 
 - **Images**: `[Image: source: ...]` in content; persistent cache at `app_data_dir/images/{sha256}.ext`; `read_image_base64` reads from cache when original is deleted
 - **Tool merge**: `call_id` pairs tool calls with results into single tool message
 - **Tool metadata**: Rust `build_tool_metadata` + `enrich_tool_metadata` attaches summary, structured result, status, and result_kind to each tool call
-- **Subagents**: `parent_id` links children; "Open" button for providers with separate files (Claude, Codex, Kimi, Cursor, CC-Mirror)
+- **Subagents**: `parent_id` links children; "Open" button for providers with separate files (Claude, Codex, Kimi, CC-Mirror)
 - **Provider snapshots**: backend derives provider label/color/order/watch strategy/path info; frontend consumes via `providerSnapshots` store
 - **Trash**: `TrashMeta.parent_id` cascades restore/delete; `is_session_dir()` prevents shared dir deletion
 - **Immutable state**: All Solid.js store updates use spread (`{ ...prev, field: newValue }`). Never mutate in place.
@@ -153,10 +151,8 @@ Resume: Claude `--resume`, Codex `resume`, Gemini `--resume`, Kimi `--session`, 
 - **macOS watchers**: File-backed providers use `notify` with `macos_kqueue` for more reliable file-level follow behavior; do not assume `FSEvents`.
 - **Codex**: `call_id` pairing, output can be nested JSON.
 - **Kimi**: MD5 project path, event stream format, float-second timestamps, truncated parallel agent args.
-- **Cursor**: JSONL transcripts + store.db marker. `[REDACTED]` = redacted thinking. Full-text subagent matching.
 - **CC-Mirror**: Multi-variant under `~/.cc-mirror/`, sanitized variant names.
 - **Qwen**: `sanitizeCwd()` path (hyphens, not SHA256). `thought: true` boolean + `text` field. Subagents embedded in parent (no separate files). Skip `ui_telemetry`/`slash_command`/`at_command`/`chat_compression`.
-- **Copilot**: Session ID from directory name (UUID). `reasoningText` for thinking. `toolRequests[]` in `assistant.message` + `tool.execution_start/complete` for tool calls. Subagents embedded via `task` tool (no separate files). Skip `hook.*`/`session.info`/`system.notification`/`session.mode_changed`.
 - **compact_string**: Rust `compact_string(s, limit)` truncates with `…` suffix. Do NOT use truncated summaries for matching/comparison — always extract full values from source JSON.
 - **Session ID vs agentId**: Claude subagent files are `agent-{id}.jsonl`, so session ID = `agent-{id}` but tool result `agentId` = `{id}` (no prefix). Always match both forms.
 
@@ -166,7 +162,7 @@ Resume: Claude `--resume`, Codex `resume`, Gemini `--resume`, Kimi `--session`, 
 - TypeScript: strict mode, no `any`, ESLint + Prettier
 - Commits: conventional commits (`feat:`, `fix:`, `refactor:`)
 - i18n: all user-facing strings via `t()`
-- Colors: Claude `#d97757`, Codex `#10b981`, Gemini `#f59e0b`, Cursor `#3b82f6`, OpenCode `#06b6d4`, Kimi `#1783ff`, CC-Mirror `#f472b6`, Qwen `#6c3cf5`, Copilot `#171717`
+- Colors: Claude `#d97757`, Codex `#10b981`, Gemini `#f59e0b`, OpenCode `#06b6d4`, Kimi `#1783ff`, CC-Mirror `#f472b6`, Qwen `#6c3cf5`
 
 ## Error Handling: No Silent Fallbacks
 

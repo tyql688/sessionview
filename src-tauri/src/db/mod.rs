@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-use rusqlite::Connection;
+use rusqlite::{params_from_iter, Connection};
 
 /// Number of read-only connections in the pool. SQLite WAL allows
 /// concurrent readers across distinct connections, so each connection in
@@ -321,6 +321,41 @@ impl Database {
 
                  INSERT INTO meta (key, value) VALUES ('fts_tokenizer_version', 'trigram_v1')
                      ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
+            )?;
+        }
+
+        let supported_provider_keys: Vec<&str> = crate::models::Provider::all()
+            .iter()
+            .map(|p| p.key())
+            .collect();
+        let supported_provider_placeholders =
+            std::iter::repeat_n("?", supported_provider_keys.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+        let unsupported_provider_filter =
+            format!("provider NOT IN ({supported_provider_placeholders})");
+        let removed_provider_rows: i64 = write_conn.query_row(
+            &format!("SELECT COUNT(*) FROM sessions WHERE {unsupported_provider_filter}"),
+            params_from_iter(supported_provider_keys.iter().copied()),
+            |row| row.get(0),
+        )?;
+        if removed_provider_rows > 0 {
+            write_conn.execute(
+                &format!(
+                    "DELETE FROM favorites
+                        WHERE session_id IN (
+                            SELECT id FROM sessions WHERE {unsupported_provider_filter}
+                        )"
+                ),
+                params_from_iter(supported_provider_keys.iter().copied()),
+            )?;
+            write_conn.execute(
+                &format!("DELETE FROM sessions WHERE {unsupported_provider_filter}"),
+                params_from_iter(supported_provider_keys.iter().copied()),
+            )?;
+            write_conn.execute(
+                "INSERT INTO sessions_fts(sessions_fts) VALUES('rebuild')",
+                [],
             )?;
         }
 

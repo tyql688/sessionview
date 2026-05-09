@@ -4,6 +4,20 @@ import {
   getProviderSortOrder,
 } from "../stores/providerSnapshots";
 
+const KNOWN_PROVIDER_KEYS = new Set<string>([
+  "claude",
+  "codex",
+  "gemini",
+  "opencode",
+  "kimi",
+  "cc-mirror",
+  "qwen",
+]);
+
+function parseProviderKey(provider: string): Provider | null {
+  return KNOWN_PROVIDER_KEYS.has(provider) ? (provider as Provider) : null;
+}
+
 function projectFromTrashPath(item: TrashMeta, unknownLabel: string): string {
   const provider = item.provider || "claude";
   const path = item.original_path.replaceAll("\\", "/");
@@ -21,7 +35,6 @@ function projectFromTrashPath(item: TrashMeta, unknownLabel: string): string {
     case "claude":
     case "cc-mirror":
       return segments.at(-2) || unknownLabel;
-    case "cursor":
     case "codex":
     case "gemini":
     case "kimi":
@@ -133,7 +146,13 @@ export function buildTrashTree(
   const providerMap = new Map<string, ProviderGroup<TrashMeta[]>>();
 
   for (const item of items) {
-    const provider = (item.provider || "claude") as Provider;
+    const provider = parseProviderKey(item.provider || "claude");
+    if (!provider) {
+      console.warn(
+        `skipping trash entry ${item.id} with unsupported provider ${item.provider}`,
+      );
+      continue;
+    }
     const key = providerGroupKey(provider, item.variant_name);
     const project =
       item.project_name?.trim() || projectFromTrashPath(item, labels.unknown);

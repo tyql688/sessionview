@@ -189,10 +189,16 @@ impl<'a> SessionLifecycleService<'a> {
     pub fn list_trash() -> Result<Vec<TrashMeta>, String> {
         let trash_dir = trash_dir()?;
         let meta_path = trash_meta_path(&trash_dir);
+        let shared_deletions_path = shared_deletions_path(&trash_dir);
         let _lock = TRASH_META_LOCK
             .lock()
             .map_err(|_| "trash meta lock poisoned".to_string())?;
-        Ok(read_trash_meta(&meta_path))
+        prune_unsupported_trash_entries(
+            read_trash_meta(&meta_path),
+            &meta_path,
+            &trash_dir,
+            &shared_deletions_path,
+        )
     }
 
     pub fn restore_session(&self, trash_id: &str) -> Result<(), String> {
@@ -207,7 +213,12 @@ impl<'a> SessionLifecycleService<'a> {
             .lock()
             .map_err(|_| "trash meta lock poisoned".to_string())?;
 
-        let entries = read_trash_meta(&meta_path);
+        let entries = prune_unsupported_trash_entries(
+            read_trash_meta(&meta_path),
+            &meta_path,
+            &trash_dir,
+            &shared_deletions_path,
+        )?;
         let Some(restore_entries) = collect_restore_entries(entries, trash_id) else {
             drop(lock);
             return Ok(());
@@ -269,7 +280,12 @@ impl<'a> SessionLifecycleService<'a> {
             let _lock = TRASH_META_LOCK
                 .lock()
                 .map_err(|_| "trash meta lock poisoned".to_string())?;
-            let entries = read_trash_meta(&meta_path);
+            let entries = prune_unsupported_trash_entries(
+                read_trash_meta(&meta_path),
+                &meta_path,
+                &trash_dir,
+                &shared_deletions_path,
+            )?;
 
             for entry in &entries {
                 cleanup_cached_images_for_trash(entry, &trash_dir);
@@ -294,7 +310,12 @@ impl<'a> SessionLifecycleService<'a> {
         let _lock = TRASH_META_LOCK
             .lock()
             .map_err(|_| "trash meta lock poisoned".to_string())?;
-        let entries = read_trash_meta(&meta_path);
+        let entries = prune_unsupported_trash_entries(
+            read_trash_meta(&meta_path),
+            &meta_path,
+            &trash_dir,
+            &shared_deletions_path,
+        )?;
 
         if let Some(entry) = entries.iter().find(|entry| entry.id == trash_id) {
             cleanup_cached_images_for_trash(entry, &trash_dir);
@@ -308,6 +329,71 @@ impl<'a> SessionLifecycleService<'a> {
         atomic_write_json(&meta_path, &remaining)?;
         Ok(())
     }
+}
+
+fn prune_unsupported_trash_entries(
+    entries: Vec<TrashMeta>,
+    meta_path: &Path,
+    trash_dir: &Path,
+    shared_deletions_path: &Path,
+) -> Result<Vec<TrashMeta>, String> {
+    let mut retained = Vec::with_capacity(entries.len());
+    let mut removed = false;
+
+    for entry in entries {
+        if crate::models::Provider::parse(&entry.provider).is_some() {
+            retained.push(entry);
+            continue;
+        }
+
+        log::warn!(
+            "removing trash entry {} with unsupported provider '{}'",
+            entry.id,
+            entry.provider
+        );
+        remove_unsupported_trash_entry(&entry, trash_dir, shared_deletions_path)?;
+        removed = true;
+    }
+
+    if removed {
+        atomic_write_json(meta_path, &retained)?;
+    }
+
+    Ok(retained)
+}
+
+fn remove_unsupported_trash_entry(
+    entry: &TrashMeta,
+    trash_dir: &Path,
+    shared_deletions_path: &Path,
+) -> Result<(), String> {
+    if !entry.trash_file.is_empty() {
+        let trash_file = trash_dir.join(&entry.trash_file);
+        if trash_file.exists() {
+            let metadata = trash_file
+                .metadata()
+                .map_err(|e| format!("failed to inspect unsupported trash file: {e}"))?;
+            if metadata.is_dir() {
+                std::fs::remove_dir_all(&trash_file)
+                    .map_err(|e| format!("failed to remove unsupported trash directory: {e}"))?;
+            } else {
+                std::fs::remove_file(&trash_file)
+                    .map_err(|e| format!("failed to remove unsupported trash file: {e}"))?;
+            }
+        } else {
+            log::warn!(
+                "unsupported trash entry {} references missing trash file: {}",
+                entry.id,
+                entry.trash_file
+            );
+        }
+    }
+
+    if !entry.original_path.is_empty() {
+        remove_shared_deletion(shared_deletions_path, &entry.id, &entry.original_path)?;
+    }
+
+    Ok(())
 }
 
 fn collect_restore_entries(entries: Vec<TrashMeta>, trash_id: &str) -> Option<RestoreEntries> {
@@ -392,7 +478,7 @@ fn remove_trash_entry(
 /// Remove session directory from original location.
 /// Tries both patterns to cover all providers:
 /// - `<file>.jsonl` → `<file>/` (Claude, Codex, CC-Mirror)
-/// - `parent()` of file (Kimi, Cursor — session UUID dir contains subagents/, state.json)
+/// - `parent()` of file (Kimi — session UUID dir contains subagents/, state.json)
 ///
 /// Safety: only `remove_dir_all` on directories that look session-specific
 /// (contain subagents/, state.json, wire.jsonl, or context.jsonl).
@@ -465,5 +551,74 @@ fn purge_shared_trash_entry(entry: &TrashMeta, shared_deletions_path: &Path) -> 
 fn cleanup_provider_entry(entry: &TrashMeta) {
     if let Some(provider) = runtime_for_trash_entry(entry) {
         provider.cleanup_on_permanent_delete(&entry.id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::trash_state::SharedDeletion;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn trash_entry(id: &str, provider: &str, original_path: &str, trash_file: &str) -> TrashMeta {
+        TrashMeta {
+            id: id.to_string(),
+            provider: provider.to_string(),
+            title: id.to_string(),
+            original_path: original_path.to_string(),
+            trashed_at: 1,
+            trash_file: trash_file.to_string(),
+            project_name: String::new(),
+            variant_name: None,
+            parent_id: None,
+        }
+    }
+
+    #[test]
+    fn prunes_unsupported_trash_entries_without_touching_original_path() {
+        let dir = TempDir::new().expect("temp dir");
+        let trash_dir = dir.path().join("trash");
+        fs::create_dir_all(&trash_dir).expect("create trash dir");
+        let meta_path = trash_dir.join("trash_meta.json");
+        let shared_deletions_path = trash_dir.join("shared_deletions.json");
+        let original_path = dir.path().join("source").join("legacy.jsonl");
+        fs::create_dir_all(original_path.parent().unwrap()).expect("create source dir");
+        fs::write(&original_path, "source").expect("write source");
+        let original_path_str = original_path.to_string_lossy().to_string();
+        fs::write(trash_dir.join("legacy.jsonl"), "trash").expect("write trash file");
+        atomic_write_json(
+            &shared_deletions_path,
+            &vec![SharedDeletion {
+                id: "old".to_string(),
+                provider: "legacy-provider".to_string(),
+                original_path: original_path_str.clone(),
+            }],
+        )
+        .expect("write shared deletions");
+
+        let retained = prune_unsupported_trash_entries(
+            vec![
+                trash_entry("old", "legacy-provider", &original_path_str, "legacy.jsonl"),
+                trash_entry("kept", "claude", "", ""),
+            ],
+            &meta_path,
+            &trash_dir,
+            &shared_deletions_path,
+        )
+        .expect("prune unsupported entries");
+
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].id, "kept");
+        assert!(!trash_dir.join("legacy.jsonl").exists());
+        assert!(original_path.exists());
+
+        let persisted = read_trash_meta(&meta_path);
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].id, "kept");
+
+        let shared: Vec<SharedDeletion> =
+            crate::trash_state::read_shared_deletions(&shared_deletions_path);
+        assert!(shared.is_empty());
     }
 }

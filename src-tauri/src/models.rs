@@ -8,14 +8,12 @@ pub enum Provider {
     Claude,
     Codex,
     Gemini,
-    Cursor,
     #[serde(rename = "opencode")]
     OpenCode,
     Kimi,
     #[serde(rename = "cc-mirror")]
     CcMirror,
     Qwen,
-    Copilot,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -129,7 +127,7 @@ pub struct Message {
     /// `messageId:requestId` hash for cross-file usage deduplication.
     ///
     /// `None` means the source provider does not expose a stable `(messageId, requestId)`
-    /// pair — this is the norm for Codex / Gemini / Copilot / Cursor / Qwen / Kimi, where
+    /// pair — this is the norm for Codex / Gemini / Qwen / Kimi, where
     /// sessions are not split across files and usage rows cannot collide. Only Claude and
     /// OpenCode populate `Some(..)`. `None` here is *not* the CLAUDE.md "placeholder when a
     /// real value should be computed" antipattern — it is an explicit "unsupported" marker

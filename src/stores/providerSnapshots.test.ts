@@ -87,11 +87,9 @@ describe("providerSnapshots store", () => {
       "cc-mirror",
       "codex",
       "gemini",
-      "cursor",
       "opencode",
       "kimi",
       "qwen",
-      "copilot",
     ]);
   });
 
