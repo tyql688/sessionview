@@ -6,6 +6,23 @@ pub fn contains_image_placeholder_without_source(text: &str) -> bool {
     text.contains("[Image") && !contains_image_source(text)
 }
 
+pub fn count_image_markers(text: &str) -> usize {
+    let mut count = 0;
+    let mut remaining = text;
+
+    while let Some(start) = remaining.find("[Image") {
+        let image_slice = &remaining[start..];
+        let Some(end_offset) = image_slice.find(']') else {
+            break;
+        };
+
+        count += 1;
+        remaining = &image_slice[end_offset + 1..];
+    }
+
+    count
+}
+
 pub fn normalize_image_source_segments(text: &str) -> String {
     let mut normalized = String::new();
     let mut remaining = text;
@@ -120,7 +137,7 @@ fn parse_image_source_segment(segment: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_image_source_segments, merge_image_placeholders_with_sources,
+        count_image_markers, extract_image_source_segments, merge_image_placeholders_with_sources,
         normalize_image_source_segments,
     };
 
@@ -140,6 +157,12 @@ mod tests {
             extract_image_source_segments(text),
             vec!["[Image: source: /tmp/demo.png]".to_string()]
         );
+    }
+
+    #[test]
+    fn counts_image_markers() {
+        assert_eq!(count_image_markers("before [Image #1] after [Image]"), 2);
+        assert_eq!(count_image_markers("no image"), 0);
     }
 
     #[test]

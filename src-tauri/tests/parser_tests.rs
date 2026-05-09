@@ -21,6 +21,16 @@ fn fixtures_dir() -> PathBuf {
         .join("fixtures")
 }
 
+fn parse_temp_claude_jsonl(content: &str) -> cc_session_lib::provider::ParsedSession {
+    let dir = TempDir::new().expect("temp dir must be created");
+    let path = dir.path().join("claude-temp.jsonl");
+    fs::write(&path, content).expect("temp claude fixture must be written");
+    ClaudeProvider::new()
+        .expect("home dir must be available")
+        .parse_session(&path)
+        .expect("temp claude fixture must parse")
+}
+
 // ---------------------------------------------------------------------------
 // Claude parser tests
 // ---------------------------------------------------------------------------
@@ -269,6 +279,83 @@ fn claude_normalizes_new_image_source_marker_format() {
             .count(),
         1,
         "attachment records between placeholder and isMeta should not split the user image message"
+    );
+}
+
+#[test]
+fn claude_image_block_without_text_marker_merges_meta_source() {
+    let session = parse_temp_claude_jsonl(concat!(
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"screenshot attached"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"abc123"}}]},"timestamp":"2026-05-01T10:00:00.000Z","cwd":"/tmp/demo","sessionId":"claude-image-block","uuid":"u1","isSidechain":false}"#,
+        "\n",
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Image source: /Users/test/.claude/image-cache/claude-image-block/1.png]"}]},"isMeta":true,"timestamp":"2026-05-01T10:00:00.100Z","cwd":"/tmp/demo","sessionId":"claude-image-block","uuid":"u2","isSidechain":false}"#,
+        "\n"
+    ));
+
+    let user = session
+        .messages
+        .iter()
+        .find(|m| m.role == MessageRole::User)
+        .expect("expected user message");
+    assert!(
+        user.content
+            .contains("[Image: source: /Users/test/.claude/image-cache/claude-image-block/1.png]"),
+        "image block should be replaced with meta source, got: {}",
+        user.content
+    );
+}
+
+#[test]
+fn claude_image_block_without_meta_source_keeps_placeholder() {
+    let session = parse_temp_claude_jsonl(concat!(
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"screenshot attached"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"abc123"}}]},"timestamp":"2026-05-01T10:00:00.000Z","cwd":"/tmp/demo","sessionId":"claude-image-block","uuid":"u1","isSidechain":false}"#,
+        "\n"
+    ));
+
+    let user = session
+        .messages
+        .iter()
+        .find(|m| m.role == MessageRole::User)
+        .expect("expected user message");
+    assert!(
+        user.content.contains("[Image]"),
+        "image block without cache source should still be visible, got: {}",
+        user.content
+    );
+}
+
+#[test]
+fn claude_displays_local_command_and_informational_system_messages() {
+    let session = parse_temp_claude_jsonl(concat!(
+        r#"{"type":"user","message":{"role":"user","content":"<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args></command-args>"},"timestamp":"2026-05-01T10:00:00.000Z","cwd":"/tmp/demo","sessionId":"claude-system","uuid":"u1","isSidechain":false}"#,
+        "\n",
+        r#"{"type":"system","subtype":"local_command","content":"<local-command-stdout>Kept model as \u001b[1mOpus 4.6\u001b[22m</local-command-stdout>","level":"info","timestamp":"2026-05-01T10:00:01.000Z","cwd":"/tmp/demo","sessionId":"claude-system","uuid":"s1","isSidechain":false}"#,
+        "\n",
+        r#"{"type":"system","subtype":"informational","content":"Auto mode lets Claude handle permission prompts automatically.","level":"warning","timestamp":"2026-05-01T10:00:02.000Z","cwd":"/tmp/demo","sessionId":"claude-system","uuid":"s2","isSidechain":false}"#,
+        "\n"
+    ));
+
+    let system_contents: Vec<&str> = session
+        .messages
+        .iter()
+        .filter(|m| m.role == MessageRole::System)
+        .map(|m| m.content.as_str())
+        .collect();
+    assert!(
+        system_contents.contains(&"[local_command] /model"),
+        "slash command should be visible as a system message: {:?}",
+        system_contents
+    );
+    assert!(
+        system_contents.contains(&"[local_command] Kept model as Opus 4.6"),
+        "local command output should be visible and ANSI-stripped: {:?}",
+        system_contents
+    );
+    assert!(
+        system_contents.contains(
+            &"[informational] Auto mode lets Claude handle permission prompts automatically."
+        ),
+        "informational system message should be visible: {:?}",
+        system_contents
     );
 }
 

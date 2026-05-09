@@ -16,7 +16,7 @@ use crate::tool_metadata::{
 };
 
 use super::images::{
-    contains_image_placeholder_without_source, contains_image_source,
+    contains_image_placeholder_without_source, contains_image_source, count_image_markers,
     merge_image_placeholders_with_sources, normalize_image_source_segments,
 };
 
@@ -585,6 +585,11 @@ fn handle_user_message(entry: &Value, state: &mut ParseState, timestamp: Option<
     if text.trim().is_empty() {
         return;
     }
+    if let Some(content) = format_local_command_text(&text) {
+        flush_pending(state);
+        append_system_message(state, content, timestamp);
+        return;
+    }
     let is_meta = entry
         .get("isMeta")
         .and_then(serde_json::Value::as_bool)
@@ -1030,9 +1035,34 @@ fn handle_system_message(entry: &Value, state: &mut ParseState, timestamp: Optio
             .filter(|s| !s.trim().is_empty())
             .map(|content| format!("[scheduled_task_fire] {content}"))
             .unwrap_or_else(|| "[scheduled_task_fire]".to_string()),
+        "local_command" => {
+            let Some(content) = entry
+                .get("content")
+                .and_then(|v| v.as_str())
+                .and_then(format_local_command_text)
+            else {
+                return;
+            };
+            content
+        }
+        "informational" => {
+            let Some(content) = entry
+                .get("content")
+                .and_then(|v| v.as_str())
+                .map(clean_system_text)
+                .filter(|s| !s.is_empty())
+            else {
+                return;
+            };
+            format!("[informational] {content}")
+        }
         _ => return,
     };
 
+    append_system_message(state, content, timestamp);
+}
+
+fn append_system_message(state: &mut ParseState, content: String, timestamp: Option<String>) {
     state.messages.push(Message {
         role: MessageRole::System,
         content,
@@ -1044,6 +1074,70 @@ fn handle_system_message(entry: &Value, state: &mut ParseState, timestamp: Optio
         usage_hash: None,
         tool_metadata: None,
     });
+}
+
+fn format_local_command_text(raw: &str) -> Option<String> {
+    let trimmed = raw.trim_start();
+    if !trimmed.starts_with("<command-name>")
+        && !trimmed.starts_with("<command-message>")
+        && !trimmed.starts_with("<local-command-stdout>")
+        && !trimmed.starts_with("<local-command-stderr>")
+    {
+        return None;
+    }
+
+    if let Some(command) = extract_tag_text(raw, "command-name").filter(|s| !s.is_empty()) {
+        let args = extract_tag_text(raw, "command-args").unwrap_or_default();
+        let detail = [command, args]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        return Some(format!("[local_command] {detail}"));
+    }
+
+    let stdout = extract_tag_text(raw, "local-command-stdout")
+        .or_else(|| extract_tag_text(raw, "local-command-stderr"))
+        .map(|value| clean_system_text(&value))
+        .filter(|s| !s.is_empty())?;
+    Some(format!("[local_command] {stdout}"))
+}
+
+fn extract_tag_text(raw: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = raw.find(&open)? + open.len();
+    let end = raw[start..].find(&close)? + start;
+    Some(clean_system_text(&raw[start..end]))
+}
+
+fn clean_system_text(raw: &str) -> String {
+    strip_ansi_codes(raw)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn strip_ansi_codes(raw: &str) -> String {
+    let mut cleaned = String::new();
+    let mut chars = raw.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            for code in chars.by_ref() {
+                if ('@'..='~').contains(&code) {
+                    break;
+                }
+            }
+            continue;
+        }
+        cleaned.push(ch);
+    }
+
+    cleaned
 }
 
 fn handle_pr_link(entry: &Value, state: &mut ParseState, timestamp: Option<String>) {
@@ -1163,6 +1257,7 @@ fn extract_message_content(message: &Value) -> String {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Array(arr)) => {
             let mut parts = Vec::new();
+            let mut image_block_count = 0usize;
             for item in arr {
                 let item_type = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
                 match item_type {
@@ -1194,12 +1289,18 @@ fn extract_message_content(message: &Value) -> String {
                             parts.push(format!("[Result] {}", &text[..end]));
                         }
                     }
-                    // "image" blocks are handled by the isMeta merge logic:
-                    // text has [Image #N] placeholders, next isMeta entry provides
-                    // file paths via [Image: source: /path], and
-                    // merge_image_placeholders_with_sources combines them.
+                    "image" => {
+                        image_block_count += 1;
+                    }
                     _ => {}
                 }
+            }
+            let marker_count = parts
+                .iter()
+                .map(|part| count_image_markers(part))
+                .sum::<usize>();
+            for _ in marker_count..image_block_count {
+                parts.push("[Image]".to_string());
             }
             parts.join("\n")
         }
