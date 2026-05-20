@@ -450,6 +450,7 @@ pub fn parse_session_file(path: &PathBuf) -> Option<ParsedSession> {
         content_text,
         parse_warning_count: state.parse_warning_count,
         child_session_ids: Vec::new(),
+        codex_usage_events: Vec::new(),
     })
 }
 

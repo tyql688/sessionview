@@ -121,15 +121,18 @@ impl SessionProvider for CodexProvider {
             ))
         })?;
 
+        let token_totals = codex_token_totals_from_usage_events(&parsed.codex_usage_events);
         let mut loaded = LoadedSession::from_parsed(parsed);
-        loaded.token_totals = codex_token_totals_from_file(&path);
+        loaded.token_totals = token_totals;
         Ok(loaded)
     }
 }
 
-fn codex_token_totals_from_file(path: &PathBuf) -> TokenTotals {
-    parser::extract_usage_events_from_file(path)
-        .into_iter()
+fn codex_token_totals_from_usage_events(
+    events: &[crate::provider::CodexUsageEvent],
+) -> TokenTotals {
+    events
+        .iter()
         .fold(TokenTotals::default(), |mut totals, event| {
             totals.input_tokens += event.input_tokens;
             totals.output_tokens += event.output_tokens;

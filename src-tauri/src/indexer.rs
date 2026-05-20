@@ -10,7 +10,6 @@ use crate::db::Database;
 use crate::models::{Provider, SessionMeta, TreeNode, TreeNodeType};
 use crate::pricing::{self, PricingCatalog, PRICING_CATALOG_JSON_KEY};
 use crate::provider::{ParsedSession, SessionProvider};
-use crate::providers::codex::parser::extract_usage_events_from_file;
 use crate::services::image_cache::{image_cache_provider_for, ImageCacheService};
 
 #[derive(Clone)]
@@ -465,10 +464,11 @@ fn compute_codex_token_stats(
     parsed: &ParsedSession,
     pricing_catalog: Option<&PricingCatalog>,
 ) -> Vec<TokenStatRow> {
-    let path = PathBuf::from(&parsed.meta.source_path);
     let mut stats_map: HashMap<(String, String), TokenStatRow> = HashMap::with_capacity(16);
 
-    for event in extract_usage_events_from_file(&path) {
+    // Usage events are captured during the single Codex parse pass so we
+    // don't have to re-open the file here just to aggregate per-date stats.
+    for event in &parsed.codex_usage_events {
         let Some(date) = timestamp_to_local_date(&event.timestamp) else {
             continue;
         };
@@ -538,6 +538,7 @@ mod tests {
             content_text: String::new(),
             parse_warning_count: 0,
             child_session_ids: Vec::new(),
+            codex_usage_events: Vec::new(),
         }
     }
 

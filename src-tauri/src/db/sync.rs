@@ -456,6 +456,7 @@ mod tests {
                 content_text: String::new(),
                 parse_warning_count: 0,
                 child_session_ids: Vec::new(),
+                codex_usage_events: Vec::new(),
             }],
             true,
         )
@@ -502,6 +503,7 @@ mod tests {
                 content_text: String::new(),
                 parse_warning_count: 0,
                 child_session_ids: Vec::new(),
+                codex_usage_events: Vec::new(),
             }],
             true,
         )
@@ -563,6 +565,7 @@ mod tests {
             content_text: String::new(),
             parse_warning_count: 0,
             child_session_ids: Vec::new(),
+            codex_usage_events: Vec::new(),
         })
         .collect::<Vec<_>>();
         db.sync_provider_snapshot(&Provider::Claude, &parsed, true)
@@ -599,6 +602,7 @@ mod tests {
                 content_text: String::new(),
                 parse_warning_count: 0,
                 child_session_ids: Vec::new(),
+                codex_usage_events: Vec::new(),
             }],
             true,
         )
@@ -624,6 +628,7 @@ mod tests {
                 content_text: String::new(),
                 parse_warning_count: 0,
                 child_session_ids: vec![child_id.to_string()],
+                codex_usage_events: Vec::new(),
             }],
             true,
         )
@@ -645,6 +650,7 @@ mod tests {
                 content_text: "Child updated content".into(),
                 parse_warning_count: 0,
                 child_session_ids: Vec::new(),
+                codex_usage_events: Vec::new(),
             }],
             true,
         )
@@ -685,6 +691,7 @@ mod tests {
                     content_text: String::new(),
                     parse_warning_count: 0,
                     child_session_ids: Vec::new(),
+                    codex_usage_events: Vec::new(),
                 },
                 ParsedSession {
                     meta: true_parent_meta,
@@ -692,6 +699,7 @@ mod tests {
                     content_text: String::new(),
                     parse_warning_count: 0,
                     child_session_ids: vec![child_id.into()],
+                    codex_usage_events: Vec::new(),
                 },
             ],
             true,
@@ -710,6 +718,7 @@ mod tests {
                 content_text: String::new(),
                 parse_warning_count: 0,
                 child_session_ids: vec![child_id.into()],
+                codex_usage_events: Vec::new(),
             }],
             true,
         )

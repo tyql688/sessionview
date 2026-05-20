@@ -376,6 +376,20 @@ pub enum ProviderError {
     Sqlite(#[from] rusqlite::Error),
 }
 
+/// A single Codex `event_msg.token_count` event, captured during parse so
+/// the indexer's `compute_codex_token_stats` doesn't have to re-open the
+/// file. Populated only by the Codex parser; empty for every other
+/// provider. Kept here (rather than in `providers::codex::parser`) so
+/// `ParsedSession` doesn't depend on a provider-leaf module.
+#[derive(Clone, Debug)]
+pub struct CodexUsageEvent {
+    pub timestamp: String,
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_input_tokens: u64,
+}
+
 #[derive(Clone)]
 pub struct ParsedSession {
     pub meta: SessionMeta,
@@ -395,6 +409,11 @@ pub struct ParsedSession {
     /// `parent_id` / `is_sidechain` / inherited project metadata on already-
     /// indexed child rows. Empty for every other provider.
     pub child_session_ids: Vec<String>,
+    /// Codex `event_msg.token_count` events captured during the single
+    /// parse pass. Lets `compute_codex_token_stats` aggregate per-date
+    /// token totals without re-opening the source file. Populated only by
+    /// the Codex parser.
+    pub codex_usage_events: Vec<CodexUsageEvent>,
 }
 
 /// Materialized session payload returned by `SessionProvider::load_messages`

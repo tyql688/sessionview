@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
 use crate::models::{Message, MessageRole, Provider, SessionMeta, TokenUsage};
-use crate::provider::ParsedSession;
+use crate::provider::{CodexUsageEvent, ParsedSession};
 use crate::provider_utils::{
     is_system_content, parse_rfc3339_timestamp, project_name_from_path, session_title,
     truncate_to_bytes, FTS_CONTENT_LIMIT, NO_PROJECT,
@@ -17,15 +17,6 @@ use crate::tool_metadata::{
 
 use super::tools::*;
 use super::CodexProvider;
-
-#[derive(Clone, Debug)]
-pub struct CodexUsageEvent {
-    pub timestamp: String,
-    pub model: String,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cache_read_input_tokens: u64,
-}
 
 #[derive(Deserialize)]
 struct CodexLine {
@@ -403,6 +394,7 @@ impl CodexProvider {
 
         let reader = BufReader::new(file);
         let mut messages = Vec::new();
+        let mut usage_events: Vec<CodexUsageEvent> = Vec::new();
         let mut first_user_message: Option<String> = None;
         let mut first_timestamp: Option<String> = None;
         let mut last_timestamp: Option<String> = None;
@@ -1175,14 +1167,36 @@ impl CodexProvider {
                                 else {
                                     continue;
                                 };
+                                let (input, cached, output, reasoning, total) = usage_counts;
+                                let any_nonzero = input != 0
+                                    || cached != 0
+                                    || output != 0
+                                    || reasoning != 0
+                                    || total != 0;
+                                let resolved_model = extract_codex_model(info)
+                                    .or_else(|| extract_codex_model(payload))
+                                    .or_else(|| current_model.clone())
+                                    .or_else(|| usage_model.clone());
+                                // Capture the event for the indexer's per-date stats
+                                // in the same pass — replaces a second file read.
+                                if any_nonzero {
+                                    if let Some(ts) = entry.timestamp.as_ref() {
+                                        let model_for_event = resolved_model
+                                            .clone()
+                                            .unwrap_or_else(|| "gpt-5".to_string());
+                                        usage_events.push(CodexUsageEvent {
+                                            timestamp: ts.clone(),
+                                            model: model_for_event,
+                                            input_tokens: input,
+                                            output_tokens: output,
+                                            cache_read_input_tokens: cached.min(input),
+                                        });
+                                    }
+                                }
                                 let Some(usage) = codex_token_usage_from_counts(usage_counts)
                                 else {
                                     continue;
                                 };
-                                let resolved_model = extract_codex_model(info)
-                                    .or_else(|| extract_codex_model(payload))
-                                    .or_else(|| current_model.clone())
-                                    .or(usage_model);
                                 if let Some(model_name) = resolved_model.clone() {
                                     current_model = Some(model_name);
                                 }
@@ -1688,101 +1702,9 @@ impl CodexProvider {
             content_text,
             parse_warning_count,
             child_session_ids: Vec::new(),
+            codex_usage_events: usage_events,
         })
     }
-}
-
-pub fn extract_usage_events_from_file(path: &PathBuf) -> Vec<CodexUsageEvent> {
-    let file = match File::open(path) {
-        Ok(file) => file,
-        Err(error) => {
-            log::warn!(
-                "failed to open Codex session for usage extraction '{}': {}",
-                path.display(),
-                error
-            );
-            return Vec::new();
-        }
-    };
-    let reader = BufReader::new(file);
-
-    let mut current_model: Option<String> = None;
-    let mut previous_totals: Option<CodexRawUsageCounts> = None;
-    let mut events = Vec::new();
-
-    for line in reader.lines() {
-        let line = match line {
-            Ok(line) if !line.trim().is_empty() => line,
-            Ok(_) => continue,
-            Err(error) => {
-                log::warn!(
-                    "failed to read Codex usage line from '{}': {}",
-                    path.display(),
-                    error
-                );
-                continue;
-            }
-        };
-
-        let entry: CodexLine = match serde_json::from_str(&line) {
-            Ok(entry) => entry,
-            Err(error) => {
-                log::warn!(
-                    "skipping malformed Codex usage JSONL in '{}': {}",
-                    path.display(),
-                    error
-                );
-                continue;
-            }
-        };
-
-        let Some(payload) = entry.payload.as_ref() else {
-            continue;
-        };
-
-        match entry.line_type.as_str() {
-            "turn_context" => {
-                current_model = extract_codex_model(payload).or(current_model);
-            }
-            "event_msg" => {
-                if payload.get("type").and_then(|v| v.as_str()) != Some("token_count") {
-                    continue;
-                }
-                let Some(timestamp) = entry.timestamp.clone() else {
-                    continue;
-                };
-                let Some(info) = payload.get("info") else {
-                    continue;
-                };
-
-                let Some((model, (input, cached, output, reasoning, total))) =
-                    codex_usage_from_info(info, &mut previous_totals)
-                else {
-                    continue;
-                };
-                if input == 0 && cached == 0 && output == 0 && reasoning == 0 && total == 0 {
-                    continue;
-                }
-
-                let model = extract_codex_model(info)
-                    .or_else(|| extract_codex_model(payload))
-                    .or_else(|| current_model.clone())
-                    .unwrap_or_else(|| model.unwrap_or_else(|| "gpt-5".to_string()));
-                current_model = Some(model.clone());
-
-                events.push(CodexUsageEvent {
-                    timestamp,
-                    model,
-                    input_tokens: input,
-                    output_tokens: output,
-                    cache_read_input_tokens: cached.min(input),
-                });
-            }
-            _ => {}
-        }
-    }
-
-    events
 }
 
 fn extract_codex_model(value: &Value) -> Option<String> {
@@ -2004,26 +1926,30 @@ fn flush_pending_user_message(
 
 #[cfg(test)]
 mod tests {
-    use super::extract_usage_events_from_file;
     use super::CodexProvider;
     use std::fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
     #[test]
-    fn extract_usage_events_keeps_total_input_and_cached_input() {
+    fn parse_session_collects_usage_events_keeping_total_input_and_cached_input() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("codex.jsonl");
         fs::write(
             &file,
             concat!(
                 "{\"timestamp\":\"2026-04-10T10:00:00Z\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.4\"}}\n",
-                "{\"timestamp\":\"2026-04-10T10:00:01Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"last_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":600,\"output_tokens\":50,\"reasoning_output_tokens\":25,\"total_tokens\":1050}}}}\n"
+                "{\"timestamp\":\"2026-04-10T10:00:01Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}}\n",
+                "{\"timestamp\":\"2026-04-10T10:00:02Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"last_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":600,\"output_tokens\":50,\"reasoning_output_tokens\":25,\"total_tokens\":1050}}}}\n"
             ),
         )
         .unwrap();
 
-        let events = extract_usage_events_from_file(&file);
+        let provider = CodexProvider {
+            home_dir: PathBuf::from("/tmp"),
+        };
+        let parsed = provider.parse_session_file(&file).expect("parsed session");
+        let events = &parsed.codex_usage_events;
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].model, "gpt-5.4");
         assert_eq!(events[0].input_tokens, 1000);
@@ -2032,21 +1958,26 @@ mod tests {
     }
 
     #[test]
-    fn extract_usage_events_matches_ccusage_last_usage_preference() {
+    fn parse_session_collects_usage_events_matching_ccusage_last_usage_preference() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("codex.jsonl");
         fs::write(
             &file,
             concat!(
                 "{\"timestamp\":\"2026-04-10T10:00:00Z\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.4\"}}\n",
-                "{\"timestamp\":\"2026-04-10T10:00:01Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":600,\"output_tokens\":50,\"reasoning_output_tokens\":25,\"total_tokens\":1050},\"last_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":600,\"output_tokens\":50,\"reasoning_output_tokens\":25,\"total_tokens\":1050}}}}\n",
+                "{\"timestamp\":\"2026-04-10T10:00:01Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}}\n",
                 "{\"timestamp\":\"2026-04-10T10:00:02Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":600,\"output_tokens\":50,\"reasoning_output_tokens\":25,\"total_tokens\":1050},\"last_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":600,\"output_tokens\":50,\"reasoning_output_tokens\":25,\"total_tokens\":1050}}}}\n",
-                "{\"timestamp\":\"2026-04-10T10:00:03Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1700,\"cached_input_tokens\":1000,\"output_tokens\":70,\"reasoning_output_tokens\":25,\"total_tokens\":1770},\"last_token_usage\":{\"input_tokens\":700,\"cached_input_tokens\":400,\"output_tokens\":20,\"reasoning_output_tokens\":0,\"total_tokens\":720}}}}\n"
+                "{\"timestamp\":\"2026-04-10T10:00:03Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":600,\"output_tokens\":50,\"reasoning_output_tokens\":25,\"total_tokens\":1050},\"last_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":600,\"output_tokens\":50,\"reasoning_output_tokens\":25,\"total_tokens\":1050}}}}\n",
+                "{\"timestamp\":\"2026-04-10T10:00:04Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1700,\"cached_input_tokens\":1000,\"output_tokens\":70,\"reasoning_output_tokens\":25,\"total_tokens\":1770},\"last_token_usage\":{\"input_tokens\":700,\"cached_input_tokens\":400,\"output_tokens\":20,\"reasoning_output_tokens\":0,\"total_tokens\":720}}}}\n"
             ),
         )
         .unwrap();
 
-        let events = extract_usage_events_from_file(&file);
+        let provider = CodexProvider {
+            home_dir: PathBuf::from("/tmp"),
+        };
+        let parsed = provider.parse_session_file(&file).expect("parsed session");
+        let events = &parsed.codex_usage_events;
         assert_eq!(events.len(), 3);
         assert_eq!(events[0].input_tokens, 1000);
         assert_eq!(events[0].cache_read_input_tokens, 600);
