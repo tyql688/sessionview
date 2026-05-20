@@ -279,6 +279,18 @@ pub async fn get_session_messages_window(
         let meta = load_session_meta(&state.db, &session_id).map_err(anyhow::Error::msg)?;
         let source_path = meta.source_path.clone();
         with_load_guard(&state, &session_id, &source_path, |_flag| {
+            // Fast path: when the frontend asks for a tail-of-file window
+            // (negative offset) and the cache hasn't seen this session yet,
+            // skip the full-file parse by reading only the trailing bytes.
+            // Currently wired up for Claude only — see
+            // `try_claude_tail_fast_path` for the eligibility rules and
+            // background-promote setup.
+            if let Some(window) =
+                try_claude_tail_fast_path(&state, &meta, offset, limit, &session_id)?
+            {
+                return Ok(window);
+            }
+
             let (messages, parse_warning_count, token_totals) =
                 load_messages_cached(&state, &meta)?;
             if load_cancel::is_canceled() {
@@ -310,6 +322,127 @@ pub async fn get_session_messages_window(
     .await
     .context("task join error")?
     .map_err(CommandError::from)
+}
+
+/// Try to satisfy a window request by mmap-reading just the trailing
+/// portion of the source file instead of parsing it whole.
+///
+/// Returns `Ok(Some(_))` when the fast path applied; the caller can
+/// return the window directly. Returns `Ok(None)` when the caller
+/// should fall through to the normal cached parse — either the request
+/// doesn't fit the fast-path criteria (positive offset, non-Claude
+/// provider, in-memory cache already has the full session) or the tail
+/// parse came up empty.
+///
+/// When the fast path applies, this also kicks off a background full
+/// parse via `spawn_blocking` so the next "load older" request hits a
+/// fully populated cache without paying the parse cost again.
+fn try_claude_tail_fast_path(
+    state: &AppState,
+    meta: &SessionMeta,
+    offset: i64,
+    limit: usize,
+    session_id: &str,
+) -> anyhow::Result<Option<SessionMessagesWindow>> {
+    if offset >= 0 {
+        return Ok(None);
+    }
+    if !matches!(meta.provider, Provider::Claude) {
+        return Ok(None);
+    }
+    if meta.source_path.is_empty() {
+        return Ok(None);
+    }
+
+    // Cache hit means the full file has already been parsed — let the
+    // existing slow path serve from `Arc<Vec<Message>>` rather than
+    // re-running the tail mmap.
+    let mtime = std::fs::metadata(&meta.source_path)
+        .ok()
+        .and_then(|m| m.modified().ok());
+    let cache_key = session_cache_key(meta);
+    if state.session_cache.get(&cache_key, mtime).is_some() {
+        return Ok(None);
+    }
+
+    let target_messages = limit.max(offset.unsigned_abs() as usize).max(1);
+    let path = std::path::PathBuf::from(&meta.source_path);
+    let tail = match crate::providers::claude::parser::parse_session_tail(&path, target_messages) {
+        Some(t) => t,
+        None => return Ok(None),
+    };
+    if load_cancel::is_canceled() {
+        return Err(canceled_error());
+    }
+
+    // Trust the DB's stored message count when we have it — it's what
+    // the indexer wrote after the last full parse. Falls back to the
+    // tail-length so the window slicing math still works for sessions
+    // that haven't been indexed yet.
+    let stored_total = meta.message_count as usize;
+    let tail_len = tail.messages.len();
+    let total = stored_total.max(tail_len);
+
+    let from_end = offset.unsigned_abs() as usize;
+    let want = from_end.max(limit);
+    let visible_in_tail = want.min(tail_len);
+    let slice_start = tail_len.saturating_sub(visible_in_tail);
+    let slice = tail.messages[slice_start..tail_len].to_vec();
+    let window_start = total.saturating_sub(visible_in_tail);
+
+    // Token totals from the indexer are authoritative for the visible
+    // window; the tail parse doesn't see the historical token-usage
+    // entries that may have arrived earlier in the file.
+    let token_totals =
+        indexed_or_loaded_token_totals(&state.db, session_id, TokenTotals::default())?;
+
+    schedule_full_parse_promote(state.clone(), meta.clone(), cache_key, mtime);
+
+    Ok(Some(SessionMessagesWindow {
+        total,
+        start: window_start,
+        messages: slice,
+        parse_warning_count: tail.parse_warning_count,
+        token_totals,
+    }))
+}
+
+/// Fire-and-forget background full parse that overwrites the in-memory
+/// cache with the complete `Vec<Message>` once it lands. The next
+/// `load_messages_cached` call hits the promoted entry and the fast
+/// path is no longer needed for this session.
+///
+/// Failures are logged at warn level. The user already has a usable
+/// tail window in hand, so a stale cache is the worst outcome.
+fn schedule_full_parse_promote(
+    state: AppState,
+    meta: SessionMeta,
+    cache_key: String,
+    mtime: Option<std::time::SystemTime>,
+) {
+    tokio::task::spawn_blocking(move || {
+        match load_messages_from_provider(&meta.provider, &meta.id, &meta.source_path) {
+            Ok(loaded) => {
+                let total_messages = loaded.messages.len();
+                state.session_cache.insert(
+                    cache_key,
+                    meta.source_path.clone(),
+                    loaded.messages,
+                    loaded.parse_warning_count,
+                    loaded.token_totals,
+                    mtime,
+                    false,
+                    Some(total_messages),
+                );
+            }
+            Err(error) => {
+                log::warn!(
+                    "background full parse failed for session {}: {error:#}",
+                    meta.id
+                );
+            }
+        }
+    });
 }
 
 #[tauri::command]
