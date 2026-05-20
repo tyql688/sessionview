@@ -250,6 +250,31 @@ impl Database {
                 "ALTER TABLE sessions ADD COLUMN source_mtime INTEGER NOT NULL DEFAULT 0;",
             )?;
         }
+
+        // Migration: denormalize per-session token totals into the sessions
+        // table. Previously every list / search query recomputed these via
+        // four correlated `SELECT COALESCE(SUM(...))` subqueries against
+        // `session_token_stats`, paying a B-tree probe per row even though
+        // the totals only change when stats are rewritten. The aggregates
+        // are kept in sync inside `replace_token_stats_batch`'s transaction
+        // and backfilled here on first run.
+        let has_input_tokens_col: bool = {
+            let mut stmt = write_conn.prepare(
+                "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'input_tokens'",
+            )?;
+            let count: i64 = stmt.query_row([], |row| row.get(0))?;
+            count > 0
+        };
+        if !has_input_tokens_col {
+            write_conn.execute_batch(
+                "ALTER TABLE sessions ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE sessions ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE sessions ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE sessions ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0;",
+            )?;
+            // Backfill from `session_token_stats` happens further down,
+            // after the table is guaranteed to exist (see below).
+        }
         write_conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_sessions_parent_updated
                 ON sessions(parent_id, updated_at DESC);
@@ -280,6 +305,20 @@ impl Database {
                 DELETE FROM session_token_stats WHERE session_id = OLD.id;
             END;",
         )?;
+
+        if !has_input_tokens_col {
+            // Backfill the newly-added per-session token totals from the
+            // existing stats rows. Runs once, immediately after the
+            // sessions.input_tokens column is created and session_token_stats
+            // is guaranteed to exist.
+            write_conn.execute_batch(
+                "UPDATE sessions SET
+                    input_tokens = COALESCE((SELECT SUM(input_tokens) FROM session_token_stats WHERE session_id = sessions.id), 0),
+                    output_tokens = COALESCE((SELECT SUM(output_tokens) FROM session_token_stats WHERE session_id = sessions.id), 0),
+                    cache_read_tokens = COALESCE((SELECT SUM(cache_read_tokens) FROM session_token_stats WHERE session_id = sessions.id), 0),
+                    cache_write_tokens = COALESCE((SELECT SUM(cache_write_tokens) FROM session_token_stats WHERE session_id = sessions.id), 0);",
+            )?;
+        }
 
         let has_token_cost: bool = {
             let mut stmt = write_conn.prepare(

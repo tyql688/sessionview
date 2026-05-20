@@ -208,6 +208,15 @@ impl Database {
     pub fn clear_usage_stats(&self) -> Result<(), rusqlite::Error> {
         let conn = self.lock_write()?;
         conn.execute("DELETE FROM session_token_stats", [])?;
+        // Keep the denormalized totals consistent with the now-empty stats.
+        conn.execute(
+            "UPDATE sessions SET
+                input_tokens = 0,
+                output_tokens = 0,
+                cache_read_tokens = 0,
+                cache_write_tokens = 0",
+            [],
+        )?;
         Ok(())
     }
 
@@ -223,6 +232,8 @@ impl Database {
 
     /// Replace all token stats for a session. Called during indexing.
     /// Deletes existing rows first, then inserts new per-(date, model) aggregates.
+    /// Also refreshes the denormalized totals on `sessions` so list/search
+    /// queries can avoid correlated `SELECT SUM(...)` subqueries.
     pub fn replace_token_stats(
         &self,
         session_id: &str,
@@ -238,6 +249,7 @@ impl Database {
                 (session_id, date, model, turn_count, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )?;
+        let mut totals = SessionTotals::default();
         for row in stats {
             stmt.execute(params![
                 session_id,
@@ -250,7 +262,9 @@ impl Database {
                 row.cache_write_tokens as i64,
                 row.cost_usd,
             ])?;
+            totals.add_row(row);
         }
+        update_session_totals(&conn, session_id, &totals)?;
         Ok(())
     }
 
@@ -258,7 +272,9 @@ impl Database {
     /// transaction.  The frontend reads via a separate connection, so without
     /// a transaction the reader can observe a partially-updated state (e.g.
     /// after a DELETE but before the matching INSERTs), causing usage numbers
-    /// to "jump" on every poll cycle.
+    /// to "jump" on every poll cycle. The denormalized per-session totals on
+    /// `sessions` are updated in the same transaction so search/list queries
+    /// never see a stale aggregate.
     pub fn replace_token_stats_batch(
         &self,
         batch: &[(&str, &[TokenStatRow])],
@@ -274,6 +290,7 @@ impl Database {
                     "DELETE FROM session_token_stats WHERE session_id = ?1",
                     params![session_id],
                 )?;
+                let mut totals = SessionTotals::default();
                 for row in stats {
                     insert.execute(params![
                         session_id,
@@ -286,11 +303,55 @@ impl Database {
                         row.cache_write_tokens as i64,
                         row.cost_usd,
                     ])?;
+                    totals.add_row(row);
                 }
+                update_session_totals(conn, session_id, &totals)?;
             }
             Ok(())
         })
     }
+}
+
+#[derive(Default)]
+struct SessionTotals {
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_read_tokens: u64,
+    cache_write_tokens: u64,
+}
+
+impl SessionTotals {
+    fn add_row(&mut self, row: &TokenStatRow) {
+        self.input_tokens = self.input_tokens.saturating_add(row.input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(row.output_tokens);
+        self.cache_read_tokens = self.cache_read_tokens.saturating_add(row.cache_read_tokens);
+        self.cache_write_tokens = self
+            .cache_write_tokens
+            .saturating_add(row.cache_write_tokens);
+    }
+}
+
+fn update_session_totals(
+    conn: &Connection,
+    session_id: &str,
+    totals: &SessionTotals,
+) -> Result<(), rusqlite::Error> {
+    conn.execute(
+        "UPDATE sessions SET
+            input_tokens = ?1,
+            output_tokens = ?2,
+            cache_read_tokens = ?3,
+            cache_write_tokens = ?4
+         WHERE id = ?5",
+        params![
+            totals.input_tokens as i64,
+            totals.output_tokens as i64,
+            totals.cache_read_tokens as i64,
+            totals.cache_write_tokens as i64,
+            session_id,
+        ],
+    )?;
+    Ok(())
 }
 
 fn upsert_session_on(
