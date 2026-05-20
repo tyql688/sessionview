@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
 use crate::models::{Message, MessageRole, Provider, SessionMeta, TokenUsage};
-use crate::provider::{CodexUsageEvent, ParsedSession};
+use crate::provider::{ParsedSession, UsageEvent};
 use crate::provider_utils::{
     is_system_content, parse_rfc3339_timestamp, project_name_from_path, session_title,
     truncate_to_bytes, FTS_CONTENT_LIMIT, NO_PROJECT,
@@ -394,7 +394,7 @@ impl CodexProvider {
 
         let reader = BufReader::new(file);
         let mut messages = Vec::new();
-        let mut usage_events: Vec<CodexUsageEvent> = Vec::new();
+        let mut usage_events: Vec<UsageEvent> = Vec::new();
         let mut first_user_message: Option<String> = None;
         let mut first_timestamp: Option<String> = None;
         let mut last_timestamp: Option<String> = None;
@@ -1184,7 +1184,7 @@ impl CodexProvider {
                                         let model_for_event = resolved_model
                                             .clone()
                                             .unwrap_or_else(|| "gpt-5".to_string());
-                                        usage_events.push(CodexUsageEvent {
+                                        usage_events.push(UsageEvent {
                                             timestamp: ts.clone(),
                                             model: model_for_event,
                                             input_tokens: input,
@@ -1702,7 +1702,7 @@ impl CodexProvider {
             content_text,
             parse_warning_count,
             child_session_ids: Vec::new(),
-            codex_usage_events: usage_events,
+            usage_events,
         })
     }
 }
@@ -1949,7 +1949,7 @@ mod tests {
             home_dir: PathBuf::from("/tmp"),
         };
         let parsed = provider.parse_session_file(&file).expect("parsed session");
-        let events = &parsed.codex_usage_events;
+        let events = &parsed.usage_events;
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].model, "gpt-5.4");
         assert_eq!(events[0].input_tokens, 1000);
@@ -1977,7 +1977,7 @@ mod tests {
             home_dir: PathBuf::from("/tmp"),
         };
         let parsed = provider.parse_session_file(&file).expect("parsed session");
-        let events = &parsed.codex_usage_events;
+        let events = &parsed.usage_events;
         assert_eq!(events.len(), 3);
         assert_eq!(events[0].input_tokens, 1000);
         assert_eq!(events[0].cache_read_input_tokens, 600);

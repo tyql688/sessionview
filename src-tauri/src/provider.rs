@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
@@ -5,6 +6,7 @@ use thiserror::Error;
 use crate::models::{
     token_totals_from_messages, Message, Provider, SessionMeta, TokenTotals, TrashMeta,
 };
+use crate::pricing::{self, PricingCatalog};
 
 // ---------------------------------------------------------------------------
 // Deletion plan types — provider returns a plan, command layer executes it
@@ -376,13 +378,31 @@ pub enum ProviderError {
     Sqlite(#[from] rusqlite::Error),
 }
 
-/// A single Codex `event_msg.token_count` event, captured during parse so
-/// the indexer's `compute_codex_token_stats` doesn't have to re-open the
-/// file. Populated only by the Codex parser; empty for every other
-/// provider. Kept here (rather than in `providers::codex::parser`) so
-/// `ParsedSession` doesn't depend on a provider-leaf module.
+/// A single per-(date, model) token-usage row, written to
+/// `session_token_stats` by the indexer. Defined here so the provider
+/// trait can produce them without depending on `db::sync`.
 #[derive(Clone, Debug)]
-pub struct CodexUsageEvent {
+pub struct TokenStatRow {
+    pub date: String,
+    pub model: String,
+    pub turn_count: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub cost_usd: f64,
+}
+
+/// A single out-of-band token-usage event captured during parse.
+///
+/// Codex emits per-turn token counts as `event_msg.token_count` lines
+/// that aren't attached to any single message — the indexer's per-date
+/// aggregation reads from this Vec instead of re-opening the file.
+/// Populated only by the Codex parser today; the shape is generic
+/// enough that future providers with similar out-of-band usage streams
+/// can reuse the slot.
+#[derive(Clone, Debug)]
+pub struct UsageEvent {
     pub timestamp: String,
     pub model: String,
     pub input_tokens: u64,
@@ -409,11 +429,11 @@ pub struct ParsedSession {
     /// `parent_id` / `is_sidechain` / inherited project metadata on already-
     /// indexed child rows. Empty for every other provider.
     pub child_session_ids: Vec<String>,
-    /// Codex `event_msg.token_count` events captured during the single
-    /// parse pass. Lets `compute_codex_token_stats` aggregate per-date
-    /// token totals without re-opening the source file. Populated only by
-    /// the Codex parser.
-    pub codex_usage_events: Vec<CodexUsageEvent>,
+    /// Out-of-band token-usage events emitted by the provider's transcript
+    /// (e.g. Codex `event_msg.token_count`). Consumed by the provider's
+    /// own `compute_token_stats` override; empty for providers whose token
+    /// counts are attached to messages directly.
+    pub usage_events: Vec<UsageEvent>,
 }
 
 /// Materialized session payload returned by `SessionProvider::load_messages`
@@ -737,6 +757,22 @@ pub trait SessionProvider: Send + Sync {
         source_path: &str,
     ) -> Result<LoadedSession, ProviderError>;
 
+    /// Aggregate per-(date, model) token-usage rows for the indexer.
+    ///
+    /// Default implementation walks `parsed.messages[].token_usage` and
+    /// dedups via `seen_hashes` against `Message.usage_hash`. Providers
+    /// whose token counts arrive out-of-band (e.g. Codex's
+    /// `event_msg.token_count` lines) should override and aggregate from
+    /// `parsed.usage_events` instead.
+    fn compute_token_stats(
+        &self,
+        parsed: &ParsedSession,
+        pricing_catalog: Option<&PricingCatalog>,
+        seen_hashes: Option<&mut HashSet<String>>,
+    ) -> Vec<TokenStatRow> {
+        default_compute_token_stats_from_messages(parsed, pricing_catalog, seen_hashes)
+    }
+
     /// Return a deletion plan for this session.
     /// Provider decides all file actions; command layer executes mechanically.
     fn deletion_plan(&self, meta: &SessionMeta, children: &[SessionMeta]) -> DeletionPlan;
@@ -763,6 +799,101 @@ pub trait SessionProvider: Send + Sync {
     /// Called after the main file and directory cleanup.
     /// Default: no-op. Override to clean up provider-specific external data.
     fn cleanup_on_permanent_delete(&self, _session_id: &str) {}
+}
+
+/// Default token-stats aggregation: walk per-message `token_usage`,
+/// dedup by `Message.usage_hash`, apply pricing. Used by all providers
+/// except Codex (which overrides with usage-event aggregation).
+pub fn default_compute_token_stats_from_messages(
+    parsed: &ParsedSession,
+    pricing_catalog: Option<&PricingCatalog>,
+    mut seen_hashes: Option<&mut HashSet<String>>,
+) -> Vec<TokenStatRow> {
+    let mut stats_map: HashMap<(String, String), TokenStatRow> = HashMap::with_capacity(32);
+    for msg in &parsed.messages {
+        let Some(usage) = &msg.token_usage else {
+            continue;
+        };
+        // Dedup: skip if this usage entry was already counted (cross-file).
+        if let Some(ref mut seen) = seen_hashes {
+            if let Some(ref hash) = msg.usage_hash {
+                if !seen.insert(hash.clone()) {
+                    continue;
+                }
+            }
+        }
+
+        let Some(timestamp) = msg.timestamp.as_deref() else {
+            log::warn!(
+                "skipping token usage without message timestamp in session {}",
+                parsed.meta.id
+            );
+            continue;
+        };
+        let Some(date) = timestamp_to_local_date(timestamp) else {
+            log::warn!(
+                "skipping token usage with invalid timestamp '{}' in session {}",
+                timestamp,
+                parsed.meta.id
+            );
+            continue;
+        };
+        let Some(model) = msg.model.as_deref().filter(|model| !model.is_empty()) else {
+            log::warn!(
+                "skipping token usage without message model in session {}",
+                parsed.meta.id
+            );
+            continue;
+        };
+        // Claude emits `<synthetic>` for internal placeholder entries.
+        // ccusage excludes them from aggregates; match that behaviour.
+        if model == "<synthetic>" {
+            continue;
+        }
+        let model = model.to_string();
+        let entry = stats_map
+            .entry((date.clone(), model.clone()))
+            .or_insert_with(|| TokenStatRow {
+                date,
+                model,
+                turn_count: 0,
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                cost_usd: 0.0,
+            });
+        entry.turn_count += 1;
+        entry.input_tokens += usage.input_tokens as u64;
+        entry.output_tokens += usage.output_tokens as u64;
+        entry.cache_read_tokens += usage.cache_read_input_tokens as u64;
+        entry.cache_write_tokens += usage.cache_creation_input_tokens as u64;
+        entry.cost_usd += pricing::estimate_cost_with_catalog(
+            pricing_catalog,
+            &entry.model,
+            usage.input_tokens as u64,
+            usage.output_tokens as u64,
+            usage.cache_read_input_tokens as u64,
+            usage.cache_creation_input_tokens as u64,
+        );
+    }
+
+    stats_map.into_values().collect()
+}
+
+/// Convert an RFC 3339 timestamp string to a `YYYY-MM-DD` date in the
+/// user's local timezone. Falls back to the first 10 chars when parsing
+/// fails, which covers the legacy date-only timestamps some providers
+/// still produce.
+pub fn timestamp_to_local_date(timestamp: &str) -> Option<String> {
+    chrono::DateTime::parse_from_rfc3339(timestamp)
+        .ok()
+        .map(|dt| {
+            dt.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d")
+                .to_string()
+        })
+        .or_else(|| timestamp.get(..10).map(ToString::to_string))
 }
 
 fn is_shared_source_path(path: &str) -> bool {

@@ -909,7 +909,7 @@ pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
         content_text,
         parse_warning_count,
         child_session_ids,
-        codex_usage_events: Vec::new(),
+        usage_events: Vec::new(),
     })
 }
 

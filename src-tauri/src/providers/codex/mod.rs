@@ -6,10 +6,13 @@ use std::path::PathBuf;
 use rayon::prelude::*;
 use walkdir::WalkDir;
 
+use std::collections::{HashMap, HashSet};
+
 use crate::models::{Provider, SessionMeta, TokenTotals};
+use crate::pricing::{self, PricingCatalog};
 use crate::provider::{
-    jsonl_subagents_deletion_plan, DeletionPlan, LoadedSession, ParsedSession, ProviderError,
-    SessionProvider,
+    jsonl_subagents_deletion_plan, timestamp_to_local_date, DeletionPlan, LoadedSession,
+    ParsedSession, ProviderError, SessionProvider, TokenStatRow,
 };
 
 pub struct Descriptor;
@@ -121,24 +124,69 @@ impl SessionProvider for CodexProvider {
             ))
         })?;
 
-        let token_totals = codex_token_totals_from_usage_events(&parsed.codex_usage_events);
+        let token_totals =
+            parsed
+                .usage_events
+                .iter()
+                .fold(TokenTotals::default(), |mut totals, event| {
+                    totals.input_tokens += event.input_tokens;
+                    totals.output_tokens += event.output_tokens;
+                    totals.cache_read_tokens += event.cache_read_input_tokens;
+                    totals
+                });
         let mut loaded = LoadedSession::from_parsed(parsed);
         loaded.token_totals = token_totals;
         Ok(loaded)
     }
-}
 
-fn codex_token_totals_from_usage_events(
-    events: &[crate::provider::CodexUsageEvent],
-) -> TokenTotals {
-    events
-        .iter()
-        .fold(TokenTotals::default(), |mut totals, event| {
-            totals.input_tokens += event.input_tokens;
-            totals.output_tokens += event.output_tokens;
-            totals.cache_read_tokens += event.cache_read_input_tokens;
-            totals
-        })
+    /// Codex emits per-turn token counts as `event_msg.token_count` lines
+    /// that aren't tied to any single message. Aggregate from
+    /// `parsed.usage_events` (captured during the parse pass) instead of
+    /// walking `messages[].token_usage` like the default impl. Dedup is a
+    /// no-op here because Codex usage events don't carry a hash and don't
+    /// duplicate across files.
+    fn compute_token_stats(
+        &self,
+        parsed: &ParsedSession,
+        pricing_catalog: Option<&PricingCatalog>,
+        _seen_hashes: Option<&mut HashSet<String>>,
+    ) -> Vec<TokenStatRow> {
+        let mut stats_map: HashMap<(String, String), TokenStatRow> = HashMap::with_capacity(16);
+        for event in &parsed.usage_events {
+            let Some(date) = timestamp_to_local_date(&event.timestamp) else {
+                continue;
+            };
+            let entry = stats_map
+                .entry((date.clone(), event.model.clone()))
+                .or_insert_with(|| TokenStatRow {
+                    date,
+                    model: event.model.clone(),
+                    turn_count: 0,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                    cost_usd: 0.0,
+                });
+            entry.turn_count += 1;
+            entry.input_tokens += event.input_tokens;
+            entry.output_tokens += event.output_tokens;
+            entry.cache_read_tokens += event.cache_read_input_tokens;
+            let non_cached_input = event
+                .input_tokens
+                .saturating_sub(event.cache_read_input_tokens);
+            entry.cost_usd += pricing::estimate_cost_with_catalog(
+                pricing_catalog,
+                &entry.model,
+                non_cached_input,
+                event.output_tokens,
+                event.cache_read_input_tokens,
+                0,
+            );
+        }
+
+        stats_map.into_values().collect()
+    }
 }
 
 #[cfg(test)]

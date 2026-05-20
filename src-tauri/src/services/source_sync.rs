@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
 use crate::db::Database;
-use crate::indexer::compute_token_stats_with_catalog_dedup;
 use crate::models::Provider;
 use crate::pricing::{self, PRICING_CATALOG_JSON_KEY};
+use crate::provider::TokenStatRow;
 use crate::services::image_cache::{image_cache_provider_for, ImageCacheService};
 
 pub struct SourceSyncService<'a> {
@@ -70,17 +70,17 @@ impl<'a> SourceSyncService<'a> {
         }
 
         let mut seen_hashes = HashSet::new();
-        let mut stats_batch: Vec<(String, Vec<crate::db::sync::TokenStatRow>)> = Vec::new();
+        let mut stats_batch: Vec<(String, Vec<TokenStatRow>)> = Vec::new();
         for parsed in parents.iter().chain(children.iter()) {
-            let stat_rows = compute_token_stats_with_catalog_dedup(
+            let stat_rows = provider_impl.compute_token_stats(
                 parsed,
                 pricing_catalog.as_ref(),
-                &mut seen_hashes,
+                Some(&mut seen_hashes),
             );
             stats_batch.push((parsed.meta.id.clone(), stat_rows));
         }
         {
-            let batch_refs: Vec<(&str, &[crate::db::sync::TokenStatRow])> = stats_batch
+            let batch_refs: Vec<(&str, &[TokenStatRow])> = stats_batch
                 .iter()
                 .map(|(id, rows)| (id.as_str(), rows.as_slice()))
                 .collect();

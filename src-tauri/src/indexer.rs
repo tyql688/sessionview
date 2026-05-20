@@ -1,15 +1,14 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
 use rayon::prelude::*;
 
-use crate::db::sync::TokenStatRow;
 use crate::db::Database;
 use crate::models::{Provider, SessionMeta, TreeNode, TreeNodeType};
-use crate::pricing::{self, PricingCatalog, PRICING_CATALOG_JSON_KEY};
-use crate::provider::{ParsedSession, SessionProvider};
+use crate::pricing::{self, PRICING_CATALOG_JSON_KEY};
+use crate::provider::{ParsedSession, SessionProvider, TokenStatRow};
 use crate::services::image_cache::{image_cache_provider_for, ImageCacheService};
 
 #[derive(Clone)]
@@ -114,7 +113,7 @@ impl Indexer {
                 let mut stats_batch: Vec<(String, Vec<TokenStatRow>)> =
                     Vec::with_capacity(sessions.len());
                 for parsed in parents.iter().chain(children.iter()) {
-                    let stat_rows = compute_token_stats_dedup(
+                    let stat_rows = provider.compute_token_stats(
                         parsed,
                         pricing_catalog.as_ref(),
                         Some(&mut seen_hashes),
@@ -355,160 +354,28 @@ impl Indexer {
     }
 }
 
-/// Compute per-(date, model) token usage aggregates from a parsed session's messages.
-#[cfg(test)]
-pub(crate) fn compute_token_stats(parsed: &ParsedSession) -> Vec<TokenStatRow> {
-    compute_token_stats_dedup(parsed, None, None)
-}
-
-pub(crate) fn compute_token_stats_with_catalog_dedup(
-    parsed: &ParsedSession,
-    pricing_catalog: Option<&PricingCatalog>,
-    seen_hashes: &mut HashSet<String>,
-) -> Vec<TokenStatRow> {
-    compute_token_stats_dedup(parsed, pricing_catalog, Some(seen_hashes))
-}
-
-fn compute_token_stats_dedup(
-    parsed: &ParsedSession,
-    pricing_catalog: Option<&PricingCatalog>,
-    mut seen_hashes: Option<&mut HashSet<String>>,
-) -> Vec<TokenStatRow> {
-    if parsed.meta.provider == Provider::Codex {
-        return compute_codex_token_stats(parsed, pricing_catalog);
-    }
-
-    let mut stats_map: HashMap<(String, String), TokenStatRow> = HashMap::with_capacity(32);
-    for msg in &parsed.messages {
-        if let Some(usage) = &msg.token_usage {
-            // Dedup: skip if this usage entry was already counted (cross-file)
-            if let Some(ref mut seen) = seen_hashes {
-                if let Some(ref hash) = msg.usage_hash {
-                    if !seen.insert(hash.clone()) {
-                        continue;
-                    }
-                }
-            }
-
-            let Some(timestamp) = msg.timestamp.as_deref() else {
-                log::warn!(
-                    "skipping token usage without message timestamp in session {}",
-                    parsed.meta.id
-                );
-                continue;
-            };
-            let Some(date) = timestamp_to_local_date(timestamp) else {
-                log::warn!(
-                    "skipping token usage with invalid timestamp '{}' in session {}",
-                    timestamp,
-                    parsed.meta.id
-                );
-                continue;
-            };
-            let Some(model) = msg.model.as_deref().filter(|model| !model.is_empty()) else {
-                log::warn!(
-                    "skipping token usage without message model in session {}",
-                    parsed.meta.id
-                );
-                continue;
-            };
-            // Claude emits `<synthetic>` for internal placeholder entries.
-            // ccusage excludes them from aggregates; match that behaviour.
-            if model == "<synthetic>" {
-                continue;
-            }
-            let model = model.to_string();
-            let entry = stats_map
-                .entry((date.clone(), model.clone()))
-                .or_insert_with(|| TokenStatRow {
-                    date,
-                    model,
-                    turn_count: 0,
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    cache_read_tokens: 0,
-                    cache_write_tokens: 0,
-                    cost_usd: 0.0,
-                });
-            entry.turn_count += 1;
-            entry.input_tokens += usage.input_tokens as u64;
-            entry.output_tokens += usage.output_tokens as u64;
-            entry.cache_read_tokens += usage.cache_read_input_tokens as u64;
-            entry.cache_write_tokens += usage.cache_creation_input_tokens as u64;
-            entry.cost_usd += pricing::estimate_cost_with_catalog(
-                pricing_catalog,
-                &entry.model,
-                usage.input_tokens as u64,
-                usage.output_tokens as u64,
-                usage.cache_read_input_tokens as u64,
-                usage.cache_creation_input_tokens as u64,
-            );
-        }
-    }
-
-    stats_map.into_values().collect()
-}
-
-fn timestamp_to_local_date(timestamp: &str) -> Option<String> {
-    chrono::DateTime::parse_from_rfc3339(timestamp)
-        .ok()
-        .map(|dt| {
-            dt.with_timezone(&chrono::Local)
-                .format("%Y-%m-%d")
-                .to_string()
-        })
-        .or_else(|| timestamp.get(..10).map(ToString::to_string))
-}
-
-fn compute_codex_token_stats(
-    parsed: &ParsedSession,
-    pricing_catalog: Option<&PricingCatalog>,
-) -> Vec<TokenStatRow> {
-    let mut stats_map: HashMap<(String, String), TokenStatRow> = HashMap::with_capacity(16);
-
-    // Usage events are captured during the single Codex parse pass so we
-    // don't have to re-open the file here just to aggregate per-date stats.
-    for event in &parsed.codex_usage_events {
-        let Some(date) = timestamp_to_local_date(&event.timestamp) else {
-            continue;
-        };
-        let key = (date.clone(), event.model.clone());
-        let entry = stats_map.entry(key).or_insert_with(|| TokenStatRow {
-            date,
-            model: event.model.clone(),
-            turn_count: 0,
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-            cost_usd: 0.0,
-        });
-        entry.turn_count += 1;
-        entry.input_tokens += event.input_tokens;
-        entry.output_tokens += event.output_tokens;
-        entry.cache_read_tokens += event.cache_read_input_tokens;
-        let non_cached_input = event
-            .input_tokens
-            .saturating_sub(event.cache_read_input_tokens);
-        entry.cost_usd += pricing::estimate_cost_with_catalog(
-            pricing_catalog,
-            &entry.model,
-            non_cached_input,
-            event.output_tokens,
-            event.cache_read_input_tokens,
-            0,
-        );
-    }
-
-    stats_map.into_values().collect()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{compute_token_stats, compute_token_stats_with_catalog_dedup};
     use crate::models::{Message, MessageRole, Provider, SessionMeta, TokenUsage};
-    use crate::provider::ParsedSession;
+    use crate::pricing::PricingCatalog;
+    use crate::provider::{default_compute_token_stats_from_messages, ParsedSession, TokenStatRow};
     use std::collections::HashSet;
+
+    /// Drives the default per-message aggregation path that all
+    /// non-Codex providers use through the trait. Tests stay focused on
+    /// the dedup/timestamp/model logic without dragging in a real
+    /// provider runtime.
+    fn compute_token_stats(parsed: &ParsedSession) -> Vec<TokenStatRow> {
+        default_compute_token_stats_from_messages(parsed, None, None)
+    }
+
+    fn compute_token_stats_with_catalog_dedup(
+        parsed: &ParsedSession,
+        pricing_catalog: Option<&PricingCatalog>,
+        seen_hashes: &mut HashSet<String>,
+    ) -> Vec<TokenStatRow> {
+        default_compute_token_stats_from_messages(parsed, pricing_catalog, Some(seen_hashes))
+    }
 
     fn make_session(meta_model: Option<&str>, messages: Vec<Message>) -> ParsedSession {
         ParsedSession {
@@ -538,7 +405,7 @@ mod tests {
             content_text: String::new(),
             parse_warning_count: 0,
             child_session_ids: Vec::new(),
-            codex_usage_events: Vec::new(),
+            usage_events: Vec::new(),
         }
     }
 
