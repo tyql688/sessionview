@@ -366,6 +366,73 @@ fn dynamic_tool_result(payload: &Value) -> Value {
     Value::Object(result)
 }
 
+/// Per-scan accumulator shared between the full-file and tail-only
+/// Codex parsers. Holds the cross-line state the dispatch loop walks
+/// (parsed messages, call_id → message-index pairing, "first
+/// occurrence" trackers for cwd/model/version, and the fork-context
+/// skip flag used by subagent files) so the loop body can run against
+/// either a full file or a seeked tail reader without duplication.
+struct CodexScanAccum {
+    messages: Vec<Message>,
+    usage_events: Vec<UsageEvent>,
+    first_user_message: Option<String>,
+    first_timestamp: Option<String>,
+    last_timestamp: Option<String>,
+    content_parts: Vec<String>,
+    session_id: Option<String>,
+    cwd: Option<String>,
+    /// Map call_id -> message index for merging function_call_output
+    /// into the matching function_call message.
+    call_id_map: std::collections::HashMap<String, usize>,
+    model: Option<String>,
+    model_provider: Option<String>,
+    thread_name: Option<String>,
+    current_model: Option<String>,
+    previous_token_totals: Option<CodexRawUsageCounts>,
+    cc_version: Option<String>,
+    git_branch: Option<String>,
+    is_sidechain: bool,
+    parent_id: Option<String>,
+    agent_nickname: Option<String>,
+    pending_user_message: Option<PendingCodexUserMessage>,
+    /// True while we're inside a subagent file's pre-fork parent context
+    /// and must drop those lines before they leak into the subagent's
+    /// own view of the conversation.
+    skipping_fork_context: bool,
+    subagent_start_seconds: Option<i64>,
+    parse_warning_count: u32,
+}
+
+impl CodexScanAccum {
+    fn new() -> Self {
+        Self {
+            messages: Vec::new(),
+            usage_events: Vec::new(),
+            first_user_message: None,
+            first_timestamp: None,
+            last_timestamp: None,
+            content_parts: Vec::new(),
+            session_id: None,
+            cwd: None,
+            call_id_map: std::collections::HashMap::new(),
+            model: None,
+            model_provider: None,
+            thread_name: None,
+            current_model: None,
+            previous_token_totals: None,
+            cc_version: None,
+            git_branch: None,
+            is_sidechain: false,
+            parent_id: None,
+            agent_nickname: None,
+            pending_user_message: None,
+            skipping_fork_context: false,
+            subagent_start_seconds: None,
+            parse_warning_count: 0,
+        }
+    }
+}
+
 impl CodexProvider {
     pub fn parse_session_file(&self, path: &PathBuf) -> Option<ParsedSession> {
         let file = match File::open(path) {
@@ -393,30 +460,7 @@ impl CodexProvider {
         let file_size = metadata.len();
 
         let reader = BufReader::new(file);
-        let mut messages = Vec::new();
-        let mut usage_events: Vec<UsageEvent> = Vec::new();
-        let mut first_user_message: Option<String> = None;
-        let mut first_timestamp: Option<String> = None;
-        let mut last_timestamp: Option<String> = None;
-        let mut content_parts: Vec<String> = Vec::new();
-        let mut session_id: Option<String> = None;
-        let mut cwd: Option<String> = None;
-        // Map call_id -> message index for merging function_call_output into function_call
-        let mut call_id_map: std::collections::HashMap<String, usize> =
-            std::collections::HashMap::new();
-        let mut model: Option<String> = None;
-        let mut model_provider: Option<String> = None;
-        let mut thread_name: Option<String> = None;
-        let mut current_model: Option<String> = None;
-        let mut previous_token_totals: Option<CodexRawUsageCounts> = None;
-        let mut cc_version: Option<String> = None;
-        let mut git_branch: Option<String> = None;
-        let mut is_sidechain = false;
-        let mut parent_id: Option<String> = None;
-        let mut agent_nickname: Option<String> = None;
-        let mut pending_user_message: Option<PendingCodexUserMessage> = None;
-        // When parsing subagent files, skip the forked parent context.
-        // Subagent JSONL layout:
+        // Subagent JSONL layout for `skipping_fork_context`:
         //   pre-0.120 (legacy):   [sub_meta, parent_meta, ...parent_context...,
         //                          function_call_output("newly spawned agent"), sub_turn]
         //   0.120+ (post-#16709): [sub_meta, parent_meta, ...sanitized_parent_history...,
@@ -424,9 +468,7 @@ impl CodexProvider {
         //     Upstream dropped the textual marker; the fork boundary is the first
         //     `event_msg.task_started` whose `started_at` is >= the subagent's own
         //     session_meta.timestamp.
-        let mut skipping_fork_context = false;
-        let mut subagent_start_seconds: Option<i64> = None;
-        let mut parse_warning_count: u32 = 0;
+        let mut accum = CodexScanAccum::new();
 
         for line in reader.lines() {
             let line = match line {
@@ -452,16 +494,16 @@ impl CodexProvider {
                         path.display(),
                         error
                     );
-                    parse_warning_count = parse_warning_count.saturating_add(1);
+                    accum.parse_warning_count = accum.parse_warning_count.saturating_add(1);
                     continue;
                 }
             };
 
             if let Some(ref ts) = entry.timestamp {
-                if first_timestamp.is_none() {
-                    first_timestamp = Some(ts.clone());
+                if accum.first_timestamp.is_none() {
+                    accum.first_timestamp = Some(ts.clone());
                 }
-                last_timestamp = Some(ts.clone());
+                accum.last_timestamp = Some(ts.clone());
             }
 
             let payload = match entry.payload {
@@ -473,16 +515,16 @@ impl CodexProvider {
             // the first subagent-owned `task_started` event (its `started_at`
             // matches the subagent session's creation time). Fall back to the
             // legacy `newly spawned agent` marker for pre-0.120 rollouts.
-            if skipping_fork_context {
+            if accum.skipping_fork_context {
                 if entry.line_type == "event_msg"
                     && payload.get("type").and_then(|v| v.as_str()) == Some("task_started")
                 {
                     if let (Some(started_at), Some(sub_sec)) = (
                         payload.get("started_at").and_then(|v| v.as_i64()),
-                        subagent_start_seconds,
+                        accum.subagent_start_seconds,
                     ) {
                         if started_at >= sub_sec {
-                            skipping_fork_context = false;
+                            accum.skipping_fork_context = false;
                             continue;
                         }
                     }
@@ -491,7 +533,7 @@ impl CodexProvider {
                 {
                     let output = payload.get("output").and_then(|v| v.as_str()).unwrap_or("");
                     if output.contains("newly spawned agent") {
-                        skipping_fork_context = false;
+                        accum.skipping_fork_context = false;
                     }
                 }
                 continue;
@@ -501,28 +543,28 @@ impl CodexProvider {
                 "session_meta" => {
                     // Only process the first session_meta; subagent JSONL files
                     // contain a second session_meta for the parent context which
-                    // would overwrite the subagent's own id/cwd/source fields.
-                    if session_id.is_some() {
+                    // would overwrite the subagent's own id/accum.cwd/source fields.
+                    if accum.session_id.is_some() {
                         // 2nd session_meta = start of forked parent context
-                        if is_sidechain {
-                            skipping_fork_context = true;
+                        if accum.is_sidechain {
+                            accum.skipping_fork_context = true;
                         }
                         continue;
                     }
                     if let Some(id) = payload.get("id").and_then(|v| v.as_str()) {
-                        session_id = Some(id.to_string());
+                        accum.session_id = Some(id.to_string());
                     }
                     if let Some(c) = payload.get("cwd").and_then(|v| v.as_str()) {
-                        cwd = Some(c.to_string());
+                        accum.cwd = Some(c.to_string());
                     }
                     if let Some(v) = payload.get("cli_version").and_then(|v| v.as_str()) {
                         if !v.is_empty() {
-                            cc_version = Some(v.to_string());
+                            accum.cc_version = Some(v.to_string());
                         }
                     }
                     if let Some(m) = payload.get("model_provider").and_then(|v| v.as_str()) {
                         if !m.is_empty() {
-                            model_provider = Some(m.to_string());
+                            accum.model_provider = Some(m.to_string());
                         }
                     }
                     if let Some(b) = payload
@@ -531,7 +573,7 @@ impl CodexProvider {
                         .and_then(|v| v.as_str())
                     {
                         if !b.is_empty() && b != "HEAD" {
-                            git_branch = Some(b.to_string());
+                            accum.git_branch = Some(b.to_string());
                         }
                     }
                     // Detect subagent sessions: source.subagent.thread_spawn
@@ -540,12 +582,12 @@ impl CodexProvider {
                         .and_then(|s| s.get("subagent"))
                         .and_then(|a| a.get("thread_spawn"))
                     {
-                        is_sidechain = true;
-                        parent_id = spawn
+                        accum.is_sidechain = true;
+                        accum.parent_id = spawn
                             .get("parent_thread_id")
                             .and_then(|v| v.as_str())
                             .map(|s| s.to_string());
-                        agent_nickname = payload
+                        accum.agent_nickname = payload
                             .get("agent_nickname")
                             .and_then(|v| v.as_str())
                             .map(|s| s.to_string());
@@ -556,7 +598,7 @@ impl CodexProvider {
                                 .or(entry.timestamp.as_deref()),
                         );
                         if sub_ts > 0 {
-                            subagent_start_seconds = Some(sub_ts);
+                            accum.subagent_start_seconds = Some(sub_ts);
                         }
                     }
                 }
@@ -571,10 +613,10 @@ impl CodexProvider {
 
                     if !(item_type == "message" && role_str == "user") {
                         flush_pending_user_message(
-                            &mut pending_user_message,
-                            &mut messages,
-                            &mut content_parts,
-                            &mut first_user_message,
+                            &mut accum.pending_user_message,
+                            &mut accum.messages,
+                            &mut accum.content_parts,
+                            &mut accum.first_user_message,
                         );
                     }
 
@@ -588,7 +630,7 @@ impl CodexProvider {
                                 _ => continue,
                             };
 
-                            // Skip empty messages and system/environment XML content
+                            // Skip empty accum.messages and system/environment XML content
                             if text.is_empty() {
                                 continue;
                             }
@@ -600,12 +642,12 @@ impl CodexProvider {
                             if role == MessageRole::User {
                                 let image_segments = extract_image_source_segments(&text);
                                 flush_pending_user_message(
-                                    &mut pending_user_message,
-                                    &mut messages,
-                                    &mut content_parts,
-                                    &mut first_user_message,
+                                    &mut accum.pending_user_message,
+                                    &mut accum.messages,
+                                    &mut accum.content_parts,
+                                    &mut accum.first_user_message,
                                 );
-                                pending_user_message = Some(PendingCodexUserMessage {
+                                accum.pending_user_message = Some(PendingCodexUserMessage {
                                     content: text,
                                     timestamp: entry.timestamp.clone(),
                                     image_segments,
@@ -614,14 +656,14 @@ impl CodexProvider {
                             }
 
                             let msg_model = if role == MessageRole::Assistant {
-                                current_model.clone()
+                                accum.current_model.clone()
                             } else {
                                 None
                             };
                             if !normalized_text.is_empty() {
-                                content_parts.push(normalized_text);
+                                accum.content_parts.push(normalized_text);
                             }
-                            messages.push(Message {
+                            accum.messages.push(Message {
                                 role,
                                 content: text,
                                 timestamp: entry.timestamp.clone(),
@@ -682,7 +724,7 @@ impl CodexProvider {
                                         }
                                     })
                                     {
-                                        messages.push(Message {
+                                        accum.messages.push(Message {
                                             role: MessageRole::Assistant,
                                             content: format!("[Image: source: {path}]"),
                                             timestamp: entry.timestamp.clone(),
@@ -728,11 +770,11 @@ impl CodexProvider {
                             });
                             let display_name = metadata.canonical_name.clone();
 
-                            let idx = messages.len();
+                            let idx = accum.messages.len();
                             if let Some(cid) = payload.get("call_id").and_then(|v| v.as_str()) {
-                                call_id_map.insert(cid.to_string(), idx);
+                                accum.call_id_map.insert(cid.to_string(), idx);
                             }
-                            messages.push(Message {
+                            accum.messages.push(Message {
                                 role: MessageRole::Tool,
                                 content: String::new(),
                                 timestamp: entry.timestamp.clone(),
@@ -753,17 +795,18 @@ impl CodexProvider {
                             let output = extract_tool_output(&raw_output);
 
                             if !output.is_empty() {
-                                content_parts.push(output.clone());
+                                accum.content_parts.push(output.clone());
                             }
 
                             // Merge output into the matching function_call message
                             let call_id = payload.get("call_id").and_then(|v| v.as_str());
-                            if let Some(idx) = call_id.and_then(|cid| call_id_map.get(cid)).copied()
+                            if let Some(idx) =
+                                call_id.and_then(|cid| accum.call_id_map.get(cid)).copied()
                             {
-                                if idx < messages.len() {
+                                if idx < accum.messages.len() {
                                     let result_value =
                                         codex_tool_result_value(&raw_output, &output);
-                                    messages[idx].content = output;
+                                    accum.messages[idx].content = output;
                                     let is_error = result_value.as_ref().and_then(|value| {
                                         value
                                             .get("exitCode")
@@ -772,7 +815,7 @@ impl CodexProvider {
                                     });
                                     if let Some(result_value) = result_value {
                                         enrich_existing_tool_message(
-                                            &mut messages[idx],
+                                            &mut accum.messages[idx],
                                             result_value,
                                             is_error,
                                             None,
@@ -782,7 +825,7 @@ impl CodexProvider {
                                 }
                             }
                             // Fallback: standalone output message
-                            messages.push(Message {
+                            accum.messages.push(Message {
                                 role: MessageRole::Tool,
                                 content: output,
                                 timestamp: entry.timestamp.clone(),
@@ -821,13 +864,13 @@ impl CodexProvider {
                                 },
                             );
                             if !query.is_empty() {
-                                content_parts.push(query.to_string());
+                                accum.content_parts.push(query.to_string());
                             }
-                            let idx = messages.len();
+                            let idx = accum.messages.len();
                             if let Some(call_id) = call_id {
-                                call_id_map.insert(call_id.to_string(), idx);
+                                accum.call_id_map.insert(call_id.to_string(), idx);
                             }
-                            messages.push(Message {
+                            accum.messages.push(Message {
                                 role: MessageRole::Tool,
                                 content: query.to_string(),
                                 timestamp: entry.timestamp.clone(),
@@ -849,11 +892,11 @@ impl CodexProvider {
                                 call_id,
                                 assistant_id: None,
                             });
-                            let idx = messages.len();
+                            let idx = accum.messages.len();
                             if let Some(call_id) = call_id {
-                                call_id_map.insert(call_id.to_string(), idx);
+                                accum.call_id_map.insert(call_id.to_string(), idx);
                             }
-                            messages.push(Message {
+                            accum.messages.push(Message {
                                 role: MessageRole::Tool,
                                 content: String::new(),
                                 timestamp: entry.timestamp.clone(),
@@ -875,11 +918,11 @@ impl CodexProvider {
                                 call_id: codex_call_id(payload),
                                 assistant_id: None,
                             });
-                            let idx = messages.len();
+                            let idx = accum.messages.len();
                             if let Some(call_id) = codex_call_id(payload) {
-                                call_id_map.insert(call_id.to_string(), idx);
+                                accum.call_id_map.insert(call_id.to_string(), idx);
                             }
-                            messages.push(Message {
+                            accum.messages.push(Message {
                                 role: MessageRole::Tool,
                                 content: String::new(),
                                 timestamp: entry.timestamp.clone(),
@@ -900,11 +943,11 @@ impl CodexProvider {
                                 call_id: codex_call_id(payload),
                                 assistant_id: None,
                             });
-                            let idx = messages.len();
+                            let idx = accum.messages.len();
                             if let Some(call_id) = codex_call_id(payload) {
-                                call_id_map.insert(call_id.to_string(), idx);
+                                accum.call_id_map.insert(call_id.to_string(), idx);
                             }
-                            messages.push(Message {
+                            accum.messages.push(Message {
                                 role: MessageRole::Tool,
                                 content: String::new(),
                                 timestamp: entry.timestamp.clone(),
@@ -919,15 +962,15 @@ impl CodexProvider {
                         "tool_search_output" | "ToolSearchOutput" => {
                             let output = codex_content_items_text(payload);
                             if !output.is_empty() {
-                                content_parts.push(output.clone());
+                                accum.content_parts.push(output.clone());
                             }
                             if let Some(idx) = codex_call_id(payload)
-                                .and_then(|cid| call_id_map.get(cid))
+                                .and_then(|cid| accum.call_id_map.get(cid))
                                 .copied()
                             {
-                                messages[idx].content = output;
+                                accum.messages[idx].content = output;
                                 enrich_existing_tool_message(
-                                    &mut messages[idx],
+                                    &mut accum.messages[idx],
                                     payload.clone(),
                                     None,
                                     payload.get("status").and_then(|v| v.as_str()),
@@ -936,7 +979,7 @@ impl CodexProvider {
                         }
                         "compaction" | "Compaction" => {
                             push_system_event(
-                                &mut messages,
+                                &mut accum.messages,
                                 entry.timestamp.clone(),
                                 "[context_compacted]".to_string(),
                             );
@@ -964,11 +1007,11 @@ impl CodexProvider {
                             });
                             let display_name = metadata.canonical_name.clone();
 
-                            let idx = messages.len();
+                            let idx = accum.messages.len();
                             if let Some(cid) = payload.get("call_id").and_then(|v| v.as_str()) {
-                                call_id_map.insert(cid.to_string(), idx);
+                                accum.call_id_map.insert(cid.to_string(), idx);
                             }
-                            messages.push(Message {
+                            accum.messages.push(Message {
                                 role: MessageRole::Tool,
                                 content: String::new(),
                                 timestamp: entry.timestamp.clone(),
@@ -989,12 +1032,13 @@ impl CodexProvider {
                             let output = extract_tool_output(&raw_output);
 
                             let call_id = payload.get("call_id").and_then(|v| v.as_str());
-                            if let Some(idx) = call_id.and_then(|cid| call_id_map.get(cid)).copied()
+                            if let Some(idx) =
+                                call_id.and_then(|cid| accum.call_id_map.get(cid)).copied()
                             {
-                                if idx < messages.len() {
+                                if idx < accum.messages.len() {
                                     let result_value =
                                         codex_tool_result_value(&raw_output, &output);
-                                    messages[idx].content = output;
+                                    accum.messages[idx].content = output;
                                     let is_error = result_value.as_ref().and_then(|value| {
                                         value
                                             .get("exitCode")
@@ -1003,7 +1047,7 @@ impl CodexProvider {
                                     });
                                     if let Some(result_value) = result_value {
                                         enrich_existing_tool_message(
-                                            &mut messages[idx],
+                                            &mut accum.messages[idx],
                                             result_value,
                                             is_error,
                                             None,
@@ -1013,7 +1057,7 @@ impl CodexProvider {
                                 }
                             }
                             if !output.is_empty() {
-                                messages.push(Message {
+                                accum.messages.push(Message {
                                     role: MessageRole::Tool,
                                     content: output,
                                     timestamp: entry.timestamp.clone(),
@@ -1031,17 +1075,17 @@ impl CodexProvider {
                 }
                 "turn_context" => {
                     flush_pending_user_message(
-                        &mut pending_user_message,
-                        &mut messages,
-                        &mut content_parts,
-                        &mut first_user_message,
+                        &mut accum.pending_user_message,
+                        &mut accum.messages,
+                        &mut accum.content_parts,
+                        &mut accum.first_user_message,
                     );
-                    // Extract actual model name (e.g. "gpt-5.4") from turn_context
+                    // Extract actual accum.model name (e.g. "gpt-5.4") from turn_context
                     if let Some(m) = payload.get("model").and_then(|v| v.as_str()) {
                         if !m.is_empty() {
-                            current_model = Some(m.to_string());
-                            if model.is_none() {
-                                model = Some(m.to_string());
+                            accum.current_model = Some(m.to_string());
+                            if accum.model.is_none() {
+                                accum.model = Some(m.to_string());
                             }
                         }
                     }
@@ -1051,7 +1095,7 @@ impl CodexProvider {
                     // agent_message is a duplicate of response_item/message/assistant — skip
                     match event_type {
                         "user_message" => {
-                            let pending = pending_user_message.take();
+                            let pending = accum.pending_user_message.take();
                             let fallback_content =
                                 pending.as_ref().map(|message| message.content.clone());
                             let response_image_segments = pending
@@ -1070,19 +1114,19 @@ impl CodexProvider {
                                 built_content
                             };
                             append_user_message(
-                                &mut messages,
-                                &mut content_parts,
-                                &mut first_user_message,
+                                &mut accum.messages,
+                                &mut accum.content_parts,
+                                &mut accum.first_user_message,
                                 content,
                                 timestamp,
                             );
                         }
                         "item_completed" => {
                             flush_pending_user_message(
-                                &mut pending_user_message,
-                                &mut messages,
-                                &mut content_parts,
-                                &mut first_user_message,
+                                &mut accum.pending_user_message,
+                                &mut accum.messages,
+                                &mut accum.content_parts,
+                                &mut accum.first_user_message,
                             );
                             let item = payload.get("item");
                             if item.and_then(|v| v.get("type")).and_then(|v| v.as_str())
@@ -1093,15 +1137,15 @@ impl CodexProvider {
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("");
                                 if !text.trim().is_empty() {
-                                    content_parts.push(text.to_string());
-                                    messages.push(Message {
+                                    accum.content_parts.push(text.to_string());
+                                    accum.messages.push(Message {
                                         role: MessageRole::Assistant,
                                         content: text.to_string(),
                                         timestamp: entry.timestamp.clone(),
                                         tool_name: None,
                                         tool_input: None,
                                         token_usage: None,
-                                        model: current_model.clone(),
+                                        model: accum.current_model.clone(),
                                         usage_hash: None,
                                         tool_metadata: None,
                                     });
@@ -1114,7 +1158,7 @@ impl CodexProvider {
                                 .and_then(|v| v.as_str())
                                 .filter(|s| !s.trim().is_empty())
                             {
-                                thread_name = Some(name.to_string());
+                                accum.thread_name = Some(name.to_string());
                             }
                         }
                         "error" => {
@@ -1132,7 +1176,7 @@ impl CodexProvider {
                                 format!("{info}: {message}")
                             };
                             push_system_event(
-                                &mut messages,
+                                &mut accum.messages,
                                 entry.timestamp.clone(),
                                 format!("[error] {detail}"),
                             );
@@ -1148,14 +1192,14 @@ impl CodexProvider {
                                 .map(|ms| format!(" ({:.1}s)", ms as f64 / 1000.0))
                                 .unwrap_or_default();
                             push_system_event(
-                                &mut messages,
+                                &mut accum.messages,
                                 entry.timestamp.clone(),
                                 format!("[turn_aborted] {reason}{duration}"),
                             );
                         }
                         "context_compacted" => {
                             push_system_event(
-                                &mut messages,
+                                &mut accum.messages,
                                 entry.timestamp.clone(),
                                 "[context_compacted]".to_string(),
                             );
@@ -1163,7 +1207,7 @@ impl CodexProvider {
                         "token_count" => {
                             if let Some(info) = payload.get("info") {
                                 let Some((usage_model, usage_counts)) =
-                                    codex_usage_from_info(info, &mut previous_token_totals)
+                                    codex_usage_from_info(info, &mut accum.previous_token_totals)
                                 else {
                                     continue;
                                 };
@@ -1175,7 +1219,7 @@ impl CodexProvider {
                                     || total != 0;
                                 let resolved_model = extract_codex_model(info)
                                     .or_else(|| extract_codex_model(payload))
-                                    .or_else(|| current_model.clone())
+                                    .or_else(|| accum.current_model.clone())
                                     .or_else(|| usage_model.clone());
                                 // Capture the event for the indexer's per-date stats
                                 // in the same pass — replaces a second file read.
@@ -1184,7 +1228,7 @@ impl CodexProvider {
                                         let model_for_event = resolved_model
                                             .clone()
                                             .unwrap_or_else(|| "gpt-5".to_string());
-                                        usage_events.push(UsageEvent {
+                                        accum.usage_events.push(UsageEvent {
                                             timestamp: ts.clone(),
                                             model: model_for_event,
                                             input_tokens: input,
@@ -1198,9 +1242,13 @@ impl CodexProvider {
                                     continue;
                                 };
                                 if let Some(model_name) = resolved_model.clone() {
-                                    current_model = Some(model_name);
+                                    accum.current_model = Some(model_name);
                                 }
-                                add_usage_to_last_assistant(&mut messages, usage, resolved_model);
+                                add_usage_to_last_assistant(
+                                    &mut accum.messages,
+                                    usage,
+                                    resolved_model,
+                                );
                             }
                         }
                         "web_search_end" => {
@@ -1209,15 +1257,18 @@ impl CodexProvider {
                             let query = payload.get("query").and_then(|v| v.as_str()).unwrap_or("");
                             let result = Some(payload.clone());
 
-                            if let Some(idx) = call_id.and_then(|cid| call_id_map.get(cid)).copied()
+                            if let Some(idx) =
+                                call_id.and_then(|cid| accum.call_id_map.get(cid)).copied()
                             {
-                                if idx < messages.len() {
-                                    messages[idx].content = query.to_string();
-                                    if messages[idx].tool_input.is_none() {
-                                        messages[idx].tool_input =
+                                if idx < accum.messages.len() {
+                                    accum.messages[idx].content = query.to_string();
+                                    if accum.messages[idx].tool_input.is_none() {
+                                        accum.messages[idx].tool_input =
                                             action.map(|value| value.to_string());
                                     }
-                                    if let Some(metadata) = messages[idx].tool_metadata.as_mut() {
+                                    if let Some(metadata) =
+                                        accum.messages[idx].tool_metadata.as_mut()
+                                    {
                                         enrich_tool_metadata(
                                             metadata,
                                             ToolResultFacts {
@@ -1248,14 +1299,14 @@ impl CodexProvider {
                                     artifact_path: None,
                                 },
                             );
-                            let idx = messages.len();
+                            let idx = accum.messages.len();
                             if let Some(call_id) = call_id {
-                                call_id_map.insert(call_id.to_string(), idx);
+                                accum.call_id_map.insert(call_id.to_string(), idx);
                             }
                             if !query.is_empty() {
-                                content_parts.push(query.to_string());
+                                accum.content_parts.push(query.to_string());
                             }
-                            messages.push(Message {
+                            accum.messages.push(Message {
                                 role: MessageRole::Tool,
                                 content: query.to_string(),
                                 timestamp: entry.timestamp.clone(),
@@ -1271,7 +1322,7 @@ impl CodexProvider {
                             let Some(call_id) = codex_call_id(payload) else {
                                 continue;
                             };
-                            let Some(idx) = call_id_map.get(call_id).copied() else {
+                            let Some(idx) = accum.call_id_map.get(call_id).copied() else {
                                 log::warn!(
                                     "missing Codex image generation tool message for event call_id {} in '{}'",
                                     call_id,
@@ -1279,18 +1330,19 @@ impl CodexProvider {
                                 );
                                 continue;
                             };
-                            if idx >= messages.len() {
+                            if idx >= accum.messages.len() {
                                 continue;
                             }
 
                             if let Some(saved_path) =
                                 payload.get("saved_path").and_then(|v| v.as_str())
                             {
-                                messages[idx].content = format!("[Image: source: {saved_path}]");
+                                accum.messages[idx].content =
+                                    format!("[Image: source: {saved_path}]");
                             }
                             let result_value = codex_image_generation_result(payload);
                             enrich_existing_tool_message(
-                                &mut messages[idx],
+                                &mut accum.messages[idx],
                                 result_value,
                                 None,
                                 payload.get("status").and_then(|v| v.as_str()),
@@ -1309,11 +1361,11 @@ impl CodexProvider {
                                 call_id: codex_call_id(payload),
                                 assistant_id: None,
                             });
-                            let idx = messages.len();
+                            let idx = accum.messages.len();
                             if let Some(call_id) = codex_call_id(payload) {
-                                call_id_map.insert(call_id.to_string(), idx);
+                                accum.call_id_map.insert(call_id.to_string(), idx);
                             }
-                            messages.push(Message {
+                            accum.messages.push(Message {
                                 role: MessageRole::Tool,
                                 content: String::new(),
                                 timestamp: entry.timestamp.clone(),
@@ -1328,7 +1380,7 @@ impl CodexProvider {
                         "dynamic_tool_call_response" => {
                             let output = codex_content_items_text(payload);
                             if !output.is_empty() {
-                                content_parts.push(output.clone());
+                                accum.content_parts.push(output.clone());
                             }
                             let result_value = dynamic_tool_result(payload);
                             let is_error = payload
@@ -1341,13 +1393,13 @@ impl CodexProvider {
                                 .map(|success| if success { "success" } else { "error" });
 
                             if let Some(idx) = codex_call_id(payload)
-                                .and_then(|cid| call_id_map.get(cid))
+                                .and_then(|cid| accum.call_id_map.get(cid))
                                 .copied()
                             {
-                                if idx < messages.len() {
-                                    messages[idx].content = output;
+                                if idx < accum.messages.len() {
+                                    accum.messages[idx].content = output;
                                     enrich_existing_tool_message(
-                                        &mut messages[idx],
+                                        &mut accum.messages[idx],
                                         result_value,
                                         is_error,
                                         status,
@@ -1377,7 +1429,7 @@ impl CodexProvider {
                                     artifact_path: None,
                                 },
                             );
-                            messages.push(Message {
+                            accum.messages.push(Message {
                                 role: MessageRole::Tool,
                                 content: output,
                                 timestamp: entry.timestamp.clone(),
@@ -1394,7 +1446,7 @@ impl CodexProvider {
                             else {
                                 continue;
                             };
-                            let Some(idx) = call_id_map.get(call_id).copied() else {
+                            let Some(idx) = accum.call_id_map.get(call_id).copied() else {
                                 log::warn!(
                                     "missing Codex exec_command tool message for event call_id {} in '{}'",
                                     call_id,
@@ -1402,17 +1454,19 @@ impl CodexProvider {
                                 );
                                 continue;
                             };
-                            if idx >= messages.len() {
+                            if idx >= accum.messages.len() {
                                 continue;
                             }
 
-                            let result_value =
-                                codex_exec_command_event_result(payload, &messages[idx].content);
+                            let result_value = codex_exec_command_event_result(
+                                payload,
+                                &accum.messages[idx].content,
+                            );
                             let status = payload.get("status").and_then(|v| v.as_str());
                             let is_error =
                                 status.map(|status| matches!(status, "failed" | "declined"));
-                            if messages[idx].content.is_empty()
-                                || messages[idx].content.trim_start().starts_with('{')
+                            if accum.messages[idx].content.is_empty()
+                                || accum.messages[idx].content.trim_start().starts_with('{')
                             {
                                 if let Some(formatted_output) = result_value
                                     .get("formattedOutput")
@@ -1431,11 +1485,11 @@ impl CodexProvider {
                                             .filter(|v| !v.is_empty())
                                     })
                                 {
-                                    messages[idx].content = formatted_output.to_string();
+                                    accum.messages[idx].content = formatted_output.to_string();
                                 }
                             }
                             enrich_existing_tool_message(
-                                &mut messages[idx],
+                                &mut accum.messages[idx],
                                 result_value,
                                 is_error,
                                 status,
@@ -1446,7 +1500,7 @@ impl CodexProvider {
                             else {
                                 continue;
                             };
-                            let Some(idx) = call_id_map.get(call_id).copied() else {
+                            let Some(idx) = accum.call_id_map.get(call_id).copied() else {
                                 log::warn!(
                                     "missing Codex MCP tool message for event call_id {} in '{}'",
                                     call_id,
@@ -1454,7 +1508,7 @@ impl CodexProvider {
                                 );
                                 continue;
                             };
-                            if idx >= messages.len() {
+                            if idx >= accum.messages.len() {
                                 continue;
                             }
 
@@ -1464,7 +1518,7 @@ impl CodexProvider {
                                 .and_then(|v| v.as_bool())
                                 .map(|success| !success);
                             enrich_existing_tool_message(
-                                &mut messages[idx],
+                                &mut accum.messages[idx],
                                 result_value,
                                 is_error,
                                 None,
@@ -1475,7 +1529,7 @@ impl CodexProvider {
                             else {
                                 continue;
                             };
-                            let Some(idx) = call_id_map.get(call_id).copied() else {
+                            let Some(idx) = accum.call_id_map.get(call_id).copied() else {
                                 log::warn!(
                                     "missing Codex apply_patch tool message for event call_id {} in '{}'",
                                     call_id,
@@ -1483,7 +1537,7 @@ impl CodexProvider {
                                 );
                                 continue;
                             };
-                            if idx >= messages.len() {
+                            if idx >= accum.messages.len() {
                                 continue;
                             }
 
@@ -1491,19 +1545,19 @@ impl CodexProvider {
                             let status = payload.get("status").and_then(|v| v.as_str());
                             let is_error =
                                 payload.get("success").and_then(|v| v.as_bool()).map(|v| !v);
-                            if messages[idx].content.is_empty()
-                                || messages[idx].content.trim_start().starts_with('{')
+                            if accum.messages[idx].content.is_empty()
+                                || accum.messages[idx].content.trim_start().starts_with('{')
                             {
                                 if let Some(stdout) = result_value
                                     .get("stdout")
                                     .and_then(|v| v.as_str())
                                     .filter(|v| !v.is_empty())
                                 {
-                                    messages[idx].content = stdout.to_string();
+                                    accum.messages[idx].content = stdout.to_string();
                                 }
                             }
                             enrich_existing_tool_message(
-                                &mut messages[idx],
+                                &mut accum.messages[idx],
                                 result_value,
                                 is_error,
                                 status,
@@ -1514,7 +1568,7 @@ impl CodexProvider {
                             else {
                                 continue;
                             };
-                            let Some(idx) = call_id_map.get(call_id).copied() else {
+                            let Some(idx) = accum.call_id_map.get(call_id).copied() else {
                                 log::warn!(
                                     "missing Codex spawn_agent tool message for event call_id {} in '{}'",
                                     call_id,
@@ -1522,13 +1576,13 @@ impl CodexProvider {
                                 );
                                 continue;
                             };
-                            if idx >= messages.len() {
+                            if idx >= accum.messages.len() {
                                 continue;
                             }
 
                             let status = payload.get("status").and_then(|v| v.as_str());
                             enrich_existing_tool_message(
-                                &mut messages[idx],
+                                &mut accum.messages[idx],
                                 payload.clone(),
                                 None,
                                 status,
@@ -1539,7 +1593,7 @@ impl CodexProvider {
                             else {
                                 continue;
                             };
-                            let Some(idx) = call_id_map.get(call_id).copied() else {
+                            let Some(idx) = accum.call_id_map.get(call_id).copied() else {
                                 log::warn!(
                                     "missing Codex wait_agent tool message for event call_id {} in '{}'",
                                     call_id,
@@ -1547,11 +1601,11 @@ impl CodexProvider {
                                 );
                                 continue;
                             };
-                            if idx >= messages.len() {
+                            if idx >= accum.messages.len() {
                                 continue;
                             }
 
-                            let status = messages[idx]
+                            let status = accum.messages[idx]
                                 .tool_metadata
                                 .as_ref()
                                 .and_then(|metadata| metadata.structured.as_ref())
@@ -1560,7 +1614,7 @@ impl CodexProvider {
                                 .map(|timed_out| if timed_out { "timed_out" } else { "completed" });
                             let is_error = status.map(|status| status == "timed_out");
                             enrich_existing_tool_message(
-                                &mut messages[idx],
+                                &mut accum.messages[idx],
                                 payload.clone(),
                                 is_error,
                                 status,
@@ -1571,7 +1625,7 @@ impl CodexProvider {
                             else {
                                 continue;
                             };
-                            let Some(idx) = call_id_map.get(call_id).copied() else {
+                            let Some(idx) = accum.call_id_map.get(call_id).copied() else {
                                 log::warn!(
                                     "missing Codex send_input tool message for event call_id {} in '{}'",
                                     call_id,
@@ -1579,7 +1633,7 @@ impl CodexProvider {
                                 );
                                 continue;
                             };
-                            if idx >= messages.len() {
+                            if idx >= accum.messages.len() {
                                 continue;
                             }
 
@@ -1588,7 +1642,7 @@ impl CodexProvider {
                                 .and_then(|v| v.as_str())
                                 .or(Some("completed"));
                             enrich_existing_tool_message(
-                                &mut messages[idx],
+                                &mut accum.messages[idx],
                                 payload.clone(),
                                 None,
                                 status,
@@ -1599,7 +1653,7 @@ impl CodexProvider {
                             else {
                                 continue;
                             };
-                            let Some(idx) = call_id_map.get(call_id).copied() else {
+                            let Some(idx) = accum.call_id_map.get(call_id).copied() else {
                                 log::warn!(
                                     "missing Codex close_agent tool message for event call_id {} in '{}'",
                                     call_id,
@@ -1607,12 +1661,12 @@ impl CodexProvider {
                                 );
                                 continue;
                             };
-                            if idx >= messages.len() {
+                            if idx >= accum.messages.len() {
                                 continue;
                             }
 
                             enrich_existing_tool_message(
-                                &mut messages[idx],
+                                &mut accum.messages[idx],
                                 payload.clone(),
                                 None,
                                 Some("completed"),
@@ -1620,10 +1674,10 @@ impl CodexProvider {
                         }
                         _ => {
                             flush_pending_user_message(
-                                &mut pending_user_message,
-                                &mut messages,
-                                &mut content_parts,
-                                &mut first_user_message,
+                                &mut accum.pending_user_message,
+                                &mut accum.messages,
+                                &mut accum.content_parts,
+                                &mut accum.first_user_message,
                             );
                         }
                     }
@@ -1631,6 +1685,35 @@ impl CodexProvider {
                 _ => continue,
             }
         }
+
+        // Hoist accumulator fields back to locals so the existing post-loop
+        // finalization (title, project_path, content_text, meta assembly)
+        // reads exactly like the pre-refactor code did.
+        let CodexScanAccum {
+            mut messages,
+            usage_events,
+            mut first_user_message,
+            first_timestamp,
+            last_timestamp,
+            mut content_parts,
+            session_id,
+            cwd,
+            call_id_map: _,
+            model,
+            model_provider,
+            thread_name,
+            current_model: _,
+            previous_token_totals: _,
+            cc_version,
+            git_branch,
+            is_sidechain,
+            parent_id,
+            agent_nickname,
+            mut pending_user_message,
+            skipping_fork_context,
+            subagent_start_seconds: _,
+            parse_warning_count,
+        } = accum;
 
         flush_pending_user_message(
             &mut pending_user_message,
