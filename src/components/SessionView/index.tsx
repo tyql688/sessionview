@@ -8,6 +8,7 @@ import {
   onMount,
   onCleanup,
 } from "solid-js";
+import { createVirtualizer } from "@tanstack/solid-virtual";
 import type {
   SessionRef,
   SessionMeta,
@@ -35,7 +36,7 @@ import {
   pendingSessionSearch,
   setPendingSessionSearch,
 } from "../../stores/search";
-import { processMessages } from "./hooks";
+import { processMessages, type ProcessedEntry } from "./hooks";
 import { SessionToolbar } from "./SessionToolbar";
 import { SessionSearch } from "./SessionSearch";
 import { TimelineMinimap } from "./TimelineMinimap";
@@ -99,21 +100,28 @@ export function SessionView(props: {
     return counts;
   });
 
-  // Reversed for column-reverse layout: newest first in DOM = visually at bottom.
-  // Search keeps the existing render window and expands only enough to reveal
-  // the first match. Rendering every entry on each input stalls large sessions.
+  // Chronological order: oldest first, newest last. The container
+  // auto-scrolls to the bottom on initial load (see scroll-to-bottom
+  // effect below). The virtualizer recycles DOM nodes, so the list can
+  // safely grow to thousands of entries without dropping into a slow
+  // markdown-rendering loop.
+  //
+  // Search keeps the existing render window and expands only enough to
+  // reveal the first match — rendering every entry on each input would
+  // stall a large session even with virtualization, because we'd have
+  // to walk the filteredEntries array to compute the highlight count.
   const visibleEntries = createMemo(() => {
     const all = filteredEntries();
     const focusedIndex = searchFocusEntryIndex();
     if (activeSessionSearch().trim() && focusedIndex !== null) {
       const bounds = searchWindowBounds(all.length, focusedIndex);
       if (bounds) {
-        return all.slice(bounds.start, bounds.end).reverse();
+        return all.slice(bounds.start, bounds.end);
       }
     }
     const count = visibleCount();
     const start = count >= all.length ? 0 : all.length - count;
-    return all.slice(start).reverse();
+    return all.slice(start);
   });
   // Streaming pagination state — declared before `hasMore` since it's
   // read inside that memo.
@@ -208,6 +216,18 @@ export function SessionView(props: {
           setParseWarningCount(tail.parse_warning_count ?? 0);
           setTotalMessages(tail.total);
           setWindowStart(tail.start);
+          // Anchor to the newest entry after the initial render. Two RAFs
+          // give the virtualizer time to measure the freshly-mounted rows;
+          // without that, jumping to `scrollHeight` lands too high because
+          // estimated heights underrun the real ones.
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              if (version !== loadVersion) return;
+              if (messagesRef) {
+                messagesRef.scrollTop = messagesRef.scrollHeight;
+              }
+            });
+          });
         } catch (e) {
           if (version !== loadVersion) return;
           if (isLoadCanceledError(e)) return; // user navigated away
@@ -309,19 +329,38 @@ export function SessionView(props: {
     olderFetchInFlight = true;
     const newStart = Math.max(0, windowStart() - TAIL_BATCH);
     const span = windowStart() - newStart;
+    // Capture the pre-prepend scroll geometry so we can offset scrollTop
+    // by the height of the newly-mounted older rows. Without this anchor
+    // the virtualizer keeps the same `scrollTop` after prepending, which
+    // visually yanks the user away from the row they were looking at.
+    const refBeforeFetch = messagesRef;
+    const heightBeforeFetch = refBeforeFetch?.scrollHeight ?? 0;
+    const scrollBeforeFetch = refBeforeFetch?.scrollTop ?? 0;
     try {
       const older = await getSessionMessagesWindow(sessionId, newStart, span);
       if (sessionId !== props.session.id) return;
       setMeta((prev) => withTokenTotals(prev, older.token_totals));
-      // Prepend the newly fetched older messages and grow `visibleCount`
-      // by the same amount so the just-fetched entries actually become
-      // visible at the top of the viewport (column-reverse layout).
-      // Without the bump, `visibleEntries` slices from the newer end and
-      // the user sees no change after the round trip.
+      // Prepend the newly fetched older messages. `visibleCount` grows by
+      // the same amount so the slice in `visibleEntries` widens to cover
+      // both ends.
       setMessages((prev) => [...older.messages, ...prev]);
       setWindowStart(newStart);
       setTotalMessages(older.total);
       setVisibleCount((count) => count + older.messages.length);
+      // Wait for the virtualizer to remeasure with the new entries, then
+      // shift scrollTop down by the delta so the anchored row stays in
+      // place. Two RAFs because the first commit only re-runs the memo;
+      // measurement happens in the next paint.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (refBeforeFetch && refBeforeFetch === messagesRef) {
+            const delta = refBeforeFetch.scrollHeight - heightBeforeFetch;
+            if (delta > 0) {
+              refBeforeFetch.scrollTop = scrollBeforeFetch + delta;
+            }
+          }
+        });
+      });
     } catch (e) {
       if (isLoadCanceledError(e)) return;
       console.warn("load older messages failed:", e);
@@ -332,7 +371,7 @@ export function SessionView(props: {
 
   function loadOlderEntries() {
     if (!messagesRef || !hasMore()) return;
-    // column-reverse: older entries append at the end of the DOM (visual top).
+    // Older entries live at the top of the natural-direction layout.
     // First exhaust the in-memory window via visibleCount, then page in
     // older messages from the backend cache.
     if (visibleCount() < filteredEntries().length) {
@@ -348,21 +387,14 @@ export function SessionView(props: {
     const target = e.currentTarget as HTMLDivElement;
     clearTimeout(loadOlderDebounce);
 
-    // column-reverse: scrollTop=0 is bottom (newest). User scrolls up -> scrollTop
-    // goes negative. We want to load more when user reaches the visual top.
-    // Visual top = max negative scrollTop = -(scrollHeight - clientHeight).
-    const atVisualTop =
-      target.scrollHeight + target.scrollTop - target.clientHeight <=
-      LOAD_MORE_THRESHOLD;
+    // Standard scroll: scrollTop=0 ≡ at top (oldest entries). Loading
+    // more older content triggers when the user scrolls all the way up.
+    const atVisualTop = target.scrollTop <= LOAD_MORE_THRESHOLD;
 
     if (atVisualTop) {
       loadOlderDebounce = setTimeout(() => {
         if (!messagesRef) return;
-        const stillAtTop =
-          messagesRef.scrollHeight +
-            messagesRef.scrollTop -
-            messagesRef.clientHeight <=
-          LOAD_MORE_THRESHOLD;
+        const stillAtTop = messagesRef.scrollTop <= LOAD_MORE_THRESHOLD;
         if (stillAtTop) {
           loadOlderEntries();
         }
@@ -454,10 +486,16 @@ export function SessionView(props: {
       setParseWarningCount(tail.parse_warning_count ?? 0);
       setTotalMessages(tail.total);
       setWindowStart(tail.start);
-      // Auto-scroll to newest if new messages arrived (column-reverse: bottom = scrollTop 0)
+      // Auto-scroll to newest if new messages arrived (normal layout:
+      // newest is at the bottom; scrollTop = scrollHeight).
       if (tail.messages.length > oldCount) {
         requestAnimationFrame(() => {
-          messagesRef?.scrollTo({ top: 0, behavior: "smooth" });
+          if (messagesRef) {
+            messagesRef.scrollTo({
+              top: messagesRef.scrollHeight,
+              behavior: "smooth",
+            });
+          }
         });
       }
     } catch (e) {
@@ -583,38 +621,12 @@ export function SessionView(props: {
             ref={messagesRef}
             onScroll={handleMessagesScroll}
           >
-            <For each={visibleEntries()}>
-              {(entry) => {
-                if (entry.type === "time-sep") {
-                  return (
-                    <div class="session-entry" data-entry-key={entry.key}>
-                      <div class="msg-time-separator">{entry.time}</div>
-                    </div>
-                  );
-                }
-                if (entry.type === "merged-tools") {
-                  return (
-                    <div class="session-entry" data-entry-key={entry.key}>
-                      <MergedToolRow
-                        tools={entry.tools}
-                        messages={entry.messages}
-                        provider={meta().provider}
-                        highlightTerm={activeSessionSearch()}
-                      />
-                    </div>
-                  );
-                }
-                return (
-                  <div class="session-entry" data-entry-key={entry.key}>
-                    <MessageBubble
-                      message={entry.msg}
-                      provider={meta().provider}
-                      highlightTerm={activeSessionSearch()}
-                    />
-                  </div>
-                );
-              }}
-            </For>
+            <MessagesVirtualList
+              entries={visibleEntries()}
+              getScrollElement={() => messagesRef}
+              provider={meta().provider}
+              highlightTerm={activeSessionSearch()}
+            />
             <Show when={messages().length === 0}>
               <div class="session-empty-messages">
                 {t("session.noMessages")}
@@ -626,6 +638,10 @@ export function SessionView(props: {
             messagesRef={messagesRef}
             onScrollToFraction={(fraction) => {
               const total = filteredEntries().length;
+              // The newest entry sits at the bottom, so the fraction's "1" end
+              // = newest. The current window is the most-recent `visibleCount`
+              // slice; jumping to `fraction` requires `(1 - fraction) * total`
+              // older entries to be loaded.
               const targetCount = Math.min(
                 total,
                 Math.ceil(total * (1 - fraction)) + BATCH_SIZE,
@@ -638,14 +654,13 @@ export function SessionView(props: {
                   ),
                 );
               }
-              // fraction: 0=top(oldest), 1=bottom(newest)
-              // column-reverse: scrollTop=0 is bottom, negative is up
+              // fraction: 0=top(oldest), 1=bottom(newest); standard scrollTop.
               requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
                   if (!messagesRef) return;
                   const maxScroll =
                     messagesRef.scrollHeight - messagesRef.clientHeight;
-                  messagesRef.scrollTop = -(1 - fraction) * maxScroll;
+                  messagesRef.scrollTop = fraction * maxScroll;
                 });
               });
             }}
@@ -668,6 +683,87 @@ export function SessionView(props: {
         session={meta()}
         onClose={() => setShowExportDialog(false)}
       />
+    </div>
+  );
+}
+
+interface MessagesVirtualListProps {
+  entries: ProcessedEntry[];
+  getScrollElement: () => HTMLDivElement | undefined;
+  provider: SessionMeta["provider"];
+  highlightTerm: string;
+}
+
+/**
+ * Viewport-only renderer for the session message list.
+ *
+ * @tanstack/solid-virtual measures each rendered row and recycles DOM
+ * nodes as they scroll out of view; the parent container scrolls
+ * naturally and the virtualizer reads its `scrollTop` to decide which
+ * indices to mount. With overscan we still mount a buffer above and
+ * below the viewport so smooth scrolling doesn't reveal blank rows.
+ *
+ * `estimateSize` is a coarse 220 px — close enough to the average bubble
+ * height that initial scroll positioning is correct; precise heights
+ * arrive via `measureElement` once each row mounts, after which the
+ * virtualizer adjusts the absolute offsets.
+ */
+function MessagesVirtualList(props: MessagesVirtualListProps) {
+  const virtualizer = createVirtualizer({
+    get count() {
+      return props.entries.length;
+    },
+    getScrollElement: () => props.getScrollElement() ?? null,
+    estimateSize: () => 220,
+    overscan: 8,
+    getItemKey: (index) => props.entries[index]?.key ?? index,
+  });
+
+  return (
+    <div
+      class="session-messages-virtual-inner"
+      style={{ height: `${virtualizer.getTotalSize()}px` }}
+    >
+      <For each={virtualizer.getVirtualItems()}>
+        {(virtualRow) => {
+          const entry = props.entries[virtualRow.index];
+          if (!entry) return null;
+          return (
+            <div
+              class="session-entry-row"
+              data-entry-key={entry.key}
+              data-index={virtualRow.index}
+              ref={(el) => queueMicrotask(() => virtualizer.measureElement(el))}
+              style={{
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+            >
+              {entry.type === "time-sep" ? (
+                <div class="session-entry">
+                  <div class="msg-time-separator">{entry.time}</div>
+                </div>
+              ) : entry.type === "merged-tools" ? (
+                <div class="session-entry">
+                  <MergedToolRow
+                    tools={entry.tools}
+                    messages={entry.messages}
+                    provider={props.provider}
+                    highlightTerm={props.highlightTerm}
+                  />
+                </div>
+              ) : (
+                <div class="session-entry">
+                  <MessageBubble
+                    message={entry.msg}
+                    provider={props.provider}
+                    highlightTerm={props.highlightTerm}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        }}
+      </For>
     </div>
   );
 }

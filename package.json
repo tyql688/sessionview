@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@solid-primitives/i18n": "^2.2.1",
+    "@tanstack/solid-virtual": "^3.13.24",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-dialog": "^2.6.0",
     "@tauri-apps/plugin-process": "^2.3.1",

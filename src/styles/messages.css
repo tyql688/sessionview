@@ -217,19 +217,42 @@
   overflow: hidden;
 }
 
-/* Messages */
+/* Messages.
+ *
+ * Standard chat layout: oldest at the top, newest at the bottom; the
+ * SessionView programmatically scrolls to the bottom on initial load
+ * and when new messages stream in. The previous `column-reverse`
+ * (scrollTop=0 ≡ bottom) is incompatible with the absolute-positioning
+ * model the virtual list uses to recycle DOM nodes.
+ */
 .session-messages {
   flex: 1;
   overflow-y: auto;
   padding: 16px 20px 26px;
-  display: flex;
-  flex-direction: column-reverse;
-  gap: 10px;
+  position: relative;
+}
+
+.session-messages-virtual-inner {
+  position: relative;
+  width: 100%;
 }
 
 .session-entry {
   display: flex;
   flex-direction: column;
+  /* The virtualizer absolute-positions each entry via inline transform.
+     The vertical spacing the legacy `gap: 10px` provided is baked into
+     measured row heights through `entry-row` margins below. */
+}
+
+.session-entry-row {
+  /* Wrapper applied by the virtualizer for each row; carries the absolute
+     `top` offset via `transform: translateY(...)`. */
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  padding-bottom: 10px;
 }
 
 .session-empty-messages {
