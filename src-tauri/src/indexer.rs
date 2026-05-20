@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+use rayon::prelude::*;
+
 use crate::db::sync::TokenStatRow;
 use crate::db::Database;
 use crate::models::{Provider, SessionMeta, TreeNode, TreeNodeType};
@@ -72,67 +74,92 @@ impl Indexer {
 
         let excluded = crate::trash_state::shared_deleted_ids();
 
-        for provider in self.providers.iter() {
-            let provider_kind = provider.provider();
+        // Phase 1 (parallel, CPU/IO): scan each provider's files and compute
+        // its token-stats batch. seen_hashes dedup is per-provider already
+        // (the parent-before-child ordering only matters within one provider's
+        // scan), so providers don't share state and can run in parallel.
+        struct ProviderWork {
+            provider_kind: Provider,
+            sessions: Vec<ParsedSession>,
+            stats_batch: Vec<(String, Vec<TokenStatRow>)>,
+        }
 
-            if let Some(allowed) = filter {
-                if !allowed.contains(&provider_kind) {
-                    continue;
+        let provider_refs: Vec<&Box<dyn SessionProvider>> = self
+            .providers
+            .iter()
+            .filter(|p| match filter {
+                Some(allowed) => allowed.contains(&p.provider()),
+                None => true,
+            })
+            .collect();
+
+        let works: Result<Vec<ProviderWork>, String> = provider_refs
+            .par_iter()
+            .map(|provider| -> Result<ProviderWork, String> {
+                let provider_kind = provider.provider();
+                let mut sessions = provider.scan_all().map_err(|e| {
+                    format!("failed to scan {} provider: {}", provider_kind.key(), e)
+                })?;
+
+                if !excluded.is_empty() {
+                    sessions.retain(|s| !excluded.contains(&s.meta.id));
                 }
-            }
 
-            let mut sessions = provider
-                .scan_all()
-                .map_err(|e| format!("failed to scan {} provider: {}", provider_kind.key(), e))?;
+                // Parent-before-child ordering so cross-file dedup attributes
+                // overlapping usage entries to the parent.
+                let (parents, children): (Vec<&ParsedSession>, Vec<&ParsedSession>) = sessions
+                    .iter()
+                    .partition(|parsed| parsed.meta.parent_id.is_none());
 
-            if !excluded.is_empty() {
-                sessions.retain(|s| !excluded.contains(&s.meta.id));
-            }
+                let mut seen_hashes: HashSet<String> = HashSet::new();
+                let mut stats_batch: Vec<(String, Vec<TokenStatRow>)> =
+                    Vec::with_capacity(sessions.len());
+                for parsed in parents.iter().chain(children.iter()) {
+                    let stat_rows = compute_token_stats_dedup(
+                        parsed,
+                        pricing_catalog.as_ref(),
+                        Some(&mut seen_hashes),
+                    );
+                    stats_batch.push((parsed.meta.id.clone(), stat_rows));
+                }
 
+                Ok(ProviderWork {
+                    provider_kind,
+                    sessions,
+                    stats_batch,
+                })
+            })
+            .collect();
+        let works = works?;
+
+        // Phase 2 (sequential, DB writer): commit each provider's snapshot.
+        // SQLite has a single writer mutex; serializing here avoids contention
+        // and keeps each provider's transaction atomic.
+        for ProviderWork {
+            provider_kind,
+            sessions,
+            stats_batch,
+        } in &works
+        {
             let count = sessions.len();
             self.db
-                .sync_provider_snapshot(&provider_kind, &sessions, aggressive)
+                .sync_provider_snapshot(provider_kind, sessions, aggressive)
                 .map_err(|e| format!("failed to sync {} provider: {}", provider_kind.key(), e))?;
 
-            // Process parent sessions before subagents so that cross-file
-            // dedup attributes overlapping usage entries to the parent.
-            let mut parents: Vec<&ParsedSession> = Vec::new();
-            let mut children: Vec<&ParsedSession> = Vec::new();
-            for parsed in &sessions {
-                if parsed.meta.parent_id.is_none() {
-                    parents.push(parsed);
-                } else {
-                    children.push(parsed);
-                }
-            }
-
-            let mut seen_hashes: HashSet<String> = HashSet::new();
-            let mut stats_batch: Vec<(String, Vec<TokenStatRow>)> = Vec::new();
-            for parsed in parents.iter().chain(children.iter()) {
-                let stat_rows = compute_token_stats_dedup(
-                    parsed,
-                    pricing_catalog.as_ref(),
-                    Some(&mut seen_hashes),
+            let batch_refs: Vec<(&str, &[TokenStatRow])> = stats_batch
+                .iter()
+                .map(|(id, rows)| (id.as_str(), rows.as_slice()))
+                .collect();
+            if let Err(e) = self.db.replace_token_stats_batch(&batch_refs) {
+                log::warn!(
+                    "failed to write token stats batch for {}: {e}",
+                    provider_kind.key()
                 );
-                stats_batch.push((parsed.meta.id.clone(), stat_rows));
-            }
-            {
-                let batch_refs: Vec<(&str, &[TokenStatRow])> = stats_batch
-                    .iter()
-                    .map(|(id, rows)| (id.as_str(), rows.as_slice()))
-                    .collect();
-                if let Err(e) = self.db.replace_token_stats_batch(&batch_refs) {
-                    log::warn!(
-                        "failed to write token stats batch for {}: {e}",
-                        provider_kind.key()
-                    );
-                }
             }
 
-            // Cache images for providers that support it
-            if let Some(cache_provider) = image_cache_provider_for(&provider_kind) {
+            if let Some(cache_provider) = image_cache_provider_for(provider_kind) {
                 let image_service = ImageCacheService::new(&self.data_dir);
-                for parsed in parents.iter().chain(children.iter()) {
+                for parsed in sessions {
                     image_service.cache_images(cache_provider.as_ref(), &parsed.messages);
                 }
             }
