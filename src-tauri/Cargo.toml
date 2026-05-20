@@ -24,6 +24,7 @@ rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 rayon = "1.10"
 notify = { version = "7", default-features = false, features = ["macos_kqueue"] }
 memmap2 = "0.9"
+memchr = "2"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"
 md5 = "0.7"

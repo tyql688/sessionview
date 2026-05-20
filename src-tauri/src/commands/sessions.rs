@@ -548,6 +548,7 @@ pub(crate) fn load_messages_cached(
 
     let loaded =
         load_messages_from_provider_or_canceled(&meta.provider, &meta.id, &meta.source_path)?;
+    let total_messages = loaded.messages.len();
     let cached = state.session_cache.insert(
         cache_key,
         meta.source_path.clone(),
@@ -555,6 +556,8 @@ pub(crate) fn load_messages_cached(
         loaded.parse_warning_count,
         loaded.token_totals,
         mtime,
+        false,
+        Some(total_messages),
     );
     Ok((
         cached.messages,

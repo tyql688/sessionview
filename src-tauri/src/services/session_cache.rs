@@ -7,6 +7,17 @@ use crate::models::{Message, TokenTotals};
 
 /// Snapshot of a parsed session's messages. `Arc` keeps clones cheap when
 /// multiple windowed reads run concurrently.
+///
+/// `is_partial` is true when the entry came from a tail-only parse (we
+/// only have the most recent N messages, not the whole file). A later
+/// full parse will overwrite the entry via `insert` and `is_partial`
+/// flips back to false. Callers needing entries older than what's in
+/// `messages` must check this flag and trigger a full re-parse before
+/// trusting the slice.
+///
+/// `total_messages` is the full file's message count when known —
+/// populated from the DB meta on the fast path so the frontend can
+/// render the correct totals even when only the tail is in memory.
 #[derive(Clone)]
 pub struct CachedMessages {
     pub source_path: String,
@@ -14,6 +25,8 @@ pub struct CachedMessages {
     pub parse_warning_count: u32,
     pub token_totals: TokenTotals,
     pub mtime: Option<SystemTime>,
+    pub is_partial: bool,
+    pub total_messages: Option<usize>,
     last_access: u64,
 }
 
@@ -62,6 +75,11 @@ impl SessionCache {
 
     /// Insert a freshly parsed entry, evicting the least-recently-accessed
     /// entry when over capacity.
+    // Cache-row fields are all small Copy / String values consumed by the
+    // CachedMessages constructor below; bundling them into a struct just
+    // to satisfy clippy would force every caller to build the struct
+    // before calling, with no real readability gain.
+    #[allow(clippy::too_many_arguments)]
     pub fn insert(
         &self,
         key: String,
@@ -70,6 +88,8 @@ impl SessionCache {
         parse_warning_count: u32,
         token_totals: TokenTotals,
         mtime: Option<SystemTime>,
+        is_partial: bool,
+        total_messages: Option<usize>,
     ) -> CachedMessages {
         let access = self.counter.fetch_add(1, Ordering::Relaxed) + 1;
         let entry = CachedMessages {
@@ -78,6 +98,8 @@ impl SessionCache {
             parse_warning_count,
             token_totals,
             mtime,
+            is_partial,
+            total_messages,
             last_access: access,
         };
 
@@ -160,6 +182,8 @@ mod tests {
             0,
             TokenTotals::default(),
             mtime,
+            false,
+            None,
         );
     }
 

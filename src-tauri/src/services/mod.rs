@@ -6,6 +6,7 @@ mod session_cache;
 mod session_lifecycle;
 mod session_resolution;
 mod source_sync;
+pub mod tail_reader;
 
 pub use persisted_output_cache::PersistedOutputCache;
 pub use provider_snapshots::ProviderSnapshotService;

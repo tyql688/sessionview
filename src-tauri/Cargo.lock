@@ -484,6 +484,7 @@ dependencies = [
  "dirs",
  "log",
  "md5",
+ "memchr",
  "memmap2",
  "notify",
  "pulldown-cmark",
