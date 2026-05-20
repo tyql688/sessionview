@@ -571,8 +571,9 @@ mod tests {
     #[test]
     fn compute_token_stats_skips_synthetic_model() {
         // Claude emits usage entries with model="<synthetic>" as internal
-        // placeholders. They should be excluded from usage aggregates to
-        // match ccusage's behavior.
+        // placeholders (continuation stubs, retry shells, etc.). They
+        // don't represent real API calls and must be excluded from the
+        // per-date aggregates.
         let parsed = make_session(
             Some("<synthetic>"),
             vec![Message {

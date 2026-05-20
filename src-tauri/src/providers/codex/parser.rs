@@ -481,8 +481,10 @@ impl CodexScanAccum {
 
             // Skip forked parent context in subagent files. Clear the flag on
             // the first subagent-owned `task_started` event (its `started_at`
-            // matches the subagent session's creation time). Fall back to the
-            // legacy `newly spawned agent` marker for pre-0.120 rollouts.
+            // matches the subagent session's creation time). Older transcripts
+            // don't carry that marker — fall back to the textual
+            // `newly spawned agent` cue still present in their function-call
+            // output.
             if self.skipping_fork_context {
                 if entry.line_type == "event_msg"
                     && payload.get("type").and_then(|v| v.as_str()) == Some("task_started")
@@ -1683,14 +1685,17 @@ impl CodexProvider {
         let file_size = metadata.len();
 
         let reader = BufReader::new(file);
-        // Subagent JSONL layout for `skipping_fork_context`:
-        //   pre-0.120 (legacy):   [sub_meta, parent_meta, ...parent_context...,
-        //                          function_call_output("newly spawned agent"), sub_turn]
-        //   0.120+ (post-#16709): [sub_meta, parent_meta, ...sanitized_parent_history...,
-        //                          task_started(sub_turn), turn_context, sub_turn]
-        //     Upstream dropped the textual marker; the fork boundary is the first
-        //     `event_msg.task_started` whose `started_at` is >= the subagent's own
-        //     session_meta.timestamp.
+        // Two Codex subagent JSONL layouts the parser has to handle.
+        // `skipping_fork_context` drops the parent's forked history so
+        // it doesn't leak into the subagent view:
+        //   legacy: [sub_meta, parent_meta, ...parent_context...,
+        //            function_call_output("newly spawned agent"), sub_turn]
+        //   newer:  [sub_meta, parent_meta, ...sanitized_parent_history...,
+        //            task_started(sub_turn), turn_context, sub_turn]
+        //     The newer layout no longer carries the "newly spawned"
+        //     textual marker; the fork boundary is the first
+        //     `event_msg.task_started` whose `started_at` is at or
+        //     after the subagent's own `session_meta.timestamp`.
         let mut accum = CodexScanAccum::new();
 
         accum.scan_lines(reader, path);
@@ -2164,7 +2169,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_session_collects_usage_events_matching_ccusage_last_usage_preference() {
+    fn parse_session_prefers_last_token_usage_when_both_last_and_total_are_present() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("codex.jsonl");
         fs::write(

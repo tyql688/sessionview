@@ -945,8 +945,10 @@ pub fn default_compute_token_stats_from_messages(
             );
             continue;
         };
-        // Claude emits `<synthetic>` for internal placeholder entries.
-        // ccusage excludes them from aggregates; match that behaviour.
+        // Claude emits `<synthetic>` as the model name for internal
+        // placeholder entries (continuation stubs, retry shells, etc.)
+        // that don't represent a real API call. Exclude them from token
+        // aggregates so daily totals reflect actual usage.
         if model == "<synthetic>" {
             continue;
         }
