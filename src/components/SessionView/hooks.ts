@@ -1,10 +1,34 @@
 import type { Message } from "../../lib/types";
 import { parseTimestamp, formatTimeOnly } from "../../lib/formatters";
 
+/// Lowercased haystack used by in-session search. Computed once when the
+/// entry is built so per-keystroke `findNewestMatchingEntryIndex` /
+/// `countMatchingEntries` walks avoid re-lowercasing every entry.
 export type ProcessedEntry =
-  | { key: string; type: "message"; msg: Message }
-  | { key: string; type: "time-sep"; time: string }
-  | { key: string; type: "merged-tools"; tools: string[]; messages: Message[] };
+  | { key: string; type: "message"; msg: Message; searchHaystack: string }
+  | { key: string; type: "time-sep"; time: string; searchHaystack: string }
+  | {
+      key: string;
+      type: "merged-tools";
+      tools: string[];
+      messages: Message[];
+      searchHaystack: string;
+    };
+
+function messageHaystack(msg: Message): string {
+  return (msg.content ?? "").toLocaleLowerCase();
+}
+
+function toolGroupHaystack(messages: Message[]): string {
+  return messages
+    .map((m) =>
+      [m.tool_name, m.tool_input, m.content]
+        .filter((value): value is string => !!value)
+        .join("\n"),
+    )
+    .join("\n")
+    .toLocaleLowerCase();
+}
 
 export function isRenderableMessage(msg: Message): boolean {
   if (msg.role === "tool") {
@@ -44,12 +68,14 @@ export function processMessages(msgs: Message[]): ProcessedEntry[] {
           type: "merged-tools",
           tools: toolNames,
           messages: toolGroup,
+          searchHaystack: toolGroupHaystack(toolGroup),
         });
       } else {
         entries.push({
           key: `msg-${i}-${msg.role}-${msg.timestamp ?? "none"}`,
           type: "message",
           msg,
+          searchHaystack: messageHaystack(msg),
         });
       }
       i = j;
@@ -73,6 +99,7 @@ export function processMessages(msgs: Message[]): ProcessedEntry[] {
           key: `sep-${i}-${curTs}`,
           type: "time-sep",
           time: formatTimeOnly(curTs),
+          searchHaystack: "",
         });
       }
     }
@@ -81,6 +108,7 @@ export function processMessages(msgs: Message[]): ProcessedEntry[] {
       key: `msg-${i}-${msg.role}-${msg.timestamp ?? "none"}`,
       type: "message",
       msg,
+      searchHaystack: messageHaystack(msg),
     });
     i++;
   }

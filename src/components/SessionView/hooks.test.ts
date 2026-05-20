@@ -36,6 +36,7 @@ describe("SessionView message processing", () => {
         key: "msg-0-assistant-2026-04-11T02:25:17.000Z",
         type: "message",
         msg: visibleAssistant,
+        searchHaystack: "visible reply",
       },
     ]);
   });

@@ -29,7 +29,10 @@ export function entryMatchesSearch(
   normalizedTerm: string,
 ): boolean {
   if (!normalizedTerm) return false;
-  return entrySearchText(entry).toLocaleLowerCase().includes(normalizedTerm);
+  // `searchHaystack` is the lowercased text pre-computed in `processMessages`;
+  // using it directly skips a `toLocaleLowerCase()` per entry per keystroke,
+  // which dominates the in-session search cost on 4k-message sessions.
+  return entry.searchHaystack.includes(normalizedTerm);
 }
 
 export function findNewestMatchingEntryIndex(

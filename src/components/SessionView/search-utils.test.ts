@@ -21,7 +21,12 @@ function message(content: string): Message {
 describe("session search utilities", () => {
   it("matches short Chinese terms in messages and tool groups", () => {
     const entries: ProcessedEntry[] = [
-      { key: "m1", type: "message", msg: message("英文内容") },
+      {
+        key: "m1",
+        type: "message",
+        msg: message("英文内容"),
+        searchHaystack: "英文内容".toLocaleLowerCase(),
+      },
       {
         key: "tools",
         type: "merged-tools",
@@ -36,8 +41,14 @@ describe("session search utilities", () => {
             token_usage: null,
           },
         ],
+        searchHaystack: "Bash\n工具输出里有中文搜索".toLocaleLowerCase(),
       },
-      { key: "m2", type: "message", msg: message("最新中文命中") },
+      {
+        key: "m2",
+        type: "message",
+        msg: message("最新中文命中"),
+        searchHaystack: "最新中文命中".toLocaleLowerCase(),
+      },
     ];
 
     expect(countMatchingEntries(entries, "中文")).toBe(2);
