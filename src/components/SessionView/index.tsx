@@ -303,23 +303,35 @@ export function SessionView(props: {
 
   let olderFetchInFlight = false;
 
+  // Re-pin the scroll position to where the user was looking right
+  // before we grew the visible-entries list. In column-reverse, new
+  // rows are appended to the DOM but appear visually *above* the
+  // existing content. Browsers usually preserve `scrollTop` across
+  // this kind of growth, but Solid's `<For>` reconciliation can move
+  // DOM nodes when the array shape changes and Chrome's scroll
+  // anchoring will sometimes shift the viewport away from the
+  // captured row. Snapping `scrollTop` back to the captured value
+  // after two paint frames keeps the user on the row they were
+  // reading.
+  function pinScrollAfterPrepend(scrollBefore: number) {
+    const ref = messagesRef;
+    if (!ref) return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (ref === messagesRef && ref.scrollTop !== scrollBefore) {
+          ref.scrollTop = scrollBefore;
+        }
+      });
+    });
+  }
+
   async function loadOlderTail() {
     if (olderFetchInFlight || windowStart() <= 0) return;
     const sessionId = props.session.id;
     olderFetchInFlight = true;
     const newStart = Math.max(0, windowStart() - TAIL_BATCH);
     const span = windowStart() - newStart;
-    // Capture the pre-prepend scroll geometry so we can re-anchor the
-    // user's view to the same content after the new (visually-above)
-    // entries are mounted. Without this the viewport "shakes": column-
-    // reverse keeps `scrollTop` fixed while `scrollHeight` grows from
-    // the top, so the row the user was reading slides downward by the
-    // height of the freshly-prepended chunk. Especially visible for
-    // Codex sessions where TAIL_BATCH=600 messages can add many
-    // thousand pixels of content in one round trip.
-    const refBefore = messagesRef;
-    const heightBefore = refBefore?.scrollHeight ?? 0;
-    const scrollBefore = refBefore?.scrollTop ?? 0;
+    const scrollBefore = messagesRef?.scrollTop ?? 0;
     try {
       const older = await getSessionMessagesWindow(sessionId, newStart, span);
       if (sessionId !== props.session.id) return;
@@ -333,22 +345,7 @@ export function SessionView(props: {
       setWindowStart(newStart);
       setTotalMessages(older.total);
       setVisibleCount((count) => count + older.messages.length);
-      // After the DOM commits the new rows, restore the visible content.
-      // In column-reverse, "scrolled up by X" is encoded as `scrollTop =
-      // -(X - clientHeight)`. Adding `delta` pixels visually above the
-      // current top means we need to scroll further up by `delta` to
-      // keep the same row pinned — i.e. subtract `delta` from
-      // `scrollTop`. Two RAFs give the browser one paint cycle to
-      // measure the newly-mounted rows.
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (!refBefore || refBefore !== messagesRef) return;
-          const delta = refBefore.scrollHeight - heightBefore;
-          if (delta > 0) {
-            refBefore.scrollTop = scrollBefore - delta;
-          }
-        });
-      });
+      pinScrollAfterPrepend(scrollBefore);
     } catch (e) {
       if (isLoadCanceledError(e)) return;
       console.warn("load older messages failed:", e);
@@ -363,7 +360,9 @@ export function SessionView(props: {
     // First exhaust the in-memory window via visibleCount, then page in
     // older messages from the backend cache.
     if (visibleCount() < filteredEntries().length) {
+      const scrollBefore = messagesRef.scrollTop;
       setVisibleCount((count) => count + BATCH_SIZE);
+      pinScrollAfterPrepend(scrollBefore);
       return;
     }
     if (windowStart() > 0) {
