@@ -3,7 +3,24 @@ use std::path::Path;
 use chrono::DateTime;
 
 pub const NO_PROJECT: &str = "(No Project)";
-pub const FTS_CONTENT_LIMIT: usize = 2000;
+
+/// Maximum size (in bytes) of the searchable `content_text` payload stored
+/// per session. The FTS5 trigram index reads from this column; raising
+/// the cap trades DB size for search recall.
+///
+/// At 64 KiB a session covers roughly the first 30–60 messages of dialogue
+/// (depending on language). The previous cap of 2 KiB indexed only the
+/// first 1–3 messages, which is why short-keyword searches across older
+/// sessions felt "useless" rather than "slow" — the SQL itself was fast,
+/// but the index didn't see most of the conversation.
+///
+/// Bumping this constant relies on the next reindex pass to refresh each
+/// session's stored `content_text` from the parsers; the FTS table's
+/// `AFTER UPDATE` trigger then refreshes the index automatically. When
+/// the indexer eventually gains an `(mtime, size)` short-circuit
+/// (planned in H2.1), the migration must also bump a content-version
+/// flag so unchanged files still get reparsed once.
+pub const FTS_CONTENT_LIMIT: usize = 64 * 1024;
 
 pub fn is_system_content(trimmed: &str) -> bool {
     trimmed.starts_with("<environment_context")
