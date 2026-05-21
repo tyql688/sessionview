@@ -1,7 +1,7 @@
 {
   "name": "cc-session",
   "private": true,
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Desktop app for browsing local AI coding sessions",
   "author": "yury <yury.zero.21@gmail.com>",
   "type": "module",
