@@ -877,6 +877,70 @@ fn kimi_session_id_from_parent_directory() {
     assert_eq!(session.meta.id, "session-uuid-0001");
 }
 
+#[test]
+fn kimi_parse_session_tail_returns_only_last_n_messages() {
+    let dir = TempDir::new().unwrap();
+    // Mimic the on-disk layout: <hash>/<session-uuid>/wire.jsonl
+    let session_dir = dir.path().join("abc123").join("session-tail");
+    fs::create_dir_all(&session_dir).unwrap();
+    let wire_path = session_dir.join("wire.jsonl");
+
+    let mut content = String::new();
+    for i in 0..200 {
+        // Each ContentPart→text line emits exactly one assistant message.
+        content.push_str(&format!(
+            r#"{{"timestamp":{},"message":{{"type":"ContentPart","payload":{{"type":"text","text":"msg-{i}"}}}}}}
+"#,
+            1_700_000_000 + i,
+        ));
+    }
+    fs::write(&wire_path, content).unwrap();
+
+    let tail = cc_session_lib::providers::kimi::parser::parse_session_tail(&wire_path, 20)
+        .expect("tail parse");
+    assert_eq!(tail.messages.len(), 20);
+    assert!(
+        tail.messages
+            .first()
+            .map(|m| m.content.contains("msg-180"))
+            .unwrap_or(false),
+        "first tail message should be msg-180"
+    );
+    assert!(
+        tail.messages
+            .last()
+            .map(|m| m.content.contains("msg-199"))
+            .unwrap_or(false),
+        "last tail message should be msg-199"
+    );
+}
+
+#[test]
+fn kimi_parse_session_tail_returns_full_file_when_smaller_than_window() {
+    let dir = TempDir::new().unwrap();
+    let session_dir = dir.path().join("abc123").join("session-small");
+    fs::create_dir_all(&session_dir).unwrap();
+    let wire_path = session_dir.join("wire.jsonl");
+
+    let mut content = String::new();
+    for i in 0..5 {
+        content.push_str(&format!(
+            r#"{{"timestamp":{},"message":{{"type":"ContentPart","payload":{{"type":"text","text":"only-{i}"}}}}}}
+"#,
+            1_700_000_000 + i,
+        ));
+    }
+    fs::write(&wire_path, content).unwrap();
+
+    let tail = cc_session_lib::providers::kimi::parser::parse_session_tail(&wire_path, 100)
+        .expect("tail parse");
+    assert_eq!(
+        tail.messages.len(),
+        5,
+        "tail must return all messages when file is smaller than requested window"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Kimi subagent tests (extracted from SubagentEvent in parent wire.jsonl)
 // ---------------------------------------------------------------------------
@@ -1138,6 +1202,69 @@ fn antigravity_tool_calls_map_to_canonical_names_and_decode_args() {
 
     assert_eq!(parsed.meta.id, "conv-123");
     assert_eq!(parsed.meta.provider, Provider::Antigravity);
+}
+
+#[test]
+fn antigravity_parse_session_tail_returns_only_last_n_messages() {
+    let tmp = TempDir::new().unwrap();
+    let conv_dir = tmp.path().join("conv-tail");
+    let logs_dir = conv_dir.join(".system_generated").join("logs");
+    fs::create_dir_all(&logs_dir).unwrap();
+    let transcript_path = logs_dir.join("transcript.jsonl");
+
+    // Each PLANNER_RESPONSE step produces 1 message (assistant content).
+    // 200 steps → 200 messages, then ask for the last 20.
+    let mut content = String::new();
+    for i in 0..200 {
+        let ts = format!("2026-05-20T04:{:02}:{:02}Z", (i / 60) % 60, i % 60);
+        content.push_str(&format!(
+            r#"{{"step_index":{i},"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"{ts}","content":"msg-{i}"}}
+"#
+        ));
+    }
+    fs::write(&transcript_path, content).unwrap();
+
+    let tail =
+        cc_session_lib::providers::antigravity::parser::parse_session_tail(&transcript_path, 20)
+            .expect("tail parse");
+    assert_eq!(tail.messages.len(), 20);
+    let first = tail.messages.first().expect("first").content.clone();
+    let last = tail.messages.last().expect("last").content.clone();
+    assert!(
+        first.contains("msg-180"),
+        "first tail message should be msg-180, got {first:?}"
+    );
+    assert!(
+        last.contains("msg-199"),
+        "last tail message should be msg-199, got {last:?}"
+    );
+}
+
+#[test]
+fn antigravity_parse_session_tail_returns_full_file_when_smaller_than_window() {
+    let tmp = TempDir::new().unwrap();
+    let conv_dir = tmp.path().join("conv-small");
+    let logs_dir = conv_dir.join(".system_generated").join("logs");
+    fs::create_dir_all(&logs_dir).unwrap();
+    let transcript_path = logs_dir.join("transcript.jsonl");
+
+    let mut content = String::new();
+    for i in 0..5 {
+        content.push_str(&format!(
+            r#"{{"step_index":{i},"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-05-20T04:00:0{i}Z","content":"only-{i}"}}
+"#
+        ));
+    }
+    fs::write(&transcript_path, content).unwrap();
+
+    let tail =
+        cc_session_lib::providers::antigravity::parser::parse_session_tail(&transcript_path, 100)
+            .expect("tail parse");
+    assert_eq!(
+        tail.messages.len(),
+        5,
+        "tail must return all messages when file is smaller than requested window"
+    );
 }
 
 #[test]

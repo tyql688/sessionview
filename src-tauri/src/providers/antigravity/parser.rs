@@ -1,8 +1,8 @@
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
 
 use crate::models::{
@@ -10,6 +10,7 @@ use crate::models::{
 };
 use crate::provider::ParsedSession;
 use crate::provider_utils::{parse_rfc3339_timestamp, project_name_from_path, session_title};
+use crate::services::tail_reader::tail_byte_offset;
 use crate::tool_metadata::{
     build_tool_metadata, enrich_tool_metadata, ToolCallFacts, ToolResultFacts,
 };
@@ -520,81 +521,68 @@ pub fn find_workspace_by_display_content(first_user_msg: &str) -> Option<String>
     None
 }
 
-pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
-    let conversation_id = path
-        .parent() // logs/
-        .and_then(|p| p.parent()) // .system_generated/
-        .and_then(|p| p.parent()) // {conversation_id}/
-        .and_then(|p| p.file_name())
-        .and_then(|s| s.to_str())?
-        .to_string();
+/// Mutable scan state shared by the full-file parser and the tail-only
+/// parser. All per-step accumulation lives here so both entry points
+/// dispatch through the same `process_step` body.
+struct AntigravityScanAccum {
+    messages: Vec<Message>,
+    pending_tool_indices: VecDeque<usize>,
+    /// Absolute paths observed inside tool_call args — used by the full
+    /// parser to recover `project_path` when the history file doesn't
+    /// have an entry. The tail parser collects them too but discards them.
+    candidate_paths: Vec<String>,
+    first_user_msg: Option<String>,
+    first_timestamp: Option<String>,
+    last_timestamp: Option<String>,
+    current_model: Option<String>,
+    context_chars: usize,
+    /// Structured subagent links extracted from the transcript itself —
+    /// only populated by the full parser since the tail rarely sees the
+    /// INVOKE_SUBAGENT step (it lives near the start of the parent file).
+    child_session_ids: Vec<String>,
+    invoke_workspace: Option<String>,
+    parent_from_send: Option<String>,
+    parse_warning_count: u32,
+}
 
-    let file = File::open(path).ok()?;
-    let reader = BufReader::new(file);
-    let mut steps = Vec::new();
-    let mut parse_warning_count = 0;
-
-    for (line_idx, line) in reader.lines().enumerate() {
-        let line_str = match line {
-            Ok(s) => s,
-            Err(_) => {
-                parse_warning_count += 1;
-                continue;
-            }
-        };
-        if line_str.trim().is_empty() {
-            continue;
-        }
-        match serde_json::from_str::<Step>(&line_str) {
-            Ok(step) => steps.push(step),
-            Err(e) => {
-                log::warn!(
-                    "Malformed step at line {} in {}: {}",
-                    line_idx + 1,
-                    path.display(),
-                    e
-                );
-                parse_warning_count += 1;
-            }
+impl AntigravityScanAccum {
+    fn new() -> Self {
+        Self {
+            messages: Vec::new(),
+            pending_tool_indices: VecDeque::new(),
+            candidate_paths: Vec::new(),
+            first_user_msg: None,
+            first_timestamp: None,
+            last_timestamp: None,
+            current_model: None,
+            context_chars: 0,
+            child_session_ids: Vec::new(),
+            invoke_workspace: None,
+            parent_from_send: None,
+            parse_warning_count: 0,
         }
     }
 
-    if steps.is_empty() {
-        return None;
-    }
-
-    let mut messages: Vec<Message> = Vec::new();
-    let mut pending_tool_indices: std::collections::VecDeque<usize> =
-        std::collections::VecDeque::new();
-    let mut candidate_paths = Vec::new();
-
-    let mut first_user_msg: Option<String> = None;
-    let first_timestamp = steps.first().map(|s| s.created_at.as_str());
-    let last_timestamp = steps.last().map(|s| s.created_at.as_str());
-
-    let mut current_model: Option<String> = None;
-    let mut context_chars = 0;
-
-    // Structured subagent links extracted from the transcript itself:
-    // - INVOKE_SUBAGENT steps name this session's children and their workspace
-    // - send_message tool calls name this session's parent (when this file is
-    //   itself a subagent reporting back)
-    let mut child_session_ids: Vec<String> = Vec::new();
-    let mut invoke_workspace: Option<String> = None;
-    let mut parent_from_send: Option<String> = None;
-
-    for step in &steps {
+    /// Dispatch a single step into the running message stream. Called by
+    /// both `parse_session_file` (every step) and `parse_session_tail`
+    /// (only the tail window's steps) — they share this body to keep
+    /// rendering identical inside the overlap.
+    fn process_step(&mut self, step: &Step, conversation_id: &str) {
         let timestamp_str = Some(step.created_at.clone());
+        if self.first_timestamp.is_none() {
+            self.first_timestamp = Some(step.created_at.clone());
+        }
+        self.last_timestamp = Some(step.created_at.clone());
 
         if let Some(ref tool_calls) = step.tool_calls {
             for tc in tool_calls {
                 if let Some(ref args) = tc.args {
-                    extract_absolute_paths_from_value(args, &mut candidate_paths);
+                    extract_absolute_paths_from_value(args, &mut self.candidate_paths);
                 }
-                if parent_from_send.is_none() {
+                if self.parent_from_send.is_none() {
                     if let Some(recipient) = recipient_from_send_message(tc) {
                         if recipient != conversation_id {
-                            parent_from_send = Some(recipient);
+                            self.parent_from_send = Some(recipient);
                         }
                     }
                 }
@@ -608,12 +596,12 @@ pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
             let content = step.content.as_deref().unwrap_or("");
             let info = parse_invoke_subagent_content(content);
             for id in &info.conversation_ids {
-                if id != &conversation_id && !child_session_ids.contains(id) {
-                    child_session_ids.push(id.clone());
+                if id != conversation_id && !self.child_session_ids.contains(id) {
+                    self.child_session_ids.push(id.clone());
                 }
             }
-            if invoke_workspace.is_none() {
-                invoke_workspace = info.workspace.clone();
+            if self.invoke_workspace.is_none() {
+                self.invoke_workspace = info.workspace.clone();
             }
             Some(info)
         } else {
@@ -624,14 +612,14 @@ pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
             "USER_INPUT" => {
                 let content = step.content.clone().unwrap_or_default();
                 if let Some(m) = extract_model_from_content(&content) {
-                    current_model = Some(m);
+                    self.current_model = Some(m);
                 }
                 let clean = clean_user_content(&content);
-                context_chars += clean.len();
-                if first_user_msg.is_none() {
-                    first_user_msg = Some(clean.clone());
+                self.context_chars += clean.len();
+                if self.first_user_msg.is_none() {
+                    self.first_user_msg = Some(clean.clone());
                 }
-                messages.push(Message {
+                self.messages.push(Message {
                     role: MessageRole::User,
                     content: clean,
                     timestamp: timestamp_str,
@@ -639,7 +627,7 @@ pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
                     tool_input: None,
                     tool_metadata: None,
                     token_usage: None,
-                    model: current_model.clone(),
+                    model: self.current_model.clone(),
                     usage_hash: None,
                 });
             }
@@ -648,7 +636,7 @@ pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
                 if let Some(thinking) = &step.thinking {
                     thinking_len = thinking.len();
                     if !thinking.trim().is_empty() {
-                        messages.push(Message {
+                        self.messages.push(Message {
                             role: MessageRole::System,
                             content: format!("[thinking]\n{}", thinking.trim()),
                             timestamp: timestamp_str.clone(),
@@ -667,12 +655,11 @@ pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
                 if let Some(content) = &step.content {
                     assistant_content_len = content.len();
                     if !content.trim().is_empty() {
-                        // Estimate token usage
-                        let input_tokens = (context_chars / 4).max(1) as u32;
+                        let input_tokens = (self.context_chars / 4).max(1) as u32;
                         let output_tokens =
                             ((thinking_len + assistant_content_len) / 4).max(1) as u32;
 
-                        messages.push(Message {
+                        self.messages.push(Message {
                             role: MessageRole::Assistant,
                             content: content.clone(),
                             timestamp: timestamp_str.clone(),
@@ -685,7 +672,7 @@ pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
                                 cache_creation_input_tokens: 0,
                                 cache_read_input_tokens: 0,
                             }),
-                            model: current_model.clone(),
+                            model: self.current_model.clone(),
                             usage_hash: None,
                         });
                         has_assistant_msg = true;
@@ -694,16 +681,7 @@ pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
 
                 if let Some(tool_calls) = &step.tool_calls {
                     for (tc_idx, tc) in tool_calls.iter().enumerate() {
-                        // Decode antigravity's double-JSON arg encoding once
-                        // up front so both the persisted tool_input and the
-                        // summary-builder see real path / command / number
-                        // values instead of literal `"..."` blobs.
                         let decoded_args = tc.args.as_ref().map(decode_antigravity_value);
-                        // For `invoke_subagent` the `Subagents` array carries
-                        // each child's Prompt — extract them from the raw
-                        // (pre-decode) args so we don't depend on the value
-                        // round-tripping through serde_json, which often
-                        // chokes on agy's malformed escape sequences.
                         let subagent_prompts: Vec<String> = if tc.name == "invoke_subagent" {
                             invoke_subagent_prompts(
                                 tc.args.as_ref().and_then(|args| args.get("Subagents")),
@@ -724,18 +702,16 @@ pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
                             }));
                         }
                         let canonical = metadata.canonical_name.clone();
-                        let idx = messages.len();
+                        let idx = self.messages.len();
                         let tool_input_str = decoded_args
                             .as_ref()
                             .map(|args| serde_json::to_string(args).unwrap_or_default());
                         if let Some(ref args_str) = tool_input_str {
-                            context_chars += args_str.len();
+                            self.context_chars += args_str.len();
                         }
 
-                        // If we haven't attached token usage to an assistant message in this turn,
-                        // attach it to the first tool call message of the turn.
                         let token_usage = if !has_assistant_msg && tc_idx == 0 {
-                            let input_tokens = (context_chars / 4).max(1) as u32;
+                            let input_tokens = (self.context_chars / 4).max(1) as u32;
                             let output_tokens = (thinking_len / 4).max(1) as u32;
                             Some(TokenUsage {
                                 input_tokens,
@@ -748,12 +724,12 @@ pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
                         };
 
                         let model = if !has_assistant_msg && tc_idx == 0 {
-                            current_model.clone()
+                            self.current_model.clone()
                         } else {
                             None
                         };
 
-                        messages.push(Message {
+                        self.messages.push(Message {
                             role: MessageRole::Tool,
                             content: String::new(),
                             timestamp: timestamp_str.clone(),
@@ -764,18 +740,17 @@ pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
                             model,
                             usage_hash: None,
                         });
-                        pending_tool_indices.push_back(idx);
+                        self.pending_tool_indices.push_back(idx);
                     }
                 }
 
-                // Add assistant outputs to context_chars for future steps
-                context_chars += thinking_len;
-                context_chars += assistant_content_len;
+                self.context_chars += thinking_len;
+                self.context_chars += assistant_content_len;
             }
             "CONVERSATION_HISTORY" => {}
             _ => {
                 if step.source == "MODEL" || step.source == "SYSTEM" {
-                    if let Some(idx) = pending_tool_indices.pop_front() {
+                    if let Some(idx) = self.pending_tool_indices.pop_front() {
                         let invoke_children: Vec<String> = invoke_info
                             .as_ref()
                             .map(|info| {
@@ -787,9 +762,9 @@ pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
                             })
                             .unwrap_or_default();
 
-                        if let Some(msg) = messages.get_mut(idx) {
+                        if let Some(msg) = self.messages.get_mut(idx) {
                             let content = step.content.clone().unwrap_or_default();
-                            context_chars += content.len();
+                            self.context_chars += content.len();
                             msg.content = content;
 
                             if let Some(metadata) = msg.tool_metadata.as_mut() {
@@ -803,13 +778,6 @@ pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
                                     },
                                 );
 
-                                // Merge the conversationIds emitted by this
-                                // INVOKE_SUBAGENT result into the structured
-                                // metadata. The per-subagent Prompts (zipped
-                                // by position) were already attached when the
-                                // `invoke_subagent` tool_call was processed at
-                                // PLANNER_RESPONSE time, so we preserve them
-                                // here rather than overwriting.
                                 if !invoke_children.is_empty() {
                                     let prompts = metadata
                                         .structured
@@ -830,22 +798,43 @@ pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
             }
         }
     }
+}
+
+pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
+    let conversation_id = path
+        .parent() // logs/
+        .and_then(|p| p.parent()) // .system_generated/
+        .and_then(|p| p.parent()) // {conversation_id}/
+        .and_then(|p| p.file_name())
+        .and_then(|s| s.to_str())?
+        .to_string();
+
+    let file = File::open(path).ok()?;
+    let reader = BufReader::new(file);
+    let mut accum = AntigravityScanAccum::new();
+
+    scan_antigravity_lines(reader, path, &conversation_id, &mut accum);
+
+    if accum.messages.is_empty() {
+        return None;
+    }
 
     let history_workspaces = load_history_workspaces();
     let mut project_path = history_workspaces
         .get(&conversation_id)
         .cloned()
         .or_else(|| {
-            first_user_msg
+            accum
+                .first_user_msg
                 .as_ref()
                 .and_then(|msg| find_workspace_by_display_content(msg))
         })
-        .or_else(|| invoke_workspace.clone())
+        .or_else(|| accum.invoke_workspace.clone())
         .unwrap_or_default();
 
     if project_path.is_empty() {
         let known_workspaces: Vec<String> = history_workspaces.values().cloned().collect();
-        for p in &candidate_paths {
+        for p in &accum.candidate_paths {
             for ws in &known_workspaces {
                 if p.starts_with(ws) {
                     project_path = ws.clone();
@@ -874,25 +863,25 @@ pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
             (m.len(), mtime)
         })
         .unwrap_or((0, 0));
-    let message_count = messages.len() as u32;
+    let message_count = accum.messages.len() as u32;
 
     let mut content_text = String::new();
-    for msg in &messages {
+    for msg in &accum.messages {
         content_text.push_str(&msg.content);
         content_text.push(' ');
     }
 
-    let created_at = parse_rfc3339_timestamp(first_timestamp);
-    let updated_at = parse_rfc3339_timestamp(last_timestamp);
+    let created_at = parse_rfc3339_timestamp(accum.first_timestamp.as_deref());
+    let updated_at = parse_rfc3339_timestamp(accum.last_timestamp.as_deref());
 
-    let totals = token_totals_from_messages(&messages);
+    let totals = token_totals_from_messages(&accum.messages);
 
-    let is_sidechain = parent_from_send.is_some();
+    let is_sidechain = accum.parent_from_send.is_some();
 
     let meta = SessionMeta {
         id: conversation_id,
         provider: Provider::Antigravity,
-        title: session_title(first_user_msg.as_deref()),
+        title: session_title(accum.first_user_msg.as_deref()),
         project_path,
         project_name,
         created_at,
@@ -902,10 +891,10 @@ pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
         source_path: path.to_string_lossy().to_string(),
         is_sidechain,
         variant_name: None,
-        model: current_model,
+        model: accum.current_model,
         cc_version: None,
         git_branch: None,
-        parent_id: parent_from_send,
+        parent_id: accum.parent_from_send,
         input_tokens: totals.input_tokens,
         output_tokens: totals.output_tokens,
         cache_read_tokens: totals.cache_read_tokens,
@@ -914,12 +903,148 @@ pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
 
     Some(ParsedSession {
         meta,
-        messages,
+        messages: accum.messages,
         content_text,
-        parse_warning_count,
-        child_session_ids,
+        parse_warning_count: accum.parse_warning_count,
+        child_session_ids: accum.child_session_ids,
         usage_events: Vec::new(),
         source_mtime,
+    })
+}
+
+/// Read JSONL lines from `reader`, parse each as `Step`, and dispatch
+/// into `accum`. Shared between full-file and tail-only parsing.
+fn scan_antigravity_lines<R: BufRead>(
+    reader: R,
+    path: &Path,
+    conversation_id: &str,
+    accum: &mut AntigravityScanAccum,
+) {
+    for (line_idx, line) in reader.lines().enumerate() {
+        let line_str = match line {
+            Ok(s) => s,
+            Err(_) => {
+                accum.parse_warning_count += 1;
+                continue;
+            }
+        };
+        if line_str.trim().is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<Step>(&line_str) {
+            Ok(step) => accum.process_step(&step, conversation_id),
+            Err(e) => {
+                log::warn!(
+                    "Malformed step at line {} in {}: {}",
+                    line_idx + 1,
+                    path.display(),
+                    e
+                );
+                accum.parse_warning_count += 1;
+            }
+        }
+    }
+}
+
+/// Tail-only parse result. Mirrors `ClaudeTailResult` / `CodexTailResult`:
+/// just the trailing messages + the parse-warning count needed by
+/// `try_tail_fast_path` to build a `SessionMessagesWindow`.
+pub struct AntigravityTailResult {
+    pub messages: Vec<Message>,
+    pub parse_warning_count: u32,
+}
+
+/// Parse only the tail of an Antigravity transcript — the last
+/// `target_messages` (or so) emitted messages — by mmap'ing the file
+/// and seeking the BufReader past the byte offset of the first line we
+/// care about.
+///
+/// Trade-offs vs the full-file parser:
+/// - **Tool merging is best-effort at the boundary.** A tool-result step
+///   in the tail whose matching tool_call was earlier in the file
+///   surfaces as a standalone (unmerged) tool message. The background
+///   full-parse promote replaces the cache with the merged version
+///   once it completes.
+/// - **No project_path / parent_id derivation.** The caller already has
+///   `SessionMeta` from the DB; this function returns only the message
+///   slice + parse warnings. INVOKE_SUBAGENT steps almost always live
+///   near the top of the parent file, so the tail wouldn't see them
+///   anyway.
+/// - **Token estimates are undercounted near the boundary** because
+///   `context_chars` starts at 0 instead of including everything before
+///   the tail window. Acceptable for display; the indexer's full parse
+///   computes authoritative totals.
+pub fn parse_session_tail(path: &Path, target_messages: usize) -> Option<AntigravityTailResult> {
+    let conversation_id = path
+        .parent() // logs/
+        .and_then(|p| p.parent()) // .system_generated/
+        .and_then(|p| p.parent()) // {conversation_id}/
+        .and_then(|p| p.file_name())
+        .and_then(|s| s.to_str())?
+        .to_string();
+
+    // Antigravity steps emit ~1-3 messages on average (USER_INPUT = 1,
+    // PLANNER_RESPONSE can produce thinking + assistant + N tool calls).
+    // Over-scan generously so the tool_call ↔ tool_result pairing has a
+    // good chance of landing fully inside the parsed range.
+    let safety_buffer = target_messages / 2 + 100;
+    let scan_lines = target_messages.saturating_add(safety_buffer);
+    let window = match tail_byte_offset(path, scan_lines) {
+        Ok(w) => w,
+        Err(error) => {
+            log::warn!(
+                "failed to locate Antigravity session tail in '{}': {}",
+                path.display(),
+                error
+            );
+            return None;
+        }
+    };
+
+    let file = match File::open(path) {
+        Ok(f) => f,
+        Err(error) => {
+            log::warn!(
+                "failed to open Antigravity session for tail parse '{}': {}",
+                path.display(),
+                error
+            );
+            return None;
+        }
+    };
+    let mut reader = BufReader::new(file);
+    if window.start_offset > 0 {
+        if let Err(error) = reader.seek(SeekFrom::Start(window.start_offset)) {
+            log::warn!(
+                "failed to seek Antigravity session for tail parse '{}': {}",
+                path.display(),
+                error
+            );
+            return None;
+        }
+    }
+
+    let mut accum = AntigravityScanAccum::new();
+    scan_antigravity_lines(reader, path, &conversation_id, &mut accum);
+
+    if accum.messages.is_empty() {
+        log::debug!(
+            "Antigravity tail parse produced no messages for '{}'; falling back to full parse",
+            path.display()
+        );
+        return None;
+    }
+
+    // Trim to exactly `target_messages` — we over-scan for tool-pair
+    // merging at the boundary, but the caller asked for a specific window.
+    let len = accum.messages.len();
+    if len > target_messages {
+        accum.messages.drain(0..(len - target_messages));
+    }
+
+    Some(AntigravityTailResult {
+        messages: accum.messages,
+        parse_warning_count: accum.parse_warning_count,
     })
 }
 

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
@@ -10,6 +10,7 @@ use crate::provider::ParsedSession;
 use crate::provider_utils::{
     project_name_from_path, session_title, truncate_to_bytes, FTS_CONTENT_LIMIT, NO_PROJECT,
 };
+use crate::services::tail_reader::tail_byte_offset;
 use crate::tool_metadata::{
     build_tool_metadata, enrich_tool_metadata, ToolCallFacts, ToolResultFacts,
 };
@@ -145,6 +146,364 @@ fn subagent_title_from_meta(session_dir: &std::path::Path, agent_id: &str) -> Op
         .map(|s| s.to_string())
 }
 
+/// Mutable scan state shared by the full-file parent parser and the
+/// tail-only entry point. All cross-line state lives here so both
+/// callers dispatch through the same per-line body.
+struct KimiScanAccum {
+    messages: Vec<Message>,
+    first_user_message: Option<String>,
+    first_timestamp: Option<i64>,
+    last_timestamp: Option<i64>,
+    content_parts: Vec<String>,
+    /// call_id → message index, used to merge ToolResult payloads into
+    /// the matching ToolCall message.
+    call_id_map: HashMap<String, usize>,
+    /// Index of the most recent ToolCall, used by ToolCallPart to
+    /// append streamed argument chunks to the right message.
+    last_tool_call_idx: Option<usize>,
+    parse_warning_count: u32,
+}
+
+impl KimiScanAccum {
+    fn new() -> Self {
+        Self {
+            messages: Vec::new(),
+            first_user_message: None,
+            first_timestamp: None,
+            last_timestamp: None,
+            content_parts: Vec::new(),
+            call_id_map: HashMap::new(),
+            last_tool_call_idx: None,
+            parse_warning_count: 0,
+        }
+    }
+
+    /// Run the per-line wire.jsonl dispatch over `reader`, mutating
+    /// `self` with the messages / tool-call pairings / first-occurrence
+    /// trackers it observes. Called by both `parse_session_file`
+    /// (full-file) and `parse_session_tail` (mmap-seeked) — they share
+    /// this exact loop body to keep rendering identical inside any
+    /// overlap region.
+    fn scan_lines<R: BufRead>(&mut self, reader: R, path: &Path) {
+        for line in reader.lines() {
+            let line = match line {
+                Ok(l) => l,
+                Err(error) => {
+                    log::warn!(
+                        "failed to read Kimi session line from '{}': {}",
+                        path.display(),
+                        error
+                    );
+                    continue;
+                }
+            };
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            let entry: Value = match serde_json::from_str(&line) {
+                Ok(v) => v,
+                Err(error) => {
+                    log::warn!(
+                        "skipping malformed Kimi JSONL in '{}': {}",
+                        path.display(),
+                        error
+                    );
+                    self.parse_warning_count = self.parse_warning_count.saturating_add(1);
+                    continue;
+                }
+            };
+
+            let ts_secs = entry.get("timestamp").and_then(|v| v.as_f64());
+            let ts_epoch = ts_secs.map(|t| t as i64);
+
+            if let Some(ts) = ts_epoch {
+                if self.first_timestamp.is_none() {
+                    self.first_timestamp = Some(ts);
+                }
+                self.last_timestamp = Some(ts);
+            }
+
+            let message = match entry.get("message") {
+                Some(m) => m,
+                None => continue,
+            };
+
+            let msg_type = match message.get("type").and_then(|v| v.as_str()) {
+                Some(t) => t,
+                None => continue,
+            };
+
+            let payload = match message.get("payload") {
+                Some(p) => p,
+                None => continue,
+            };
+
+            let ts_str = ts_secs.map(|t| {
+                chrono::DateTime::from_timestamp(t as i64, ((t.fract()) * 1_000_000_000.0) as u32)
+                    .map(|dt| dt.to_rfc3339())
+                    .unwrap_or_default()
+            });
+
+            match msg_type {
+                "TurnBegin" => {
+                    if let Some(Value::String(text)) = payload.get("user_input") {
+                        if text.is_empty() {
+                            continue;
+                        }
+                        if self.first_user_message.is_none() {
+                            self.first_user_message = Some(text.to_string());
+                        }
+                        self.content_parts.push(text.to_string());
+                        self.messages.push(Message {
+                            role: MessageRole::User,
+                            content: text.to_string(),
+                            timestamp: ts_str.clone(),
+                            tool_name: None,
+                            tool_input: None,
+                            token_usage: None,
+                            model: None,
+                            usage_hash: None,
+                            tool_metadata: None,
+                        });
+                    } else if let Some(Value::Array(parts)) = payload.get("user_input") {
+                        let has_image = parts
+                            .iter()
+                            .any(|p| p.get("type").and_then(|t| t.as_str()) == Some("image_url"));
+                        let mut text_parts = Vec::new();
+                        for part in parts {
+                            let part_type =
+                                part.get("type").and_then(|t| t.as_str()).unwrap_or("text");
+                            match part_type {
+                                "text" => {
+                                    let text =
+                                        part.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                                    if has_image
+                                        && (text.contains("<image path=")
+                                            || text.trim() == "</image>")
+                                    {
+                                        continue;
+                                    }
+                                    if !text.is_empty() {
+                                        text_parts.push(text.to_string());
+                                    }
+                                }
+                                "image_url" => {
+                                    if let Some(url) = part
+                                        .get("image_url")
+                                        .and_then(|iu| iu.get("url"))
+                                        .and_then(|v| v.as_str())
+                                    {
+                                        text_parts.push(format!("[Image: source: {url}]"));
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        let text = text_parts.join("\n");
+                        if text.is_empty() {
+                            continue;
+                        }
+                        if self.first_user_message.is_none() {
+                            let title_text = text
+                                .lines()
+                                .find(|l| !l.starts_with("[Image:"))
+                                .unwrap_or(&text)
+                                .to_string();
+                            self.first_user_message = Some(title_text);
+                        }
+                        self.content_parts.push(text.clone());
+                        self.messages.push(Message {
+                            role: MessageRole::User,
+                            content: text,
+                            timestamp: ts_str.clone(),
+                            tool_name: None,
+                            tool_input: None,
+                            token_usage: None,
+                            model: None,
+                            usage_hash: None,
+                            tool_metadata: None,
+                        });
+                    }
+                }
+                "ContentPart" => {
+                    let part_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                    match part_type {
+                        "think" => {
+                            let think_text =
+                                payload.get("think").and_then(|v| v.as_str()).unwrap_or("");
+                            if !think_text.is_empty() {
+                                self.messages.push(Message {
+                                    role: MessageRole::System,
+                                    content: format!("[thinking]\n{think_text}"),
+                                    timestamp: ts_str.clone(),
+                                    tool_name: None,
+                                    tool_input: None,
+                                    token_usage: None,
+                                    model: None,
+                                    usage_hash: None,
+                                    tool_metadata: None,
+                                });
+                            }
+                        }
+                        "text" => {
+                            let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                            if !text.is_empty() {
+                                self.content_parts.push(text.to_string());
+                                self.messages.push(Message {
+                                    role: MessageRole::Assistant,
+                                    content: text.to_string(),
+                                    timestamp: ts_str.clone(),
+                                    tool_name: None,
+                                    tool_input: None,
+                                    token_usage: None,
+                                    model: None,
+                                    usage_hash: None,
+                                    tool_metadata: None,
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                "ToolCall" => {
+                    let call_id = payload.get("id").and_then(|v| v.as_str());
+                    let func = payload.get("function");
+                    let raw_name = func
+                        .and_then(|f| f.get("name"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    let arguments_str = func
+                        .and_then(|f| f.get("arguments"))
+                        .and_then(|v| v.as_str());
+
+                    let input_value = parse_json_value(arguments_str);
+                    let metadata = build_tool_metadata(ToolCallFacts {
+                        provider: Provider::Kimi,
+                        raw_name,
+                        input: input_value.as_ref(),
+                        call_id,
+                        assistant_id: None,
+                    });
+                    let display_name = metadata.canonical_name.clone();
+                    let tool_input = arguments_str.map(|s| s.to_string());
+
+                    let idx = self.messages.len();
+                    if let Some(cid) = call_id {
+                        self.call_id_map.insert(cid.to_string(), idx);
+                    }
+                    self.last_tool_call_idx = Some(idx);
+                    self.messages.push(Message {
+                        role: MessageRole::Tool,
+                        content: String::new(),
+                        timestamp: ts_str.clone(),
+                        tool_name: Some(display_name.to_string()),
+                        tool_input,
+                        token_usage: None,
+                        model: None,
+                        usage_hash: None,
+                        tool_metadata: Some(metadata),
+                    });
+                }
+                "ToolCallPart" => {
+                    if let Some(part) = payload.get("arguments_part").and_then(|v| v.as_str()) {
+                        if let Some(idx) = self.last_tool_call_idx {
+                            if idx < self.messages.len()
+                                && self.messages[idx].role == MessageRole::Tool
+                            {
+                                let current =
+                                    self.messages[idx].tool_input.clone().unwrap_or_default();
+                                let merged = if current.is_empty() {
+                                    part.to_string()
+                                } else {
+                                    format!("{}{}", current, part)
+                                };
+                                self.messages[idx].tool_input = Some(merged.clone());
+                                if let Ok(value) = serde_json::from_str::<Value>(&merged) {
+                                    if let Some(meta) = self.messages[idx].tool_metadata.as_mut() {
+                                        let old_ids = meta.ids.clone();
+                                        let old_mcp = meta.mcp.clone();
+                                        let new_meta = build_tool_metadata(ToolCallFacts {
+                                            provider: Provider::Kimi,
+                                            raw_name: &meta.raw_name,
+                                            input: Some(&value),
+                                            call_id: None,
+                                            assistant_id: None,
+                                        });
+                                        *meta = new_meta;
+                                        meta.ids = old_ids;
+                                        meta.mcp = old_mcp;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                "ToolResult" => {
+                    let call_id = payload.get("tool_call_id").and_then(|v| v.as_str());
+                    let tool_name = call_id
+                        .and_then(|cid| self.call_id_map.get(cid))
+                        .copied()
+                        .and_then(|idx| self.messages.get(idx))
+                        .and_then(|msg| msg.tool_name.as_deref());
+                    let output = extract_tool_output(payload, tool_name);
+
+                    if !output.is_empty() {
+                        self.content_parts.push(output.clone());
+                    }
+                    if let Some(idx) = call_id.and_then(|cid| self.call_id_map.get(cid)).copied() {
+                        if idx < self.messages.len() {
+                            self.messages[idx].content = output;
+                            enrich_kimi_tool_metadata(&mut self.messages[idx], payload);
+                            continue;
+                        }
+                    }
+                    self.messages.push(Message {
+                        role: MessageRole::Tool,
+                        content: output,
+                        timestamp: ts_str.clone(),
+                        tool_name: None,
+                        tool_input: None,
+                        token_usage: None,
+                        model: None,
+                        usage_hash: None,
+                        tool_metadata: None,
+                    });
+                }
+                "StatusUpdate" => {
+                    if let Some(tu) = payload.get("token_usage") {
+                        let input_other =
+                            tu.get("input_other").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                        let output = tu.get("output").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                        let cache_read = tu
+                            .get("input_cache_read")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0) as u32;
+                        let cache_creation = tu
+                            .get("input_cache_creation")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0) as u32;
+
+                        let usage = TokenUsage {
+                            input_tokens: input_other + cache_read + cache_creation,
+                            output_tokens: output,
+                            cache_read_input_tokens: cache_read,
+                            cache_creation_input_tokens: cache_creation,
+                        };
+
+                        if let Some(last_msg) = self.messages.iter_mut().rev().find(|m| {
+                            m.role == MessageRole::Assistant || m.role == MessageRole::Tool
+                        }) {
+                            last_msg.token_usage = Some(usage);
+                        }
+                    }
+                }
+                _ => continue,
+            }
+        }
+    }
+}
+
 impl KimiProvider {
     /// Parse a wire.jsonl file and return the main session plus any embedded subagent sessions.
     pub fn parse_session_with_subagents(
@@ -206,345 +565,22 @@ impl KimiProvider {
         let file_size = metadata.len();
 
         let reader = BufReader::new(file);
-        let mut messages = Vec::new();
-        let mut first_user_message: Option<String> = None;
-        let mut first_timestamp: Option<i64> = None;
-        let mut last_timestamp: Option<i64> = None;
-        let mut content_parts: Vec<String> = Vec::new();
-        // Map call_id -> message index for merging ToolResult into ToolCall
-        let mut call_id_map: HashMap<String, usize> = HashMap::new();
-        // Track the most recent ToolCall for ToolCallPart append
-        let mut last_tool_call_idx: Option<usize> = None;
-        let mut parse_warning_count: u32 = 0;
+        let mut accum = KimiScanAccum::new();
+        accum.scan_lines(reader, path);
 
-        for line in reader.lines() {
-            let line = match line {
-                Ok(l) => l,
-                Err(error) => {
-                    log::warn!(
-                        "failed to read Kimi session line from '{}': {}",
-                        path.display(),
-                        error
-                    );
-                    continue;
-                }
-            };
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            let entry: Value = match serde_json::from_str(&line) {
-                Ok(v) => v,
-                Err(error) => {
-                    log::warn!(
-                        "skipping malformed Kimi JSONL in '{}': {}",
-                        path.display(),
-                        error
-                    );
-                    parse_warning_count = parse_warning_count.saturating_add(1);
-                    continue;
-                }
-            };
-
-            // Extract timestamp (float seconds)
-            let ts_secs = entry.get("timestamp").and_then(|v| v.as_f64());
-            let ts_epoch = ts_secs.map(|t| t as i64);
-
-            if let Some(ts) = ts_epoch {
-                if first_timestamp.is_none() {
-                    first_timestamp = Some(ts);
-                }
-                last_timestamp = Some(ts);
-            }
-
-            // Get message object
-            let message = match entry.get("message") {
-                Some(m) => m,
-                None => continue,
-            };
-
-            let msg_type = match message.get("type").and_then(|v| v.as_str()) {
-                Some(t) => t,
-                None => continue,
-            };
-
-            let payload = match message.get("payload") {
-                Some(p) => p,
-                None => continue,
-            };
-
-            let ts_str = ts_secs.map(|t| {
-                chrono::DateTime::from_timestamp(t as i64, ((t.fract()) * 1_000_000_000.0) as u32)
-                    .map(|dt| dt.to_rfc3339())
-                    .unwrap_or_default()
-            });
-
-            match msg_type {
-                "TurnBegin" => {
-                    // Extract user input text + images
-                    if let Some(Value::String(text)) = payload.get("user_input") {
-                        if text.is_empty() {
-                            continue;
-                        }
-                        if first_user_message.is_none() {
-                            first_user_message = Some(text.to_string());
-                        }
-                        content_parts.push(text.to_string());
-                        messages.push(Message {
-                            role: MessageRole::User,
-                            content: text.to_string(),
-                            timestamp: ts_str.clone(),
-                            tool_name: None,
-                            tool_input: None,
-                            token_usage: None,
-                            model: None,
-                            usage_hash: None,
-                            tool_metadata: None,
-                        });
-                    } else if let Some(Value::Array(parts)) = payload.get("user_input") {
-                        let has_image = parts
-                            .iter()
-                            .any(|p| p.get("type").and_then(|t| t.as_str()) == Some("image_url"));
-                        let mut text_parts = Vec::new();
-                        for part in parts {
-                            let part_type =
-                                part.get("type").and_then(|t| t.as_str()).unwrap_or("text");
-                            match part_type {
-                                "text" => {
-                                    let text =
-                                        part.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                                    // Skip <image path="..."> and </image> markers when inline image data exists
-                                    if has_image
-                                        && (text.contains("<image path=")
-                                            || text.trim() == "</image>")
-                                    {
-                                        continue;
-                                    }
-                                    if !text.is_empty() {
-                                        text_parts.push(text.to_string());
-                                    }
-                                }
-                                "image_url" => {
-                                    // Extract image: prefer local path from prompt-cache, fall back to data URI
-                                    if let Some(url) = part
-                                        .get("image_url")
-                                        .and_then(|iu| iu.get("url"))
-                                        .and_then(|v| v.as_str())
-                                    {
-                                        text_parts.push(format!("[Image: source: {url}]"));
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                        let text = text_parts.join("\n");
-                        if text.is_empty() {
-                            continue;
-                        }
-                        if first_user_message.is_none() {
-                            // Strip image markers from title
-                            let title_text = text
-                                .lines()
-                                .find(|l| !l.starts_with("[Image:"))
-                                .unwrap_or(&text)
-                                .to_string();
-                            first_user_message = Some(title_text);
-                        }
-                        content_parts.push(text.clone());
-                        messages.push(Message {
-                            role: MessageRole::User,
-                            content: text,
-                            timestamp: ts_str.clone(),
-                            tool_name: None,
-                            tool_input: None,
-                            token_usage: None,
-                            model: None,
-                            usage_hash: None,
-                            tool_metadata: None,
-                        });
-                    }
-                }
-                "ContentPart" => {
-                    let part_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                    match part_type {
-                        "think" => {
-                            let think_text =
-                                payload.get("think").and_then(|v| v.as_str()).unwrap_or("");
-                            if !think_text.is_empty() {
-                                messages.push(Message {
-                                    role: MessageRole::System,
-                                    content: format!("[thinking]\n{think_text}"),
-                                    timestamp: ts_str.clone(),
-                                    tool_name: None,
-                                    tool_input: None,
-                                    token_usage: None,
-                                    model: None,
-                                    usage_hash: None,
-                                    tool_metadata: None,
-                                });
-                            }
-                        }
-                        "text" => {
-                            let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                            if !text.is_empty() {
-                                content_parts.push(text.to_string());
-                                messages.push(Message {
-                                    role: MessageRole::Assistant,
-                                    content: text.to_string(),
-                                    timestamp: ts_str.clone(),
-                                    tool_name: None,
-                                    tool_input: None,
-                                    token_usage: None,
-                                    model: None,
-                                    usage_hash: None,
-                                    tool_metadata: None,
-                                });
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                "ToolCall" => {
-                    let call_id = payload.get("id").and_then(|v| v.as_str());
-                    let func = payload.get("function");
-                    let raw_name = func
-                        .and_then(|f| f.get("name"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
-                    let arguments_str = func
-                        .and_then(|f| f.get("arguments"))
-                        .and_then(|v| v.as_str());
-
-                    let input_value = parse_json_value(arguments_str);
-                    let metadata = build_tool_metadata(ToolCallFacts {
-                        provider: Provider::Kimi,
-                        raw_name,
-                        input: input_value.as_ref(),
-                        call_id,
-                        assistant_id: None,
-                    });
-                    let display_name = metadata.canonical_name.clone();
-                    let tool_input = arguments_str.map(|s| s.to_string());
-
-                    let idx = messages.len();
-                    if let Some(cid) = call_id {
-                        call_id_map.insert(cid.to_string(), idx);
-                    }
-                    last_tool_call_idx = Some(idx);
-                    messages.push(Message {
-                        role: MessageRole::Tool,
-                        content: String::new(),
-                        timestamp: ts_str.clone(),
-                        tool_name: Some(display_name.to_string()),
-                        tool_input,
-                        token_usage: None,
-                        model: None,
-                        usage_hash: None,
-                        tool_metadata: Some(metadata),
-                    });
-                }
-                "ToolCallPart" => {
-                    if let Some(part) = payload.get("arguments_part").and_then(|v| v.as_str()) {
-                        if let Some(idx) = last_tool_call_idx {
-                            if idx < messages.len() && messages[idx].role == MessageRole::Tool {
-                                let current = messages[idx].tool_input.clone().unwrap_or_default();
-                                let merged = if current.is_empty() {
-                                    part.to_string()
-                                } else {
-                                    format!("{}{}", current, part)
-                                };
-                                messages[idx].tool_input = Some(merged.clone());
-                                // Re-parse and update metadata if JSON is now valid
-                                if let Ok(value) = serde_json::from_str::<Value>(&merged) {
-                                    if let Some(meta) = messages[idx].tool_metadata.as_mut() {
-                                        let old_ids = meta.ids.clone();
-                                        let old_mcp = meta.mcp.clone();
-                                        let new_meta = build_tool_metadata(ToolCallFacts {
-                                            provider: Provider::Kimi,
-                                            raw_name: &meta.raw_name,
-                                            input: Some(&value),
-                                            call_id: None,
-                                            assistant_id: None,
-                                        });
-                                        *meta = new_meta;
-                                        meta.ids = old_ids;
-                                        meta.mcp = old_mcp;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                "ToolResult" => {
-                    // Merge output into the matching ToolCall message
-                    let call_id = payload.get("tool_call_id").and_then(|v| v.as_str());
-                    let tool_name = call_id
-                        .and_then(|cid| call_id_map.get(cid))
-                        .copied()
-                        .and_then(|idx| messages.get(idx))
-                        .and_then(|msg| msg.tool_name.as_deref());
-                    let output = extract_tool_output(payload, tool_name);
-
-                    if !output.is_empty() {
-                        content_parts.push(output.clone());
-                    }
-                    if let Some(idx) = call_id.and_then(|cid| call_id_map.get(cid)).copied() {
-                        if idx < messages.len() {
-                            messages[idx].content = output;
-                            enrich_kimi_tool_metadata(&mut messages[idx], payload);
-                            continue;
-                        }
-                    }
-                    // Fallback: standalone output message
-                    messages.push(Message {
-                        role: MessageRole::Tool,
-                        content: output,
-                        timestamp: ts_str.clone(),
-                        tool_name: None,
-                        tool_input: None,
-                        token_usage: None,
-                        model: None,
-                        usage_hash: None,
-                        tool_metadata: None,
-                    });
-                }
-                "StatusUpdate" => {
-                    if let Some(tu) = payload.get("token_usage") {
-                        let input_other =
-                            tu.get("input_other").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                        let output = tu.get("output").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                        let cache_read = tu
-                            .get("input_cache_read")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0) as u32;
-                        let cache_creation = tu
-                            .get("input_cache_creation")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0) as u32;
-
-                        let usage = TokenUsage {
-                            input_tokens: input_other + cache_read + cache_creation,
-                            output_tokens: output,
-                            cache_read_input_tokens: cache_read,
-                            cache_creation_input_tokens: cache_creation,
-                        };
-
-                        // Attach to last assistant or tool message
-                        if let Some(last_msg) = messages.iter_mut().rev().find(|m| {
-                            m.role == MessageRole::Assistant || m.role == MessageRole::Tool
-                        }) {
-                            last_msg.token_usage = Some(usage);
-                        }
-                    }
-                }
-                // Skip: metadata, TurnEnd, StepBegin, etc.
-                _ => continue,
-            }
-        }
-
-        if messages.is_empty() {
+        if accum.messages.is_empty() {
             return None;
         }
+
+        let KimiScanAccum {
+            messages,
+            first_user_message,
+            first_timestamp,
+            last_timestamp,
+            content_parts,
+            parse_warning_count,
+            ..
+        } = accum;
 
         // Derive session ID from directory name (session UUID)
         let session_id = path
@@ -1081,4 +1117,97 @@ impl KimiProvider {
             source_mtime: 0,
         })
     }
+}
+
+/// Tail-only parse result for Kimi parent sessions. Carries only the
+/// trailing messages + the parse-warning count needed by
+/// `try_tail_fast_path` to assemble a `SessionMessagesWindow`.
+pub struct KimiTailResult {
+    pub messages: Vec<Message>,
+    pub parse_warning_count: u32,
+}
+
+/// Parse only the tail of a Kimi parent wire.jsonl — the last
+/// `target_messages` (or so) emitted messages — by mmap'ing the file
+/// and seeking the BufReader past the byte offset of the first line
+/// we care about.
+///
+/// **Parent sessions only.** Kimi subagents have no file of their own
+/// (they're embedded as `SubagentEvent` lines in the parent's
+/// wire.jsonl), so a tail-of-parent does not contain the subagent's
+/// messages in any usable form. The caller must gate this entry on
+/// the session being a parent.
+///
+/// Trade-offs vs the full-file parser:
+/// - **Tool merging is best-effort at the boundary.** A `ToolResult`
+///   line in the tail whose matching `ToolCall` was earlier in the
+///   file surfaces as a standalone (unmerged) tool message. The
+///   background full-parse promote replaces the cache with the merged
+///   version once it completes.
+/// - **No metadata derivation.** The caller already has `SessionMeta`
+///   from the DB; this function returns only the message slice + parse
+///   warnings.
+pub fn parse_session_tail(path: &Path, target_messages: usize) -> Option<KimiTailResult> {
+    // Pull a small extra buffer above the requested window so a tool
+    // call/result pair that happens to span the cut boundary has a
+    // reasonable chance of landing fully inside the parsed range.
+    let safety_buffer = target_messages / 4 + 50;
+    let scan_lines = target_messages.saturating_add(safety_buffer);
+    let window = match tail_byte_offset(path, scan_lines) {
+        Ok(w) => w,
+        Err(error) => {
+            log::warn!(
+                "failed to locate Kimi session tail in '{}': {}",
+                path.display(),
+                error
+            );
+            return None;
+        }
+    };
+
+    let file = match File::open(path) {
+        Ok(f) => f,
+        Err(error) => {
+            log::warn!(
+                "failed to open Kimi session for tail parse '{}': {}",
+                path.display(),
+                error
+            );
+            return None;
+        }
+    };
+    let mut reader = BufReader::new(file);
+    if window.start_offset > 0 {
+        if let Err(error) = reader.seek(SeekFrom::Start(window.start_offset)) {
+            log::warn!(
+                "failed to seek Kimi session for tail parse '{}': {}",
+                path.display(),
+                error
+            );
+            return None;
+        }
+    }
+
+    let mut accum = KimiScanAccum::new();
+    accum.scan_lines(reader, path);
+
+    if accum.messages.is_empty() {
+        log::debug!(
+            "Kimi tail parse produced no messages for '{}'; falling back to full parse",
+            path.display()
+        );
+        return None;
+    }
+
+    // Trim to exactly `target_messages` — over-scanned for tool-pair
+    // merging at the boundary, but the caller asked for a specific window.
+    let len = accum.messages.len();
+    if len > target_messages {
+        accum.messages.drain(0..(len - target_messages));
+    }
+
+    Some(KimiTailResult {
+        messages: accum.messages,
+        parse_warning_count: accum.parse_warning_count,
+    })
 }

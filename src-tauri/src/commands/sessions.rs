@@ -346,14 +346,25 @@ fn try_tail_fast_path(
     if offset >= 0 {
         return Ok(None);
     }
-    // CC-Mirror sessions are parsed by the Claude parser; Codex has its
-    // own `parse_session_tail`. Kimi / OpenCode / Antigravity stay on
-    // the slow path because either the parser doesn't expose a tail
-    // entry yet or the underlying storage isn't per-session-file.
+    // CC-Mirror sessions are parsed by the Claude parser; Codex,
+    // Antigravity, and Kimi each have their own `parse_session_tail`.
+    // OpenCode is SQLite-backed and doesn't fit the line-tail model.
     if !matches!(
         meta.provider,
-        Provider::Claude | Provider::CcMirror | Provider::Codex
+        Provider::Claude
+            | Provider::CcMirror
+            | Provider::Codex
+            | Provider::Antigravity
+            | Provider::Kimi
     ) {
+        return Ok(None);
+    }
+    // Kimi subagents are embedded as `SubagentEvent` lines inside the
+    // parent's wire.jsonl — `source_path` points at the parent, and a
+    // tail of the parent does not contain the subagent's reconstructed
+    // messages in any usable form. Fall through to the full parse for
+    // sidechains; only parent sessions can tail.
+    if meta.provider == Provider::Kimi && meta.is_sidechain {
         return Ok(None);
     }
     if meta.source_path.is_empty() {
@@ -389,6 +400,19 @@ fn try_tail_fast_path(
         }
         Provider::Codex => {
             match crate::providers::codex::parser::parse_session_tail(&path, target_messages) {
+                Some(t) => (t.messages, t.parse_warning_count),
+                None => return Ok(None),
+            }
+        }
+        Provider::Antigravity => {
+            match crate::providers::antigravity::parser::parse_session_tail(&path, target_messages)
+            {
+                Some(t) => (t.messages, t.parse_warning_count),
+                None => return Ok(None),
+            }
+        }
+        Provider::Kimi => {
+            match crate::providers::kimi::parser::parse_session_tail(&path, target_messages) {
                 Some(t) => (t.messages, t.parse_warning_count),
                 None => return Ok(None),
             }
