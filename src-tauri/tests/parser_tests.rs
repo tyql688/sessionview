@@ -1205,6 +1205,50 @@ fn antigravity_tool_calls_map_to_canonical_names_and_decode_args() {
 }
 
 #[test]
+fn antigravity_user_message_includes_uploaded_image_markers() {
+    let tmp = TempDir::new().unwrap();
+    let conv_dir = tmp.path().join("conv-img");
+    let logs_dir = conv_dir.join(".system_generated").join("logs");
+    fs::create_dir_all(&logs_dir).unwrap();
+    let transcript_path = logs_dir.join("transcript.jsonl");
+
+    // USER_INPUT step with an uploaded image listed in ADDITIONAL_METADATA.
+    // The image path is the canonical antigravity layout:
+    // ~/.gemini/antigravity-cli/brain/{conv_id}/uploaded_media_{ts}.png
+    let img_path = "/tmp/brain/conv-img/uploaded_media_111.png";
+    let user_content = format!(
+        r#"<USER_REQUEST>\n这些是什么\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: 2026-05-20T12:00:00+08:00.\n\nThe user has uploaded 1 image(s):\n- {img_path}\nYou can embed this image in an artifact if you need the USER to review it.\n</ADDITIONAL_METADATA>"#
+    );
+    let line = format!(
+        r#"{{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-05-20T04:00:00Z","content":"{}"}}"#,
+        user_content.replace('"', "\\\"")
+    );
+    fs::write(&transcript_path, line).unwrap();
+
+    let parsed =
+        cc_session_lib::providers::antigravity::parser::parse_session_file(&transcript_path)
+            .expect("antigravity image transcript must parse");
+    let user_msg = parsed
+        .messages
+        .iter()
+        .find(|m| m.role == MessageRole::User)
+        .expect("user message");
+    assert!(
+        user_msg
+            .content
+            .contains(&format!("[Image: source: {img_path}]")),
+        "user message should carry image marker, got: {}",
+        user_msg.content
+    );
+    // Bare text from <USER_REQUEST> still survives alongside the marker.
+    assert!(
+        user_msg.content.contains("这些是什么"),
+        "user message must keep the original text, got: {}",
+        user_msg.content
+    );
+}
+
+#[test]
 fn antigravity_parse_session_tail_returns_only_last_n_messages() {
     let tmp = TempDir::new().unwrap();
     let conv_dir = tmp.path().join("conv-tail");

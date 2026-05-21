@@ -2,61 +2,30 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-use crate::models::{Message, Provider};
+use crate::models::Message;
+use crate::services::image_markers::{extract_image_source_segments, extract_path_from_segment};
 
 // ---------------------------------------------------------------------------
-// Trait
+// Path extraction
 // ---------------------------------------------------------------------------
 
-pub trait ImageCacheProvider: Send + Sync {
-    fn extract_image_paths(&self, messages: &[Message]) -> Vec<String>;
-}
-
-// ---------------------------------------------------------------------------
-// Claude implementation
-// ---------------------------------------------------------------------------
-
-pub struct ClaudeImageCacheProvider;
-
-impl ImageCacheProvider for ClaudeImageCacheProvider {
-    fn extract_image_paths(&self, messages: &[Message]) -> Vec<String> {
-        use crate::providers::claude::images::extract_image_source_segments;
-
-        let mut paths = Vec::new();
-        for msg in messages {
-            for segment in extract_image_source_segments(&msg.content) {
-                if let Some(path) = extract_path_from_segment(&segment) {
-                    paths.push(path.to_string());
-                }
+/// Walk `messages` and return every `[Image: source: ...]` payload as
+/// an owned `String`, in document order. Provider-agnostic — works for
+/// any parser that emits the universal marker format.
+///
+/// Data URIs and remote URLs are returned alongside file paths; the
+/// caller (e.g. `ImageCacheService::cache_images`) filters out anything
+/// that isn't a readable local file.
+pub fn extract_image_paths(messages: &[Message]) -> Vec<String> {
+    let mut paths = Vec::new();
+    for msg in messages {
+        for segment in extract_image_source_segments(&msg.content) {
+            if let Some(path) = extract_path_from_segment(&segment) {
+                paths.push(path.to_string());
             }
         }
-        paths
     }
-}
-
-fn extract_path_from_segment(segment: &str) -> Option<&str> {
-    let trimmed = segment.strip_prefix("[Image: source: ")?;
-    let path = trimmed.strip_suffix(']')?;
-    let path = path.trim();
-    if path.is_empty() {
-        return None;
-    }
-    Some(path)
-}
-
-// ---------------------------------------------------------------------------
-// Provider lookup helpers
-// ---------------------------------------------------------------------------
-
-pub fn image_cache_provider_for(provider: &Provider) -> Option<Box<dyn ImageCacheProvider>> {
-    match provider {
-        Provider::Claude => Some(Box::new(ClaudeImageCacheProvider)),
-        _ => None,
-    }
-}
-
-pub fn image_cache_provider_for_key(key: &str) -> Option<Box<dyn ImageCacheProvider>> {
-    Provider::parse(key).and_then(|p| image_cache_provider_for(&p))
+    paths
 }
 
 // ---------------------------------------------------------------------------
@@ -69,7 +38,7 @@ pub fn image_cache_data_dir() -> Option<PathBuf> {
 }
 
 // ---------------------------------------------------------------------------
-// ImageCacheService
+// Service
 // ---------------------------------------------------------------------------
 
 pub struct ImageCacheService {
@@ -93,8 +62,12 @@ impl ImageCacheService {
         format!("{hex}.{ext}")
     }
 
-    pub fn cache_images(&self, provider: &dyn ImageCacheProvider, messages: &[Message]) {
-        let paths = provider.extract_image_paths(messages);
+    /// Copy every readable local image referenced by `messages` into
+    /// the cache directory (idempotent — existing cache entries are
+    /// left untouched). Data URIs and remote URLs naturally fall
+    /// through because `Path::exists()` returns false for them.
+    pub fn cache_images(&self, messages: &[Message]) {
+        let paths = extract_image_paths(messages);
         if paths.is_empty() {
             return;
         }
@@ -128,8 +101,10 @@ impl ImageCacheService {
         }
     }
 
-    pub fn cleanup_images(&self, provider: &dyn ImageCacheProvider, messages: &[Message]) {
-        let paths = provider.extract_image_paths(messages);
+    /// Remove every cache entry referenced by `messages`. Used when a
+    /// session is permanently deleted so we don't leak disk space.
+    pub fn cleanup_images(&self, messages: &[Message]) {
+        let paths = extract_image_paths(messages);
         for path in &paths {
             let cache_name = Self::cache_name(path);
             let cache_path = self.cache_dir.join(&cache_name);
@@ -171,14 +146,13 @@ mod tests {
     }
 
     #[test]
-    fn claude_extracts_image_paths() {
-        let provider = ClaudeImageCacheProvider;
+    fn extract_image_paths_returns_inner_paths_in_order() {
         let messages = vec![
             msg("Here is the result [Image: source: /tmp/test-image-cache/sess/1.png] done"),
             msg("Another [Image: source: /tmp/screenshot.jpg] and [Image: source: /tmp/test-image-cache/sess/2.png]"),
             msg("No images here"),
         ];
-        let paths = provider.extract_image_paths(&messages);
+        let paths = extract_image_paths(&messages);
         assert_eq!(
             paths,
             vec![
@@ -190,10 +164,9 @@ mod tests {
     }
 
     #[test]
-    fn claude_returns_empty_for_no_images() {
-        let provider = ClaudeImageCacheProvider;
+    fn extract_image_paths_returns_empty_for_no_images() {
         let messages = vec![msg("just text"), msg("more text")];
-        assert!(provider.extract_image_paths(&messages).is_empty());
+        assert!(extract_image_paths(&messages).is_empty());
     }
 
     #[test]
@@ -228,15 +201,14 @@ mod tests {
 
         assert!(service.resolve_cached_path(img_path_str).is_none());
 
-        let provider = ClaudeImageCacheProvider;
         let messages = vec![msg(&format!("[Image: source: {img_path_str}]"))];
-        service.cache_images(&provider, &messages);
+        service.cache_images(&messages);
 
         let cached = service.resolve_cached_path(img_path_str);
         assert!(cached.is_some());
         assert_eq!(std::fs::read(cached.unwrap()).unwrap(), b"fake png data");
 
-        service.cleanup_images(&provider, &messages);
+        service.cleanup_images(&messages);
         assert!(service.resolve_cached_path(img_path_str).is_none());
     }
 
@@ -244,11 +216,24 @@ mod tests {
     fn cache_skips_missing_original() {
         let tmp = TempDir::new().unwrap();
         let service = ImageCacheService::new(tmp.path());
-        let provider = ClaudeImageCacheProvider;
         let messages = vec![msg("[Image: source: /nonexistent/path/img.png]")];
-        service.cache_images(&provider, &messages);
+        service.cache_images(&messages);
         assert!(service
             .resolve_cached_path("/nonexistent/path/img.png")
+            .is_none());
+    }
+
+    #[test]
+    fn cache_skips_data_uri_source() {
+        // Codex emits inline base64 markers for tiny screenshots. The
+        // path test fails (data URIs aren't files), so cache_images
+        // must silently skip without panicking.
+        let tmp = TempDir::new().unwrap();
+        let service = ImageCacheService::new(tmp.path());
+        let messages = vec![msg("[Image: source: data:image/png;base64,iVBOR...]")];
+        service.cache_images(&messages);
+        assert!(service
+            .resolve_cached_path("data:image/png;base64,iVBOR...")
             .is_none());
     }
 }

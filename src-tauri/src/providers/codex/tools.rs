@@ -1,5 +1,8 @@
 use serde_json::Value;
 
+// Provider-agnostic marker helpers — see `services::image_markers`.
+pub use crate::services::image_markers::{extract_image_source_segments, is_image_placeholder};
+
 pub fn extract_codex_content(payload: &Value) -> String {
     match payload.get("content") {
         Some(Value::String(s)) => s.clone(),
@@ -189,31 +192,6 @@ pub fn build_codex_user_message(payload: &Value, response_image_segments: &[Stri
     );
 
     merged_text
-}
-
-pub fn extract_image_source_segments(text: &str) -> Vec<String> {
-    let mut segments = Vec::new();
-    let mut remaining = text;
-
-    while let Some(start) = remaining.find("[Image") {
-        let image_slice = &remaining[start..];
-        let Some(end_offset) = image_slice.find(']') else {
-            break;
-        };
-
-        let candidate = &image_slice[..=end_offset];
-        if candidate.contains("source:") {
-            segments.push(candidate.to_string());
-        }
-
-        remaining = &image_slice[end_offset + 1..];
-    }
-
-    segments
-}
-
-pub fn is_image_placeholder(segment: &str) -> bool {
-    segment.starts_with("[Image") && !segment.contains("source:")
 }
 
 fn image_source_marker(source: &str) -> String {

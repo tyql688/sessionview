@@ -9,7 +9,7 @@ use crate::db::Database;
 use crate::models::{Provider, SessionMeta, TreeNode, TreeNodeType};
 use crate::pricing::{self, PRICING_CATALOG_JSON_KEY};
 use crate::provider::{ParsedSession, SessionProvider, TokenStatRow};
-use crate::services::image_cache::{image_cache_provider_for, ImageCacheService};
+use crate::services::image_cache::ImageCacheService;
 
 #[derive(Clone)]
 pub struct Indexer {
@@ -174,11 +174,9 @@ impl Indexer {
                 );
             }
 
-            if let Some(cache_provider) = image_cache_provider_for(provider_kind) {
-                let image_service = ImageCacheService::new(&self.data_dir);
-                for parsed in sessions {
-                    image_service.cache_images(cache_provider.as_ref(), &parsed.messages);
-                }
+            let image_service = ImageCacheService::new(&self.data_dir);
+            for parsed in sessions {
+                image_service.cache_images(&parsed.messages);
             }
 
             total += count;

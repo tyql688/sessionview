@@ -1,4 +1,5 @@
 pub(crate) mod image_cache;
+pub(crate) mod image_markers;
 pub mod load_cancel;
 mod persisted_output_cache;
 mod provider_snapshots;

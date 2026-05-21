@@ -46,6 +46,60 @@ fn clean_user_content(content: &str) -> String {
     content.trim().to_string()
 }
 
+/// Extract uploaded image absolute paths from a USER_INPUT step's
+/// `<ADDITIONAL_METADATA>` block. Antigravity records images as plain
+/// text bullets:
+///
+/// ```text
+/// <ADDITIONAL_METADATA>
+/// ...
+/// The user has uploaded 1 image(s):
+/// - /Users/.../brain/{conv_id}/uploaded_media_{ts}.png
+/// You can embed this image in an artifact ...
+/// </ADDITIONAL_METADATA>
+/// ```
+///
+/// Returns paths in document order; empty when no uploads are listed
+/// or the metadata block is absent.
+fn extract_uploaded_image_paths(content: &str) -> Vec<String> {
+    let Some(start_idx) = content.find("<ADDITIONAL_METADATA>") else {
+        return Vec::new();
+    };
+    let after_open = start_idx + "<ADDITIONAL_METADATA>".len();
+    let body_end = content[after_open..]
+        .find("</ADDITIONAL_METADATA>")
+        .map(|off| after_open + off)
+        .unwrap_or(content.len());
+    let body = &content[after_open..body_end];
+
+    let Some(header_idx) = body.find("The user has uploaded ") else {
+        return Vec::new();
+    };
+    // The uploads list lives on the lines after the "uploaded N image(s):"
+    // header until either an empty line or the next prose line that does
+    // not start with "- ". Stop the scan at the first such break so we
+    // don't accidentally absorb later metadata bullets.
+    let after_header = match body[header_idx..].find('\n') {
+        Some(off) => &body[header_idx + off + 1..],
+        None => return Vec::new(),
+    };
+    let mut paths = Vec::new();
+    for line in after_header.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            break;
+        }
+        let Some(rest) = trimmed.strip_prefix("- ") else {
+            break;
+        };
+        let path = rest.trim();
+        if !path.is_empty() {
+            paths.push(path.to_string());
+        }
+    }
+    paths
+}
+
 /// Output of scanning an `INVOKE_SUBAGENT` step: the conversationId of each
 /// spawned subagent plus the first workspace URI declared in that block.
 ///
@@ -614,7 +668,23 @@ impl AntigravityScanAccum {
                 if let Some(m) = extract_model_from_content(&content) {
                     self.current_model = Some(m);
                 }
-                let clean = clean_user_content(&content);
+                let mut clean = clean_user_content(&content);
+                // Append uploaded-image markers so the UI can render
+                // them (and the shared image cache picks them up).
+                // First-user-msg / title still uses the bare text — see
+                // `provider_utils::session_title` which strips markers.
+                let image_paths = extract_uploaded_image_paths(&content);
+                if !image_paths.is_empty() {
+                    if !clean.is_empty() {
+                        clean.push('\n');
+                    }
+                    for (i, path) in image_paths.iter().enumerate() {
+                        if i > 0 {
+                            clean.push('\n');
+                        }
+                        clean.push_str(&format!("[Image: source: {path}]"));
+                    }
+                }
                 self.context_chars += clean.len();
                 if self.first_user_msg.is_none() {
                     self.first_user_msg = Some(clean.clone());
@@ -1056,6 +1126,57 @@ mod tests {
     const PARENT_A: &str = "11111111-1111-4111-a111-111111111111";
     const CHILD_A: &str = "22222222-2222-4222-a222-222222222222";
     const CHILD_B: &str = "33333333-3333-4333-a333-333333333333";
+
+    #[test]
+    fn extract_uploaded_image_paths_returns_empty_when_no_metadata_block() {
+        assert!(extract_uploaded_image_paths("<USER_REQUEST>just text</USER_REQUEST>").is_empty());
+    }
+
+    #[test]
+    fn extract_uploaded_image_paths_returns_empty_when_metadata_has_no_uploads() {
+        let content = r#"<USER_REQUEST>hi</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-05-20T12:00:00+08:00.
+</ADDITIONAL_METADATA>"#;
+        assert!(extract_uploaded_image_paths(content).is_empty());
+    }
+
+    #[test]
+    fn extract_uploaded_image_paths_parses_single_upload() {
+        let content = r#"<USER_REQUEST>这些都是什么</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-05-20T12:00:00+08:00.
+
+The user has uploaded 1 image(s):
+- /tmp/brain/conv-1/uploaded_media_111.png
+You can embed this image in an artifact if you need the USER to review it.
+</ADDITIONAL_METADATA>"#;
+        let paths = extract_uploaded_image_paths(content);
+        assert_eq!(paths, vec!["/tmp/brain/conv-1/uploaded_media_111.png"]);
+    }
+
+    #[test]
+    fn extract_uploaded_image_paths_parses_multiple_uploads_and_stops_at_prose() {
+        let content = r#"<ADDITIONAL_METADATA>
+The user has uploaded 2 image(s):
+- /tmp/a.png
+- /tmp/b.jpg
+You can embed these images in an artifact.
+</ADDITIONAL_METADATA>"#;
+        let paths = extract_uploaded_image_paths(content);
+        assert_eq!(paths, vec!["/tmp/a.png", "/tmp/b.jpg"]);
+    }
+
+    #[test]
+    fn extract_uploaded_image_paths_handles_missing_closing_tag() {
+        // Truncated transcript — the open tag exists but the closing one
+        // doesn't. Should not panic; should still collect upload lines.
+        let content = "<ADDITIONAL_METADATA>\nThe user has uploaded 1 image(s):\n- /tmp/x.png";
+        assert_eq!(
+            extract_uploaded_image_paths(content),
+            vec!["/tmp/x.png".to_string()]
+        );
+    }
 
     #[test]
     fn parse_invoke_subagent_extracts_all_conversation_ids_and_workspace() {

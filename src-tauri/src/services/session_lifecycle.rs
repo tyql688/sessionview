@@ -4,9 +4,7 @@ use std::sync::Mutex;
 use crate::db::Database;
 use crate::models::TrashMeta;
 use crate::provider::{FileAction, RestoreAction, SessionProvider};
-use crate::services::image_cache::{
-    image_cache_data_dir, image_cache_provider_for, image_cache_provider_for_key, ImageCacheService,
-};
+use crate::services::image_cache::{image_cache_data_dir, ImageCacheService};
 use crate::services::{resolve_session_deletion, SourceSyncService};
 use crate::trash_state::{
     add_shared_deletion, atomic_write_json, read_trash_meta, remove_shared_deletion,
@@ -77,15 +75,12 @@ impl<'a> SessionLifecycleService<'a> {
         let deletion = resolve_session_deletion(self.db, session_id)?;
 
         // Clean cached images before deleting session data
-        if let Some(cache_provider) = image_cache_provider_for(&deletion.meta.provider) {
-            if let Ok(loaded) = deletion
-                .provider
-                .load_messages(session_id, &deletion.meta.source_path)
-            {
-                if let Some(data_dir) = image_cache_data_dir() {
-                    ImageCacheService::new(&data_dir)
-                        .cleanup_images(cache_provider.as_ref(), &loaded.messages);
-                }
+        if let Ok(loaded) = deletion
+            .provider
+            .load_messages(session_id, &deletion.meta.source_path)
+        {
+            if let Some(data_dir) = image_cache_data_dir() {
+                ImageCacheService::new(&data_dir).cleanup_images(&loaded.messages);
             }
         }
 
@@ -513,9 +508,6 @@ fn runtime_for_trash_entry(entry: &TrashMeta) -> Option<Box<dyn SessionProvider>
 
 /// Clean cached images for a trash entry, trying original path first then trash copy.
 fn cleanup_cached_images_for_trash(entry: &TrashMeta, trash_dir: &std::path::Path) {
-    let Some(cache_provider) = image_cache_provider_for_key(&entry.provider) else {
-        return;
-    };
     let Some(runtime) = runtime_for_trash_entry(entry) else {
         return;
     };
@@ -527,8 +519,7 @@ fn cleanup_cached_images_for_trash(entry: &TrashMeta, trash_dir: &std::path::Pat
         });
     if let Ok(loaded) = loaded {
         if let Some(data_dir) = image_cache_data_dir() {
-            ImageCacheService::new(&data_dir)
-                .cleanup_images(cache_provider.as_ref(), &loaded.messages);
+            ImageCacheService::new(&data_dir).cleanup_images(&loaded.messages);
         }
     }
 }

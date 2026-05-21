@@ -91,48 +91,14 @@ pub fn merge_image_placeholders_with_sources(placeholder_text: &str, meta_text: 
     merged
 }
 
-pub fn extract_image_source_segments(text: &str) -> Vec<String> {
-    let mut segments = Vec::new();
-    let mut remaining = text;
-
-    while let Some(start) = remaining.find("[Image") {
-        let image_slice = &remaining[start..];
-        let Some(end_offset) = image_slice.find(']') else {
-            break;
-        };
-
-        let candidate = &image_slice[..=end_offset];
-        if let Some(source) = parse_image_source_segment(candidate) {
-            segments.push(source);
-        }
-
-        remaining = &image_slice[end_offset + 1..];
-    }
-
-    segments
-}
-
-pub fn is_image_placeholder(segment: &str) -> bool {
-    segment.starts_with("[Image") && parse_image_source_segment(segment).is_none()
-}
-
-fn parse_image_source_segment(segment: &str) -> Option<String> {
-    if !segment.starts_with("[Image") || !segment.ends_with(']') {
-        return None;
-    }
-
-    let inner = &segment["[Image".len()..segment.len() - 1];
-    let source = inner
-        .strip_prefix(": source:")
-        .or_else(|| inner.strip_prefix(" source:"))?
-        .trim();
-
-    if source.is_empty() {
-        return None;
-    }
-
-    Some(format!("[Image: source: {source}]"))
-}
+// `extract_image_source_segments`, `is_image_placeholder`, and the
+// shared `parse_image_source_segment` validator live in
+// `services::image_markers` because every provider's parser emits the
+// same `[Image: source: ...]` marker — re-export the ones this module
+// already exposed so existing callers compile unchanged.
+pub use crate::services::image_markers::{
+    extract_image_source_segments, is_image_placeholder, parse_image_source_segment,
+};
 
 #[cfg(test)]
 mod tests {

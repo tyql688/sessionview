@@ -4,7 +4,7 @@ use crate::db::Database;
 use crate::models::Provider;
 use crate::pricing::{self, PRICING_CATALOG_JSON_KEY};
 use crate::provider::TokenStatRow;
-use crate::services::image_cache::{image_cache_provider_for, ImageCacheService};
+use crate::services::image_cache::ImageCacheService;
 
 pub struct SourceSyncService<'a> {
     db: &'a Database,
@@ -89,13 +89,12 @@ impl<'a> SourceSyncService<'a> {
             }
         }
 
-        // Cache images for providers that support it
-        if let Some(cache_provider) = image_cache_provider_for(&provider) {
-            if let Some(data_dir) = crate::services::image_cache::image_cache_data_dir() {
-                let image_service = ImageCacheService::new(&data_dir);
-                for parsed in &sessions {
-                    image_service.cache_images(cache_provider.as_ref(), &parsed.messages);
-                }
+        // Cache images for all providers (universal marker extractor
+        // filters out remote/data URI sources that aren't files).
+        if let Some(data_dir) = crate::services::image_cache::image_cache_data_dir() {
+            let image_service = ImageCacheService::new(&data_dir);
+            for parsed in &sessions {
+                image_service.cache_images(&parsed.messages);
             }
         }
 
