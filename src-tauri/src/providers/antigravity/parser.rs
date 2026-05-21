@@ -400,10 +400,23 @@ pub(super) fn decode_antigravity_value(value: &Value) -> Value {
             return None;
         }
         let escaped = escape_control_chars_for_json(raw);
-        if escaped == raw {
-            return None;
+        if escaped != raw {
+            if let Ok(parsed) = serde_json::from_str::<Value>(&escaped) {
+                return Some(parsed);
+            }
         }
-        serde_json::from_str::<Value>(&escaped).ok()
+        // Last-resort lenient unwrap: agy occasionally truncates the
+        // inner double-encoded payload mid-string (`...<truncated N
+        // bytes>` marker, no closing `"`). serde_json refuses such
+        // input, so for any value that *looks* like an outer
+        // JSON-encoded string but won't round-trip, manually strip the
+        // outer quotes and decode the common escape sequences. This
+        // produces readable diff content for truncated Edit tool calls
+        // instead of leaving literal `"` / `\n` glyphs in the UI.
+        if first == '"' {
+            return Some(Value::String(lenient_unwrap_json_string(raw)));
+        }
+        None
     }
 
     fn walk(value: &Value, depth: usize) -> Value {
@@ -442,6 +455,62 @@ fn escape_control_chars_for_json(s: &str) -> String {
             '\r' => out.push_str("\\r"),
             c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
             c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Lenient fallback for the truncation-marker case in
+/// `try_decode_string`. Strips the outer `"..."` quotes (if present)
+/// and unescapes the common JSON escapes by hand so the diff renderer
+/// gets readable text instead of a literal `"`+`\n` salad.
+///
+/// Not a full JSON string parser — intentionally narrow. Bogus escapes
+/// pass through unchanged so we never silently lose information.
+fn lenient_unwrap_json_string(raw: &str) -> String {
+    let mut inner = raw;
+    if let Some(stripped) = inner.strip_prefix('"') {
+        inner = stripped;
+    }
+    // Only strip the trailing quote when it actually closes the string —
+    // for the truncated case it's missing and we keep all the bytes.
+    if inner.ends_with('"') && !inner.ends_with("\\\"") {
+        inner = &inner[..inner.len() - 1];
+    }
+
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek() {
+            Some(&'n') => {
+                out.push('\n');
+                chars.next();
+            }
+            Some(&'t') => {
+                out.push('\t');
+                chars.next();
+            }
+            Some(&'r') => {
+                out.push('\r');
+                chars.next();
+            }
+            Some(&'"') => {
+                out.push('"');
+                chars.next();
+            }
+            Some(&'\\') => {
+                out.push('\\');
+                chars.next();
+            }
+            Some(&'/') => {
+                out.push('/');
+                chars.next();
+            }
+            _ => out.push('\\'),
         }
     }
     out
@@ -1308,6 +1377,36 @@ But this real block IS valid:
         let input = json!({ "note": "this is just text, not JSON" });
         let out = decode_antigravity_value(&input);
         assert_eq!(out["note"], json!("this is just text, not JSON"));
+    }
+
+    #[test]
+    fn decode_antigravity_value_lenient_unwraps_truncated_payload() {
+        // Real agy bug: large `replace_file_content` payloads get
+        // truncated mid-string by agy itself, leaving an opening `"`
+        // and a `<truncated N bytes>` marker but no closing `"`.
+        // serde_json refuses such input; the lenient fallback should
+        // still hand us readable text (no leading `"`, no literal
+        // `\n` glyphs) so the Edit diff renders properly.
+        let truncated = "\"fn build_codex_runtime() {\\n    let x = 1;\\n    println!(\\\"hi\\\");\\n}\\n<truncated 1929 bytes>";
+        let input = json!({ "ReplacementContent": truncated });
+        let out = decode_antigravity_value(&input);
+        let decoded = out["ReplacementContent"].as_str().expect("string");
+        assert!(
+            !decoded.starts_with('"'),
+            "leading quote should be stripped, got: {decoded:?}"
+        );
+        assert!(
+            decoded.contains("fn build_codex_runtime() {\n"),
+            "literal `\\n` should be decoded to a real newline, got: {decoded:?}"
+        );
+        assert!(
+            decoded.contains("println!(\"hi\");"),
+            "escaped quotes should be unescaped, got: {decoded:?}"
+        );
+        assert!(
+            decoded.contains("<truncated 1929 bytes>"),
+            "truncation marker should survive so users see why content is short, got: {decoded:?}"
+        );
     }
 
     #[test]
