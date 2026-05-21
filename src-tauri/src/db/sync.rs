@@ -208,13 +208,19 @@ impl Database {
     pub fn clear_usage_stats(&self) -> Result<(), rusqlite::Error> {
         let conn = self.lock_write()?;
         conn.execute("DELETE FROM session_token_stats", [])?;
-        // Keep the denormalized totals consistent with the now-empty stats.
+        // Keep the denormalized totals consistent with the now-empty stats,
+        // and invalidate the incremental-scan freshness snapshot so the
+        // following reindex re-parses every file and rewrites token stats.
+        // Without resetting `source_mtime`, `scan_incremental` would see
+        // every file's `(size, mtime)` matching the DB and skip it — leaving
+        // the zeroed totals permanently in place.
         conn.execute(
             "UPDATE sessions SET
                 input_tokens = 0,
                 output_tokens = 0,
                 cache_read_tokens = 0,
-                cache_write_tokens = 0",
+                cache_write_tokens = 0,
+                source_mtime = 0",
             [],
         )?;
         Ok(())
@@ -613,6 +619,56 @@ mod tests {
             })
             .unwrap();
         assert_eq!(usage_rows, 0);
+    }
+
+    #[test]
+    fn clear_usage_stats_resets_source_mtime_so_next_scan_reparses() {
+        // Regression: `clear_usage_stats` used to leave `sessions.source_mtime`
+        // intact. The next `Indexer::reindex` would then call
+        // `scan_incremental(&known)`, every file's `(size, mtime)` would still
+        // match the snapshot, and `partition_files_by_freshness` would route
+        // them all into `unchanged_source_paths` — skipping the parse pass
+        // that rewrites `session_token_stats`. Result: all token stats
+        // permanently zero until the user manually edited every transcript.
+        let dir = TempDir::new().unwrap();
+        let db = Database::open(dir.path()).unwrap();
+        let meta = sample_meta("session-mtime");
+        db.sync_provider_snapshot(
+            &Provider::Claude,
+            &[ParsedSession {
+                meta: meta.clone(),
+                messages: Vec::new(),
+                content_text: String::new(),
+                parse_warning_count: 0,
+                child_session_ids: Vec::new(),
+                usage_events: Vec::new(),
+                source_mtime: 1_775_635_200,
+            }],
+            true,
+            &[],
+        )
+        .unwrap();
+
+        let known_before = db
+            .source_states_for_provider(Provider::Claude.key())
+            .unwrap();
+        assert_eq!(
+            known_before.get(&meta.source_path).map(|s| s.mtime),
+            Some(1_775_635_200),
+            "precondition: sync recorded the source mtime",
+        );
+
+        db.clear_usage_stats().unwrap();
+
+        let known_after = db
+            .source_states_for_provider(Provider::Claude.key())
+            .unwrap();
+        assert_eq!(
+            known_after.get(&meta.source_path).map(|s| s.mtime),
+            Some(0),
+            "clear_usage_stats must invalidate the freshness snapshot \
+             so scan_incremental reparses every file",
+        );
     }
 
     #[test]
