@@ -7,6 +7,12 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-05-21
+
+### Fixed
+
+- "Refresh usage" no longer wipes token statistics for unchanged sessions (06f4896)
+
 ## [0.3.29] - 2026-05-01
 
 ### Fixed
