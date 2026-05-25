@@ -7,6 +7,21 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-05-25
+
+### Changed
+
+- Kimi provider now reads sessions from `~/.kimi-code/` (kimi-code 0.1.1 CLI replaces legacy kimi-cli); legacy `~/.kimi/` sessions require running `kimi migrate` to remain visible (9ee8aaa)
+
+### Added
+
+- Kimi subagents appear as separate sessions linked to their parent, with titles pulled from the spawning Agent tool's description (9ee8aaa)
+
+### Fixed
+
+- Kimi token usage is now tagged on the assistant text of each turn rather than the trailing tool result, so the model badge and cost render on the right message (9ee8aaa)
+- Kimi auto-injected `<system-reminder>` permission banners no longer pollute the transcript or session title (9ee8aaa)
+
 ## [0.4.2] - 2026-05-21
 
 ### Fixed
