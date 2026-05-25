@@ -984,7 +984,7 @@ fn kimi_load_messages_round_trips_through_source_path() {
     let loaded = provider
         .load_messages(&s.meta.id, &s.meta.source_path)
         .expect("load_messages");
-    assert_eq!(loaded.messages.len(), s.messages.len() as usize);
+    assert_eq!(loaded.messages.len(), s.messages.len());
 }
 
 #[test]
