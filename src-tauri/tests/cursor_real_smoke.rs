@@ -38,13 +38,13 @@ fn scan_real_cursor_directory() {
     let mut saw_tool = false;
     for s in &parsed {
         eprintln!(
-            "  id={:?} side={} msgs={} title={:?} project={:?} path={}",
+            "  id={:?} side={} msgs={} model={:?} title={:?} project={:?}",
             s.meta.id,
             s.meta.is_sidechain,
             s.meta.message_count,
+            s.meta.model,
             s.meta.title,
             s.meta.project_name,
-            s.meta.source_path,
         );
 
         assert_eq!(s.meta.provider, Provider::Cursor);

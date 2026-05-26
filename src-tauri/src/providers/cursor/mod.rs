@@ -17,14 +17,13 @@
 //! pick up the parent's workspace path through `store.db`.
 
 mod parser;
+mod store_db;
 mod tools;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
-use rusqlite::Connection;
-use serde_json::Value;
 
 use crate::models::{Provider, SessionMeta};
 use crate::provider::{
@@ -154,68 +153,12 @@ impl CursorProvider {
         (mains, subs)
     }
 
-    /// Cursor stores the workspace path inside `<user_info>` blobs in
-    /// `store.db`. Read each blob, json-decode it, and look for the
-    /// `Workspace Path:` line.
-    fn workspace_path_from_store_db(&self, store_db: &Path) -> Option<String> {
-        let conn = Connection::open(store_db)
-            .map_err(|e| {
-                log::warn!(
-                    "failed to open Cursor store.db '{}': {e}",
-                    store_db.display()
-                );
-                e
-            })
-            .ok()?;
-        let mut stmt = conn
-            .prepare("SELECT data FROM blobs")
-            .map_err(|e| {
-                log::warn!(
-                    "failed to prepare Cursor store.db query '{}': {e}",
-                    store_db.display()
-                );
-                e
-            })
-            .ok()?;
-        let rows = stmt
-            .query_map([], |row| row.get::<_, Vec<u8>>(0))
-            .map_err(|e| {
-                log::warn!(
-                    "failed to query Cursor store.db rows '{}': {e}",
-                    store_db.display()
-                );
-                e
-            })
-            .ok()?;
-        for row in rows {
-            let Ok(bytes) = row else { continue };
-            // Try JSON shape first (legacy CLI sessions stored a JSON
-            // envelope around the text). Fall back to a raw scan over
-            // the bytes if the blob is binary (protobuf chats).
-            if let Ok(value) = serde_json::from_slice::<Value>(&bytes) {
-                if let Some(content) = value.get("content").and_then(Value::as_str) {
-                    if let Some(p) = tools::extract_workspace_path(content) {
-                        return Some(p);
-                    }
-                }
-            }
-            let text = String::from_utf8_lossy(&bytes);
-            if let Some(p) = tools::extract_workspace_path(text.as_ref()) {
-                return Some(p);
-            }
-        }
-        None
-    }
-
-    /// If we recovered a workspace path from the session's `store.db`,
-    /// overwrite `meta.project_path` + `meta.project_name` with it so
-    /// they survive non-trivial CLI-sanitised project keys (paths
-    /// containing dashes, hidden dirs, etc).
-    fn apply_store_workspace_path(
-        &self,
-        session: &mut ParsedSession,
-        stores: &HashMap<String, PathBuf>,
-    ) {
+    /// Enrich `session` with everything we can pull from the
+    /// matching `store.db`: workspace path (more reliable than the
+    /// sanitised dir name), last-used model alias, and inline images
+    /// rewritten into shareable `[Image: source: ...]` markers so the
+    /// frontend's existing renderer picks them up.
+    fn apply_store_metadata(&self, session: &mut ParsedSession, stores: &HashMap<String, PathBuf>) {
         let lookup_id = session
             .meta
             .parent_id
@@ -224,11 +167,58 @@ impl CursorProvider {
         let Some(store) = stores.get(lookup_id) else {
             return;
         };
-        let Some(path) = self.workspace_path_from_store_db(store) else {
-            return;
-        };
-        session.meta.project_name = project_name_from_path(&path);
-        session.meta.project_path = path;
+        let info = store_db::read_store_db(store, &session.meta.id);
+        if let Some(path) = info.workspace_path {
+            session.meta.project_name = project_name_from_path(&path);
+            session.meta.project_path = path;
+        }
+        if let Some(model) = info.model {
+            session.meta.model = Some(model);
+        }
+        if !info.image_paths.is_empty() {
+            substitute_image_placeholders(&mut session.messages, &info.image_paths);
+        }
+    }
+}
+
+/// Walk every user message and replace `[Image #N]` placeholders with
+/// concrete `[Image: source: <cached-path>]` markers from `paths`.
+/// Multiple placeholders within one message are handled by repeated
+/// substitution. `N` is 1-indexed; out-of-range references are left
+/// untouched so the user at least sees the original placeholder.
+fn substitute_image_placeholders(messages: &mut [crate::models::Message], paths: &[PathBuf]) {
+    if paths.is_empty() {
+        return;
+    }
+    for message in messages.iter_mut() {
+        if !message.content.contains("[Image #") {
+            continue;
+        }
+        let mut rewritten = String::with_capacity(message.content.len() + 64);
+        let mut remaining = message.content.as_str();
+        while let Some(start) = remaining.find("[Image #") {
+            rewritten.push_str(&remaining[..start]);
+            let after = &remaining[start + "[Image #".len()..];
+            let Some(end_rel) = after.find(']') else {
+                rewritten.push_str(&remaining[start..]);
+                remaining = "";
+                break;
+            };
+            let n_str = &after[..end_rel];
+            match n_str.parse::<usize>() {
+                Ok(n) if n >= 1 && n <= paths.len() => {
+                    let path = paths[n - 1].to_string_lossy();
+                    rewritten.push_str(&format!("[Image: source: {path}]"));
+                }
+                _ => {
+                    // Preserve the original placeholder unchanged.
+                    rewritten.push_str(&remaining[start..start + "[Image #".len() + end_rel + 1]);
+                }
+            }
+            remaining = &after[end_rel + 1..];
+        }
+        rewritten.push_str(remaining);
+        message.content = rewritten;
     }
 }
 
@@ -270,7 +260,7 @@ impl SessionProvider for CursorProvider {
                     return None;
                 }
                 let mut session = parser::parse_session(path, None)?;
-                self.apply_store_workspace_path(&mut session, &stores);
+                self.apply_store_metadata(&mut session, &stores);
                 Some(session)
             })
             .collect();
@@ -288,7 +278,7 @@ impl SessionProvider for CursorProvider {
                 if !parent_is_cli {
                     return None; // parent is IDE — drop the child too.
                 }
-                self.apply_store_workspace_path(&mut session, &stores);
+                self.apply_store_metadata(&mut session, &stores);
                 Some(session)
             })
             .collect();
@@ -313,7 +303,7 @@ impl SessionProvider for CursorProvider {
         if !stores.contains_key(lookup) {
             return Ok(Vec::new()); // IDE session — skip.
         }
-        self.apply_store_workspace_path(&mut session, &stores);
+        self.apply_store_metadata(&mut session, &stores);
         Ok(vec![session])
     }
 
@@ -372,17 +362,39 @@ impl SessionProvider for CursorProvider {
         // On permanent delete, also remove the store.db directory so
         // future scans don't keep treating this id as a CLI session.
         let chats = self.chats_dir();
-        let Ok(buckets) = std::fs::read_dir(&chats) else {
-            return;
-        };
-        for bucket in buckets.flatten() {
-            let candidate = bucket.path().join(session_id);
-            if candidate.is_dir() {
-                if let Err(error) = std::fs::remove_dir_all(&candidate) {
-                    log::warn!(
-                        "failed to remove Cursor store.db dir '{}': {error}",
-                        candidate.display()
-                    );
+        if let Ok(buckets) = std::fs::read_dir(&chats) {
+            for bucket in buckets.flatten() {
+                let candidate = bucket.path().join(session_id);
+                if candidate.is_dir() {
+                    if let Err(error) = std::fs::remove_dir_all(&candidate) {
+                        log::warn!(
+                            "failed to remove Cursor store.db dir '{}': {error}",
+                            candidate.display()
+                        );
+                    }
+                }
+            }
+        }
+
+        // Drop any inline images we extracted from this session into
+        // the shared image cache. Filenames are prefixed with
+        // `cursor-<sessionId>-` so we can clean them up surgically.
+        if let Some(cache_dir) =
+            crate::services::image_cache::image_cache_data_dir().map(|d| d.join("images"))
+        {
+            if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+                let prefix = format!("cursor-{session_id}-");
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    if name.starts_with(&prefix) {
+                        if let Err(error) = std::fs::remove_file(&path) {
+                            log::warn!(
+                                "failed to remove Cursor cached image '{}': {error}",
+                                path.display()
+                            );
+                        }
+                    }
                 }
             }
         }
