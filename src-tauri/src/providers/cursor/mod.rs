@@ -182,6 +182,26 @@ impl CursorProvider {
 }
 
 /// Walk every user message and replace `[Image #N]` placeholders with
+/// For a subagent transcript path of the shape
+/// `…/agent-transcripts/<parentId>/subagents/<subId>.jsonl`,
+/// return `<parentId>` so callers can look the parent's
+/// `store.db` up. Returns None for any other path layout (main
+/// transcripts, malformed inputs, etc.).
+fn subagent_parent_id_from_path(source_path: &str) -> Option<String> {
+    let path = Path::new(source_path);
+    let subagents_dir = path.parent()?;
+    if subagents_dir.file_name().and_then(|n| n.to_str()) != Some("subagents") {
+        return None;
+    }
+    Some(
+        subagents_dir
+            .parent()?
+            .file_name()?
+            .to_string_lossy()
+            .to_string(),
+    )
+}
+
 /// concrete `[Image: source: <cached-path>]` markers from `paths`.
 /// Multiple placeholders within one message are handled by repeated
 /// substitution. `N` is 1-indexed; out-of-range references are left
@@ -309,12 +329,32 @@ impl SessionProvider for CursorProvider {
 
     fn load_messages(
         &self,
-        _session_id: &str,
+        session_id: &str,
         source_path: &str,
     ) -> Result<LoadedSession, ProviderError> {
         let content = std::fs::read_to_string(source_path)
             .map_err(|e| ProviderError::Parse(format!("failed to read transcript: {e}")))?;
-        let (messages, warnings) = parser::parse_messages(&content, source_path);
+        let (mut messages, warnings) = parser::parse_messages(&content, source_path);
+
+        // Reapply store.db image extraction so `[Image #N]` placeholders
+        // in the transcript become `[Image: source: <cache-path>]`
+        // markers the frontend can render. scan_all/scan_source go
+        // through `apply_store_metadata` for the same reason; this is
+        // the matching path for the on-demand session-open flow.
+        //
+        // For a subagent transcript, `session_id` is the subagent's id
+        // but its store.db belongs to the parent. Derive the parent id
+        // from the path so the lookup still hits.
+        let lookup_id =
+            subagent_parent_id_from_path(source_path).unwrap_or_else(|| session_id.to_string());
+        let stores = self.collect_cli_store_paths();
+        if let Some(store) = stores.get(&lookup_id) {
+            let info = store_db::read_store_db(store, session_id);
+            if !info.image_paths.is_empty() {
+                substitute_image_placeholders(&mut messages, &info.image_paths);
+            }
+        }
+
         Ok(LoadedSession::from_messages(messages, warnings))
     }
 
