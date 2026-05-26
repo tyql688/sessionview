@@ -7,6 +7,16 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-05-26
+
+### Added
+
+- Cursor CLI sessions from the `agent` binary now appear in the tree, with workspace path, model badge ("Auto" by default), inline pasted images, and Task-tool subagents linked to their parent (805687a, a839615, c55ebc0)
+
+### Changed
+
+- Kimi provider label renamed from "Kimi CLI" to "Kimi Code" to match the upstream `@moonshot-ai/kimi-code` npm package (1d8ecd3)
+
 ## [0.4.3] - 2026-05-25
 
 ### Changed
