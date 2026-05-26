@@ -7,6 +7,16 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-05-26
+
+### Added
+
+- Cursor ACP-mode sessions (from `cursor-agent acp`, used by IDEs and Zed) now appear in the tree, with messages reconstructed from the session's `store.db` since these sessions have no JSONL transcript on disk (7e6ca0f)
+
+### Fixed
+
+- "Open" subagent button now renders for Cursor Task tool calls, which carry only a description (no agent id or nickname) (50a6673)
+
 ## [0.4.4] - 2026-05-26
 
 ### Added
