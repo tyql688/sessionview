@@ -40,6 +40,12 @@ pub(crate) struct StoreDbInfo {
     /// corresponds to `[Image #1]`). Empty when no inline images
     /// were attached.
     pub image_paths: Vec<PathBuf>,
+    /// Session creation time in seconds since epoch, parsed from the
+    /// meta envelope's `createdAt` (stored in ms). ACP sessions need
+    /// this because the file mtime is polluted by long-lived WAL
+    /// connections — cursor keeps the db open and bumps mtime even
+    /// when no new turn was written.
+    pub created_at_secs: Option<i64>,
 }
 
 impl StoreDbInfo {
@@ -48,6 +54,7 @@ impl StoreDbInfo {
             workspace_path: None,
             model: None,
             image_paths: Vec::new(),
+            created_at_secs: None,
         }
     }
 }
@@ -87,6 +94,11 @@ pub(crate) fn read_store_db(store_db: &Path, session_id: &str) -> StoreDbInfo {
         .and_then(|v| v.get("latestRootBlobId"))
         .and_then(|v| v.as_str())
         .map(str::to_string);
+    let created_at_secs = meta_value
+        .as_ref()
+        .and_then(|v| v.get("createdAt"))
+        .and_then(|v| v.as_i64())
+        .map(|ms| ms / 1000);
 
     // ---- blob enumeration in root-order ----
     let ordered_ids = root_blob_id
@@ -135,6 +147,7 @@ pub(crate) fn read_store_db(store_db: &Path, session_id: &str) -> StoreDbInfo {
         workspace_path,
         model,
         image_paths,
+        created_at_secs,
     }
 }
 

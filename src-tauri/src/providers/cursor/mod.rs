@@ -187,27 +187,24 @@ impl CursorProvider {
             .clone()
             .unwrap_or_else(|| crate::provider_utils::session_title(None));
 
-        let file_meta = std::fs::metadata(store_db).ok()?;
-        let file_size = file_meta.len();
-        let created_at = file_meta
-            .created()
+        let file_size = std::fs::metadata(store_db)
             .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64)
-            .or_else(|| {
-                file_meta
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs() as i64)
-            })?;
-        let updated_at = file_meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(created_at);
-        let source_mtime = updated_at;
+            .map(|m| m.len())
+            .unwrap_or(0);
+        // ACP store.db mtime is unreliable: the cursor agent holds a
+        // long-lived WAL connection and bumps mtime on idle checkpoints,
+        // which would surface yesterday's sessions as "just updated".
+        // The meta envelope's `createdAt` is the only content-driven
+        // timestamp we get for ACP, so we anchor both fields to it.
+        let Some(created_at) = info.created_at_secs else {
+            log::warn!(
+                "skipping Cursor ACP session '{}': store.db meta missing createdAt",
+                store_db.display()
+            );
+            return None;
+        };
+        let updated_at = created_at;
+        let source_mtime = created_at;
 
         use crate::provider_utils::{truncate_to_bytes, FTS_CONTENT_LIMIT};
         let content_text = truncate_to_bytes(
@@ -592,7 +589,7 @@ impl SessionProvider for CursorProvider {
 mod tests {
     use super::*;
     use rusqlite::Connection;
-    use serde_json::json;
+    use serde_json::{json, Value};
 
     fn write_main_transcript(home: &Path, project_key: &str, sid: &str, body: &str) -> PathBuf {
         let dir = home
@@ -620,6 +617,67 @@ mod tests {
         .unwrap();
         conn.execute("INSERT INTO blobs VALUES (?1, ?2)", ("b1", blob))
             .unwrap();
+    }
+
+    /// Build a minimal ACP-mode store.db at `~/.cursor/acp-sessions/<sid>/`
+    /// containing a meta envelope (optionally with `createdAt`), a root
+    /// protobuf blob, and one user message blob. Returns the store.db path.
+    fn write_acp_store_db(
+        home: &Path,
+        sid: &str,
+        created_at_ms: Option<i64>,
+        user_text: &str,
+    ) -> PathBuf {
+        let dir = home.join(".cursor").join("acp-sessions").join(sid);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Synthetic blob ids — any 32-byte values work since the parser
+        // looks up by id string, not by sha256 verification.
+        let user_blob_id = "11111111111111111111111111111111111111111111111111111111111111aa";
+        let root_blob_id = "22222222222222222222222222222222222222222222222222222222222222bb";
+
+        let user_blob_bytes = serde_json::to_vec(&json!({
+            "role": "user",
+            "content": [{"type": "text", "text": user_text}],
+        }))
+        .unwrap();
+
+        // Root protobuf shape: 0x0A 0x20 + 32 raw bytes of user_blob_id.
+        let mut root_bytes = vec![0x0Au8, 0x20];
+        for chunk in user_blob_id.as_bytes().chunks(2) {
+            let pair = std::str::from_utf8(chunk).unwrap();
+            root_bytes.push(u8::from_str_radix(pair, 16).unwrap());
+        }
+
+        let mut meta = serde_json::Map::new();
+        meta.insert("agentId".into(), json!(sid));
+        meta.insert("latestRootBlobId".into(), json!(root_blob_id));
+        if let Some(ms) = created_at_ms {
+            meta.insert("createdAt".into(), json!(ms));
+        }
+
+        let store = dir.join("store.db");
+        let conn = Connection::open(&store).unwrap();
+        conn.execute("CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB)", [])
+            .unwrap();
+        conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO meta VALUES (?1, ?2)",
+            ("0", Value::Object(meta).to_string()),
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO blobs VALUES (?1, ?2)",
+            (root_blob_id, root_bytes),
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO blobs VALUES (?1, ?2)",
+            (user_blob_id, user_blob_bytes),
+        )
+        .unwrap();
+        store
     }
 
     #[test]
@@ -698,6 +756,49 @@ mod tests {
             .unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].meta.id, sid);
+    }
+
+    #[test]
+    fn acp_session_anchors_timestamps_to_meta_created_at_not_file_mtime() {
+        // Cursor's ACP agent holds a long-lived SQLite WAL connection
+        // that bumps store.db's mtime on idle checkpoints. We must use
+        // the meta envelope's `createdAt` so yesterday's sessions don't
+        // surface as "just updated" in the homepage recents list.
+        let dir = tempfile::tempdir().unwrap();
+        let sid = "acp-sid";
+        // 2020-01-02 03:04:05 UTC — clearly historical, so if any
+        // codepath leaks in file mtime (which is ~now) the assertions
+        // will fail loudly.
+        let created_at_ms: i64 = 1_577_934_245_000;
+        let expected_secs: i64 = created_at_ms / 1000;
+        write_acp_store_db(dir.path(), sid, Some(created_at_ms), "hi");
+
+        let provider = CursorProvider::with_home(dir.path().to_path_buf());
+        let sessions = provider.scan_all().unwrap();
+        let acp = sessions
+            .iter()
+            .find(|s| s.meta.id == sid)
+            .expect("ACP session should be indexed");
+
+        assert_eq!(acp.meta.created_at, expected_secs);
+        assert_eq!(acp.meta.updated_at, expected_secs);
+        assert_eq!(acp.source_mtime, expected_secs);
+    }
+
+    #[test]
+    fn acp_session_skipped_when_meta_lacks_created_at() {
+        // No silent fallback: if the only content-driven timestamp is
+        // missing, drop the session rather than fabricate one from the
+        // unreliable file mtime.
+        let dir = tempfile::tempdir().unwrap();
+        write_acp_store_db(dir.path(), "acp-no-created", None, "hi");
+
+        let provider = CursorProvider::with_home(dir.path().to_path_buf());
+        let sessions = provider.scan_all().unwrap();
+        assert!(
+            sessions.iter().all(|s| s.meta.id != "acp-no-created"),
+            "ACP session without meta.createdAt must be skipped"
+        );
     }
 
     #[test]
