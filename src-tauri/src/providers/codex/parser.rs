@@ -570,7 +570,35 @@ impl CodexScanAccum {
                         if sub_ts > 0 {
                             self.subagent_start_seconds = Some(sub_ts);
                         }
+                    } else if self.parent_id.is_none() {
+                        // Regular forks (source: "vscode" etc.) also carry
+                        // a `forked_from_id` we can use as the parent. We
+                        // intentionally leave is_sidechain=false so the
+                        // forked session shows in the main list, just with
+                        // provenance back to its origin.
+                        if let Some(id) = payload
+                            .get("forked_from_id")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                        {
+                            self.parent_id = Some(id.to_string());
+                        }
                     }
+                }
+                // Top-level `type: "compacted"` carries the post-compaction
+                // handoff summary in `payload.message`. Surface it as a
+                // System event so the user can see WHAT survived the
+                // compaction, not just that one happened.
+                "compacted" => {
+                    let message = payload
+                        .get("message")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty());
+                    let content = match message {
+                        Some(text) => format!("[context_compacted]\n{text}"),
+                        None => "[context_compacted]".to_string(),
+                    };
+                    push_system_event(&mut self.messages, entry.timestamp.clone(), content);
                 }
                 "response_item" => {
                     // Skip developer role and reasoning type
@@ -878,12 +906,18 @@ impl CodexScanAccum {
                                 usage_hash: None,
                             });
                         }
-                        "local_shell_call" | "LocalShellCall" => {
-                            let raw_name = "LocalShellCall";
+                        // Older Codex rollouts emit `local_shell_call` as
+                        // a `response_item` payload. Current rollouts in
+                        // this repo's local data corpus don't, but the
+                        // canonical-name table still maps it to Bash, so
+                        // we keep the snake_case dispatch for backward
+                        // compatibility with archived sessions. PascalCase
+                        // (`LocalShellCall`) is genuinely dead.
+                        "local_shell_call" => {
                             let input_value = payload.clone();
                             let metadata = build_tool_metadata(ToolCallFacts {
                                 provider: Provider::Codex,
-                                raw_name,
+                                raw_name: "LocalShellCall",
                                 input: Some(&input_value),
                                 call_id: codex_call_id(payload),
                                 assistant_id: None,
@@ -904,7 +938,7 @@ impl CodexScanAccum {
                                 usage_hash: None,
                             });
                         }
-                        "tool_search_call" | "ToolSearchCall" => {
+                        "tool_search_call" => {
                             let input_value = payload.clone();
                             let metadata = build_tool_metadata(ToolCallFacts {
                                 provider: Provider::Codex,
@@ -929,7 +963,7 @@ impl CodexScanAccum {
                                 usage_hash: None,
                             });
                         }
-                        "tool_search_output" | "ToolSearchOutput" => {
+                        "tool_search_output" => {
                             let output = codex_content_items_text(payload);
                             if !output.is_empty() {
                                 self.content_parts.push(output.clone());
@@ -946,13 +980,6 @@ impl CodexScanAccum {
                                     payload.get("status").and_then(|v| v.as_str()),
                                 );
                             }
-                        }
-                        "compaction" | "Compaction" => {
-                            push_system_event(
-                                &mut self.messages,
-                                entry.timestamp.clone(),
-                                "[context_compacted]".to_string(),
-                            );
                         }
                         "custom_tool_call" => {
                             let raw_name = payload
@@ -1193,14 +1220,28 @@ impl CodexScanAccum {
                                     .or_else(|| usage_model.clone());
                                 // Capture the event for the indexer's per-date stats
                                 // in the same pass — replaces a second file read.
+                                // No silent fallback: cost attribution
+                                // requires a real model name. If none
+                                // resolves we'd mislabel usage as GPT-5,
+                                // so we drop BOTH the indexer event and
+                                // the per-message attachment together —
+                                // keeping only one half would leave the
+                                // UI showing tokens with no provenance
+                                // while the daily totals undercount.
+                                let Some(resolved_model) = resolved_model else {
+                                    if any_nonzero {
+                                        log::warn!(
+                                            "Codex token_count event at {:?} has no resolvable model — skipping usage record",
+                                            entry.timestamp
+                                        );
+                                    }
+                                    continue;
+                                };
                                 if any_nonzero {
                                     if let Some(ts) = entry.timestamp.as_ref() {
-                                        let model_for_event = resolved_model
-                                            .clone()
-                                            .unwrap_or_else(|| "gpt-5".to_string());
                                         self.usage_events.push(UsageEvent {
                                             timestamp: ts.clone(),
-                                            model: model_for_event,
+                                            model: resolved_model.clone(),
                                             input_tokens: input,
                                             output_tokens: output,
                                             cache_read_input_tokens: cached.min(input),
@@ -1211,13 +1252,11 @@ impl CodexScanAccum {
                                 else {
                                     continue;
                                 };
-                                if let Some(model_name) = resolved_model.clone() {
-                                    self.current_model = Some(model_name);
-                                }
+                                self.current_model = Some(resolved_model.clone());
                                 add_usage_to_last_assistant(
                                     &mut self.messages,
                                     usage,
-                                    resolved_model,
+                                    Some(resolved_model),
                                 );
                             }
                         }
@@ -2141,6 +2180,73 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
+
+    #[test]
+    fn parse_session_surfaces_top_level_compacted_handoff_summary() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("codex.jsonl");
+        fs::write(
+            &file,
+            concat!(
+                "{\"timestamp\":\"2026-04-10T10:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"sess-1\",\"cwd\":\"/tmp\",\"cli_version\":\"0.123.0\"}}\n",
+                "{\"timestamp\":\"2026-04-10T10:00:01Z\",\"type\":\"compacted\",\"payload\":{\"message\":\"Recap so far: did X and Y.\",\"replacement_history\":[]}}\n",
+                "{\"timestamp\":\"2026-04-10T10:00:02Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"after compaction\"}]}}\n"
+            ),
+        )
+        .unwrap();
+        let provider = CodexProvider {
+            home_dir: PathBuf::from("/tmp"),
+        };
+        let parsed = provider.parse_session_file(&file).expect("parsed session");
+        let compacted = parsed
+            .messages
+            .iter()
+            .find(|m| m.content.contains("[context_compacted]"))
+            .expect("compacted system event");
+        assert!(
+            compacted.content.contains("Recap so far: did X and Y."),
+            "compacted handoff summary missing from {:?}",
+            compacted.content
+        );
+    }
+
+    #[test]
+    fn parse_session_skips_usage_event_with_no_resolvable_model() {
+        // No turn_context, no info.model — resolved_model is None. We
+        // must NOT fabricate "gpt-5"; we drop the usage event entirely.
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("codex.jsonl");
+        fs::write(
+            &file,
+            concat!(
+                "{\"timestamp\":\"2026-04-10T10:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"sess-2\",\"cwd\":\"/tmp\"}}\n",
+                "{\"timestamp\":\"2026-04-10T10:00:01Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hi\"}]}}\n",
+                "{\"timestamp\":\"2026-04-10T10:00:02Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"last_token_usage\":{\"input_tokens\":100,\"cached_input_tokens\":0,\"output_tokens\":10,\"reasoning_output_tokens\":0,\"total_tokens\":110}}}}\n"
+            ),
+        )
+        .unwrap();
+        let provider = CodexProvider {
+            home_dir: PathBuf::from("/tmp"),
+        };
+        let parsed = provider.parse_session_file(&file).expect("parsed session");
+        assert!(
+            parsed.usage_events.is_empty(),
+            "must NOT fabricate a model name when none resolves; got {:?}",
+            parsed.usage_events
+        );
+        // Both paths must skip together: assistant message also gets no
+        // phantom usage stamp when the model is unresolvable.
+        let assistant = parsed
+            .messages
+            .iter()
+            .find(|m| m.role == crate::models::MessageRole::Assistant)
+            .expect("assistant message");
+        assert!(
+            assistant.token_usage.is_none(),
+            "assistant must not carry usage with no resolved model; got {:?}",
+            assistant.token_usage
+        );
+    }
 
     #[test]
     fn parse_session_collects_usage_events_keeping_total_input_and_cached_input() {

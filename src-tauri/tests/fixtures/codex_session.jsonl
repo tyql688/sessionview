@@ -1,4 +1,5 @@
 {"type":"session_meta","timestamp":"2026-01-01T10:00:00.000Z","payload":{"id":"codex-session-abc123","cwd":"/home/user/my-project"}}
+{"type":"turn_context","timestamp":"2026-01-01T10:00:00.500Z","payload":{"model":"gpt-5.4"}}
 {"type":"response_item","timestamp":"2026-01-01T10:00:01.000Z","payload":{"type":"message","role":"user","content":[{"type":"text","text":"Write a hello world program"}]}}
 {"type":"event_msg","timestamp":"2026-01-01T10:00:01.100Z","payload":{"type":"user_message","message":"Write a hello world program","images":[],"local_images":[],"text_elements":[]}}
 {"type":"response_item","timestamp":"2026-01-01T10:00:05.000Z","payload":{"type":"message","role":"assistant","content":[{"type":"text","text":"I'll create a hello world program for you."}]}}
