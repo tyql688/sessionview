@@ -7,6 +7,30 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-05-28
+
+### Added
+
+- Parent dirs of churn-heavy provider trees now use shallow `watch_paths` so new session dirs are detected without paying the cost of a full recursive watch (c18432a)
+- Mermaid diagrams re-render on `props.code` change and on theme switch (including OS-level `prefers-color-scheme` toggle), instead of being stuck on the first render (b91e583)
+- Mermaid `quadrantChart` source with bare non-ASCII text on `title` / `x-axis` / `y-axis` / `quadrant-N` / point labels is auto-quoted before render, so AI-generated diagrams that omit the required quotes still display (b91e583)
+
+### Fixed
+
+- Cursor CLI tool calls no longer drop `Bash` description/cwd, `Read` limit/offset, `Grep` flags (`-i`/`-n`/`glob`/`head_limit`/`output_mode`), `Write` contents, or `Task` (Agent) `subagent_type`; tool bubbles now show the full context the user actually invoked (e9dd97d)
+- Cursor ACP assistant `reasoning` parts now render as `[thinking]` System messages (was silently dropped), tool-result base64 images get cached as `[Image: source: …]`, and per-turn model from `providerOptions.cursor.modelName` is surfaced in the session badge (e9dd97d)
+- Cursor ACP session timestamps now anchor to `meta.createdAt` instead of the WAL-polluted store.db mtime, so historical sessions stop surfacing as "just updated" (f0c1275)
+- Cursor ACP sessions no longer panic the notify-rs watcher when many concurrent fsyncs hit the parent dir (d650907)
+- Claude `tool_result.content[].tool_reference` blocks now render as `[Tool: <name>]` (235 real occurrences were dropped); top-level `mode` lines surface plan/accept_edits/normal transitions as `[mode]` System events, deduplicated to avoid noise from the default starting state; async-Agent results show their `status` (`async_launched` etc.) instead of the default success badge (9a09e21)
+- Codex top-level `type: "compacted"` post-compaction handoff summaries are now visible as `[context_compacted]` System events with the recap text (97 real occurrences were dropped); regular forks (`source.subagent` absent but `forked_from_id` set) carry provenance back to their origin via `parent_id` (e7f893f)
+- Codex token-count events with no resolvable model are skipped entirely (across both indexer stats and per-message attachment) instead of being mislabelled as GPT-5 (e7f893f)
+- `ToolMessage` no longer spams `SyntaxError: JSON Parse error` for every plain-text tool output; warnings only fire when something JSON-looking actually fails to parse (b91e583)
+- KaTeX no longer warns on every render for em-dashes, smart quotes, and full-width punctuation that user-authored math routinely contains (b91e583)
+
+### Changed
+
+- Cross-provider parser audit: removed dead PascalCase Codex arms (`LocalShellCall`/`ToolSearchCall`/`ToolSearchOutput`/`Compaction`) and the redundant `response_item.compaction` arm; collapsed duplicate `read_blob` and protobuf-scan helpers under `cursor/store_db.rs`; dropped the unused `project_path_from_content` walk in Cursor CLI parser; inlined `infer_tool_name_from_result` in Claude (e9dd97d, 9a09e21, e7f893f)
+
 ## [0.4.5] - 2026-05-26
 
 ### Added
