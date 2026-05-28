@@ -258,14 +258,47 @@ pub fn remap_tool_args(tool_name: &str, args: &Value) -> Option<String> {
                 .get("command")
                 .or_else(|| obj.get("input"))
                 .and_then(|c| c.as_str())?;
-            Some(serde_json::json!({"command": cmd}).to_string())
+            let mut out = serde_json::json!({ "command": cmd });
+            if let Some(desc) = obj.get("description").and_then(|v| v.as_str()) {
+                out["description"] = serde_json::json!(desc);
+            }
+            if let Some(cwd) = obj
+                .get("working_directory")
+                .or_else(|| obj.get("cwd"))
+                .and_then(|v| v.as_str())
+            {
+                out["cwd"] = serde_json::json!(cwd);
+            }
+            Some(out.to_string())
         }
-        "Read" | "Write" => {
+        "Read" => {
             let path = obj
                 .get("path")
                 .or_else(|| obj.get("file_path"))
                 .and_then(|p| p.as_str())?;
-            Some(serde_json::json!({"file_path": path}).to_string())
+            let mut out = serde_json::json!({ "file_path": path });
+            if let Some(limit) = obj.get("limit") {
+                out["limit"] = limit.clone();
+            }
+            if let Some(offset) = obj.get("offset") {
+                out["offset"] = offset.clone();
+            }
+            Some(out.to_string())
+        }
+        "Write" => {
+            let path = obj
+                .get("path")
+                .or_else(|| obj.get("file_path"))
+                .and_then(|p| p.as_str())?;
+            let mut out = serde_json::json!({ "file_path": path });
+            if let Some(contents) = obj
+                .get("contents")
+                .or_else(|| obj.get("content"))
+                .and_then(|v| v.as_str())
+            {
+                out["content"] = serde_json::json!(contents);
+            }
+            Some(out.to_string())
         }
         "Edit" => {
             let path = obj
@@ -313,7 +346,37 @@ pub fn remap_tool_args(tool_name: &str, args: &Value) -> Option<String> {
             if let Some(p) = obj.get("path").and_then(|p| p.as_str()) {
                 out["path"] = serde_json::json!(p);
             }
+            if let Some(glob) = obj.get("glob").and_then(|v| v.as_str()) {
+                out["glob"] = serde_json::json!(glob);
+            }
+            if let Some(output_mode) = obj.get("output_mode").and_then(|v| v.as_str()) {
+                out["output_mode"] = serde_json::json!(output_mode);
+            }
+            if let Some(head_limit) = obj.get("head_limit") {
+                out["head_limit"] = head_limit.clone();
+            }
+            if let Some(ignore_case) = obj.get("-i") {
+                out["-i"] = ignore_case.clone();
+            }
+            if let Some(line_numbers) = obj.get("-n") {
+                out["-n"] = line_numbers.clone();
+            }
             Some(out.to_string())
+        }
+        "Agent" => {
+            // Cursor's Task tool ships {description, prompt, subagent_type}.
+            // Keep all three so the frontend agent bubble has identity + body.
+            let mut out = serde_json::Map::new();
+            for key in ["description", "prompt", "subagent_type"] {
+                if let Some(v) = obj.get(key).and_then(|v| v.as_str()) {
+                    out.insert(key.to_string(), serde_json::json!(v));
+                }
+            }
+            if out.is_empty() {
+                Some(args.to_string())
+            } else {
+                Some(serde_json::Value::Object(out).to_string())
+            }
         }
         _ => Some(args.to_string()),
     }
@@ -407,6 +470,77 @@ mod tests {
         let parsed: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(parsed["pattern"], "**/*.rs");
         assert_eq!(parsed["path"], "/src");
+    }
+
+    #[test]
+    fn write_preserves_contents() {
+        let args = json!({"path": "/a.txt", "contents": "hello\nworld"});
+        let out = remap_tool_args("Write", &args).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["file_path"], "/a.txt");
+        assert_eq!(parsed["content"], "hello\nworld");
+    }
+
+    #[test]
+    fn read_preserves_limit_offset() {
+        let args = json!({"path": "/a.txt", "limit": 50, "offset": 200});
+        let out = remap_tool_args("Read", &args).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["file_path"], "/a.txt");
+        assert_eq!(parsed["limit"], 50);
+        assert_eq!(parsed["offset"], 200);
+    }
+
+    #[test]
+    fn grep_preserves_all_flags() {
+        let args = json!({
+            "pattern": "needle",
+            "path": "/src",
+            "glob": "*.rs",
+            "head_limit": 20,
+            "output_mode": "content",
+            "-i": true,
+            "-n": true,
+        });
+        let out = remap_tool_args("Grep", &args).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["pattern"], "needle");
+        assert_eq!(parsed["path"], "/src");
+        assert_eq!(parsed["glob"], "*.rs");
+        assert_eq!(parsed["head_limit"], 20);
+        assert_eq!(parsed["output_mode"], "content");
+        assert_eq!(parsed["-i"], true);
+        assert_eq!(parsed["-n"], true);
+    }
+
+    #[test]
+    fn bash_preserves_description_and_cwd() {
+        let args = json!({
+            "command": "ls -la",
+            "description": "list files",
+            "working_directory": "/tmp",
+        });
+        let out = remap_tool_args("Bash", &args).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["command"], "ls -la");
+        assert_eq!(parsed["description"], "list files");
+        assert_eq!(parsed["cwd"], "/tmp");
+    }
+
+    #[test]
+    fn agent_task_canonicalises_to_description_prompt_subagent() {
+        let args = json!({
+            "description": "audit parser",
+            "prompt": "look at parser.rs and report issues",
+            "subagent_type": "general-purpose",
+            "extra_noise": "ignored",
+        });
+        let out = remap_tool_args("Agent", &args).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["description"], "audit parser");
+        assert_eq!(parsed["prompt"], "look at parser.rs and report issues");
+        assert_eq!(parsed["subagent_type"], "general-purpose");
+        assert!(parsed.get("extra_noise").is_none());
     }
 
     #[test]

@@ -38,9 +38,8 @@ pub fn canonical_tool_name(provider: Provider, name: &str) -> String {
 
     match name {
         "Shell" | "shell" | "bash" | "exec_command" | "shell_command" | "run_shell_command"
-        | "run_in_terminal" | "write_stdin" | "Monitor" | "LocalShellCall" | "run_command" => {
-            "Bash"
-        }
+        | "run_in_terminal" | "write_stdin" | "Monitor" | "LocalShellCall" | "run_command"
+        | "AwaitShell" => "Bash",
         "Read" | "read" | "ReadFile" | "read_file" | "view" | "view_file" => "Read",
         "read_mcp_resource" => "ListMcpResourcesTool",
         "Write" | "write" | "WriteFile" | "write_file" | "create" | "write_to_file" => "Write",
@@ -100,7 +99,7 @@ pub fn canonical_tool_name(provider: Provider, name: &str) -> String {
 }
 
 fn tool_category(canonical_name: &str, raw_name: &str) -> String {
-    if raw_name.starts_with("mcp__") {
+    if raw_name.starts_with("mcp__") || raw_name.starts_with("chat-") {
         return "mcp".to_string();
     }
 

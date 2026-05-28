@@ -28,8 +28,8 @@ use crate::provider_utils::{
 use crate::tool_metadata::{build_tool_metadata, ToolCallFacts};
 
 use super::tools::{
-    extract_text_from_content, extract_think_content, extract_workspace_path, normalise_user_text,
-    parse_content_array, remap_tool_args, strip_redacted, strip_think_tags,
+    extract_text_from_content, extract_think_content, normalise_user_text, parse_content_array,
+    remap_tool_args, strip_redacted, strip_think_tags,
 };
 
 // ---------------------------------------------------------------------------
@@ -171,7 +171,7 @@ fn push_tool_call(messages: &mut Vec<Message>, part: &Value) {
 /// Determine whether `path` is a subagent transcript (lives under
 /// `…/<parentId>/subagents/<subagentId>.jsonl`). Returns the parent
 /// session id when so.
-fn parent_id_for_subagent(path: &Path) -> Option<String> {
+pub(crate) fn parent_id_for_subagent(path: &Path) -> Option<String> {
     let subagents_dir = path.parent()?;
     if subagents_dir.file_name().and_then(|n| n.to_str()) != Some("subagents") {
         return None;
@@ -228,22 +228,6 @@ pub(crate) fn decode_project_key(key: &str) -> String {
         }
     }
     path
-}
-
-/// Scan transcript content for `Workspace Path:` lines (Cursor inserts
-/// one per user turn inside `<user_info>`). Returns the first hit.
-fn project_path_from_content(content: &str) -> String {
-    let mut workspace = String::new();
-    let _ = for_each_entry(content, "<cursor transcript>", |role, content_val| {
-        if role != "user" || !workspace.is_empty() {
-            return;
-        }
-        let text = extract_text_from_content(content_val);
-        if let Some(p) = extract_workspace_path(&text) {
-            workspace = p;
-        }
-    });
-    workspace
 }
 
 /// Fall back to decoding the project key in the transcript path
@@ -394,10 +378,6 @@ pub(crate) fn parse_session(
 
     let project_path = provider_project_path_override
         .filter(|p| !p.is_empty())
-        .or_else(|| {
-            let from_content = project_path_from_content(&content);
-            (!from_content.is_empty()).then_some(from_content)
-        })
         .unwrap_or_else(|| project_path_from_transcript_path(path));
     let project_name = project_name_from_path(&project_path);
 

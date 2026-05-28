@@ -163,18 +163,26 @@ impl CursorProvider {
         let session_dir = store_db.parent()?;
         let session_id = session_dir.file_name()?.to_string_lossy().to_string();
         let acp_meta = acp::load_meta_json(session_dir);
-        let (mut messages, parse_warning_count) = acp::parse_acp_transcript(store_db);
+        let acp::AcpParseResult {
+            mut messages,
+            warnings: parse_warning_count,
+            model: per_turn_model,
+        } = acp::parse_acp_transcript(store_db);
         if messages.is_empty() {
             return None;
         }
 
-        // Reuse the existing store.db extractor for model + inline
-        // images. The workspace path is more reliable from meta.json
-        // (.cwd), so we let acp_meta win when both are present.
+        // Reuse the existing store.db extractor for user-pasted image
+        // recovery + workspace path. ACP meta has no `lastUsedModel`
+        // so `store_db::read_store_db` returns "Auto" — the per-turn
+        // model harvested from `providerOptions.cursor.modelName`
+        // wins when present. The workspace path is more reliable from
+        // meta.json (.cwd), so we let acp_meta win when both are present.
         let info = store_db::read_store_db(store_db, &session_id);
         if !info.image_paths.is_empty() {
             substitute_image_placeholders(&mut messages, &info.image_paths);
         }
+        let model = per_turn_model.or(info.model);
         let project_path = acp_meta
             .cwd
             .clone()
@@ -237,7 +245,7 @@ impl CursorProvider {
                 source_path: store_db.to_string_lossy().to_string(),
                 is_sidechain: false,
                 variant_name: None,
-                model: info.model,
+                model,
                 cc_version: None,
                 git_branch: None,
                 parent_id: None,
@@ -283,10 +291,6 @@ impl CursorProvider {
     }
 }
 
-/// Walk every user message and replace `[Image #N]` placeholders with
-/// For a subagent transcript path of the shape
-/// `…/agent-transcripts/<parentId>/subagents/<subId>.jsonl`,
-/// return `<parentId>` so callers can look the parent's
 /// True when `source_path` points at an ACP-mode session's
 /// `~/.cursor/acp-sessions/<id>/store.db`. Used to route load_messages
 /// and scan_source through the dedicated reconstructor.
@@ -295,23 +299,7 @@ fn is_acp_store_path(source_path: &str) -> bool {
     normalised.contains("/.cursor/acp-sessions/") && normalised.ends_with("/store.db")
 }
 
-/// `store.db` up. Returns None for any other path layout (main
-/// transcripts, malformed inputs, etc.).
-fn subagent_parent_id_from_path(source_path: &str) -> Option<String> {
-    let path = Path::new(source_path);
-    let subagents_dir = path.parent()?;
-    if subagents_dir.file_name().and_then(|n| n.to_str()) != Some("subagents") {
-        return None;
-    }
-    Some(
-        subagents_dir
-            .parent()?
-            .file_name()?
-            .to_string_lossy()
-            .to_string(),
-    )
-}
-
+/// Walk every user message and replace `[Image #N]` placeholders with
 /// concrete `[Image: source: <cached-path>]` markers from `paths`.
 /// Multiple placeholders within one message are handled by repeated
 /// substitution. `N` is 1-indexed; out-of-range references are left
@@ -481,8 +469,11 @@ impl SessionProvider for CursorProvider {
         // ACP sessions store everything in `store.db` — no JSONL on
         // disk. Route them through the dedicated reconstructor.
         if is_acp_store_path(source_path) {
-            let (messages, warnings) = acp::parse_acp_transcript(Path::new(source_path));
-            return Ok(LoadedSession::from_messages(messages, warnings));
+            let result = acp::parse_acp_transcript(Path::new(source_path));
+            return Ok(LoadedSession::from_messages(
+                result.messages,
+                result.warnings,
+            ));
         }
         let content = std::fs::read_to_string(source_path)
             .map_err(|e| ProviderError::Parse(format!("failed to read transcript: {e}")))?;
@@ -497,8 +488,8 @@ impl SessionProvider for CursorProvider {
         // For a subagent transcript, `session_id` is the subagent's id
         // but its store.db belongs to the parent. Derive the parent id
         // from the path so the lookup still hits.
-        let lookup_id =
-            subagent_parent_id_from_path(source_path).unwrap_or_else(|| session_id.to_string());
+        let lookup_id = parser::parent_id_for_subagent(Path::new(source_path))
+            .unwrap_or_else(|| session_id.to_string());
         let stores = self.collect_cli_store_paths();
         if let Some(store) = stores.get(&lookup_id) {
             let info = store_db::read_store_db(store, session_id);

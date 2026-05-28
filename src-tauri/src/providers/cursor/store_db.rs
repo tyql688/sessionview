@@ -209,30 +209,17 @@ pub(super) fn read_meta_value(conn: &Connection, store_db: &Path) -> Option<Valu
         .ok()
 }
 
-fn read_blob(conn: &Connection, blob_id: &str) -> Option<Vec<u8>> {
+pub(super) fn read_blob(conn: &Connection, blob_id: &str) -> Option<Vec<u8>> {
     let mut stmt = conn.prepare("SELECT data FROM blobs WHERE id = ?1").ok()?;
     stmt.query_row([blob_id], |row| row.get::<_, Vec<u8>>(0))
         .ok()
 }
 
-fn all_blob_ids(conn: &Connection) -> Vec<String> {
-    let mut stmt = match conn.prepare("SELECT id FROM blobs ORDER BY id") {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
-    };
-    let rows = match stmt.query_map([], |row| row.get::<_, String>(0)) {
-        Ok(r) => r,
-        Err(_) => return Vec::new(),
-    };
-    rows.filter_map(Result::ok).collect()
-}
-
-/// Walk the root blob's bytes looking for the protobuf shape
-/// `0A 20 <32 bytes>` (field 1, length 32). Each 32-byte payload is
-/// the binary form of a child blob's sha256 id; we render it as hex
-/// to match the table's `id TEXT` column.
-fn read_root_blob_children(conn: &Connection, root_id: &str) -> Option<Vec<String>> {
-    let bytes = read_blob(conn, root_id)?;
+/// Scan a protobuf blob's bytes for length-32 child references —
+/// every `0A 20 <32 bytes>` run is a sha256 id pointing at another
+/// blob in the same table. Used by the root-blob walker (chats/store)
+/// and the recursive ACP walker.
+pub(super) fn scan_pb_hash_refs(bytes: &[u8]) -> Vec<String> {
     let mut out = Vec::new();
     let mut i = 0;
     while i + 2 + 32 <= bytes.len() {
@@ -247,7 +234,65 @@ fn read_root_blob_children(conn: &Connection, root_id: &str) -> Option<Vec<Strin
             i += 1;
         }
     }
-    Some(out)
+    out
+}
+
+/// Write raw image bytes to `cache_dir`, naming the file
+/// `cursor-<session>-<sha256>.<ext>` so `cleanup_on_permanent_delete`
+/// can clear them surgically. Returns the cached path on success.
+/// Callers pass the already-resolved cache dir so tests can inject a
+/// tempdir without touching the user's real app data dir.
+pub(super) fn write_image_to_cache(
+    cache_dir: &Path,
+    session_id: &str,
+    bytes: &[u8],
+    mime: &str,
+) -> Option<PathBuf> {
+    if let Err(error) = std::fs::create_dir_all(cache_dir) {
+        log::warn!(
+            "failed to create Cursor image cache dir '{}': {error}",
+            cache_dir.display()
+        );
+        return None;
+    }
+    let ext = ext_for_mime_or_magic(mime, bytes);
+    let hash = Sha256::digest(bytes);
+    let cache_path = cache_dir.join(format!("cursor-{session_id}-{:x}.{ext}", hash));
+    if !cache_path.exists() {
+        if let Err(error) = std::fs::write(&cache_path, bytes) {
+            log::warn!(
+                "failed to write Cursor image cache '{}': {error}",
+                cache_path.display()
+            );
+            return None;
+        }
+    }
+    Some(cache_path)
+}
+
+/// Resolve the default Cursor image cache directory. Wraps
+/// `image_cache_data_dir().join("images")` so callers can build it
+/// once and pass into `write_image_to_cache`.
+pub(super) fn default_cursor_image_cache_dir() -> Option<PathBuf> {
+    image_cache_data_dir().map(|d| d.join("images"))
+}
+
+fn all_blob_ids(conn: &Connection) -> Vec<String> {
+    let mut stmt = match conn.prepare("SELECT id FROM blobs ORDER BY id") {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    let rows = match stmt.query_map([], |row| row.get::<_, String>(0)) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    rows.filter_map(Result::ok).collect()
+}
+
+/// Fetch the root blob and decode its protobuf hash list. Returns
+/// `None` when the blob is missing or empty.
+fn read_root_blob_children(conn: &Connection, root_id: &str) -> Option<Vec<String>> {
+    Some(scan_pb_hash_refs(&read_blob(conn, root_id)?))
 }
 
 // ---------------------------------------------------------------------------
