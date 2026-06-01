@@ -158,7 +158,7 @@ export function trendPercent(
   field: keyof PrevPeriodTotals,
 ): number | null {
   if (!prev) return null;
-  const prevVal = prev[field] as number;
+  const prevVal = prev[field];
   if (prevVal === 0) return null;
   return (current - prevVal) / prevVal;
 }

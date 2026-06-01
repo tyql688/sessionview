@@ -150,7 +150,13 @@ export default function App() {
 
     // Listen for subagent open requests from ToolMessage
     const handleOpenSubagent = async (e: Event) => {
-      const { description, nickname, agentId } = (e as CustomEvent).detail;
+      const { description, nickname, agentId } = (
+        e as CustomEvent<{
+          description?: string;
+          nickname?: string;
+          agentId?: string;
+        }>
+      ).detail;
       // Search all groups' active tabs (not just activeGroup) so clicks in
       // non-focused panes resolve correctly.
       const parentIds = groups()

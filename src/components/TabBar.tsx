@@ -151,11 +151,18 @@ export function TabBar(props: {
         onDrop={(e) => {
           e.preventDefault();
           try {
-            const data = JSON.parse(
+            const data: unknown = JSON.parse(
               e.dataTransfer?.getData("text/plain") ?? "{}",
             );
-            if (data.sessionId && data.sourceGroupId !== props.groupId) {
-              moveTabToGroup(data.sessionId, props.groupId);
+            const payload = data as {
+              sessionId?: unknown;
+              sourceGroupId?: unknown;
+            };
+            if (
+              typeof payload.sessionId === "string" &&
+              payload.sourceGroupId !== props.groupId
+            ) {
+              moveTabToGroup(payload.sessionId, props.groupId);
             }
           } catch (error) {
             console.warn("Failed to parse dragged tab payload:", error);

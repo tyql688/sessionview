@@ -138,9 +138,12 @@ export function EditorGroupsContainer(props: {
     e.preventDefault();
     setDropActive(false);
     try {
-      const data = JSON.parse(e.dataTransfer?.getData("text/plain") ?? "{}");
-      if (data.sessionId) {
-        createGroupFromDrop(data.sessionId);
+      const data: unknown = JSON.parse(
+        e.dataTransfer?.getData("text/plain") ?? "{}",
+      );
+      const payload = data as { sessionId?: unknown };
+      if (typeof payload.sessionId === "string") {
+        createGroupFromDrop(payload.sessionId);
       }
     } catch (error) {
       console.warn("Failed to parse split-drop payload:", error);
