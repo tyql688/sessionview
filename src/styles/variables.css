@@ -1,3 +1,46 @@
+/* ---------------------------------------------------------------------------
+ * Design tokens — theme-independent scales (spacing, radius, type, motion).
+ * Color and elevation tokens live in the per-theme blocks below.
+ * ------------------------------------------------------------------------- */
+:root {
+  /* Spacing scale (4px rhythm) */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 20px;
+  --space-7: 24px;
+  --space-8: 32px;
+
+  /* Corner radii */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-full: 9999px;
+
+  /* Typography */
+  --font-sans: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-family: var(--font-sans); /* legacy alias */
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+
+  /* Motion */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 260ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 /* Light theme (default) */
 :root,
 [data-theme="light"] {
@@ -86,6 +129,20 @@
   --diff-new-bg: #f0fdf4;
   --diff-new-border: #22c55e;
   --diff-new-text: #166534;
+
+  /* Aliases for tokens that were referenced before they were defined */
+  --bg-hover: var(--bg-tab-hover);
+  --bg-subtle: var(--bg-tab-hover);
+  --bg-main: var(--code-bg);
+  --fg: var(--text-primary);
+  --fg-muted: var(--text-secondary);
+  --text-warning: #e5a00d;
+  --accent-rgb: 0, 122, 255;
+
+  /* Elevation scale */
+  --shadow-1: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-2: 0 4px 16px rgba(15, 23, 42, 0.08);
+  --shadow-3: 0 12px 32px rgba(15, 23, 42, 0.12);
 }
 
 /* Dark theme */
@@ -174,4 +231,18 @@
   --diff-new-bg: rgba(34, 197, 94, 0.12);
   --diff-new-border: #4ade80;
   --diff-new-text: #86efac;
+
+  /* Aliases for tokens that were referenced before they were defined */
+  --bg-hover: var(--bg-tab-hover);
+  --bg-subtle: var(--bg-tab-hover);
+  --bg-main: var(--code-bg);
+  --fg: var(--text-primary);
+  --fg-muted: var(--text-secondary);
+  --text-warning: #f0b429;
+  --accent-rgb: 10, 132, 255;
+
+  /* Elevation scale */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-3: 0 12px 32px rgba(0, 0, 0, 0.45);
 }
