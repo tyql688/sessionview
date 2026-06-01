@@ -488,9 +488,14 @@ fn delete_missing_sources_for_provider(
 }
 
 fn repeat_vars(count: usize) -> String {
-    std::iter::repeat_n("?", count)
-        .collect::<Vec<_>>()
-        .join(", ")
+    let mut sql = String::with_capacity(count.saturating_mul(3));
+    for i in 0..count {
+        if i > 0 {
+            sql.push_str(", ");
+        }
+        sql.push('?');
+    }
+    sql
 }
 
 #[cfg(test)]

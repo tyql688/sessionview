@@ -1,5 +1,7 @@
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
+use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -667,17 +669,20 @@ fn unique_hash_from_entry(entry: &Value) -> Option<String> {
 
 fn dedup_hash_from_entry(entry: &Value) -> Option<String> {
     let base = unique_hash_from_entry(entry)?;
-    let content = entry
-        .get("message")
-        .and_then(|message| message.get("content"))
-        .map(|content| {
-            // `to_string` on an in-memory Value is infallible (no IO);
-            // the .expect is a tripwire for future signature changes.
-            serde_json::to_string(content)
-                .expect("serde_json::to_string on an in-memory Value is infallible")
-        })
-        .unwrap_or_default();
-    Some(format!("{base}:{content}"))
+    // Hash the content rather than storing its full serialization in the dedup
+    // set — keeps `processed_hashes` small for sessions with large messages.
+    let content_hash = match entry.get("message").and_then(|m| m.get("content")) {
+        // `to_string` on an in-memory Value never fails in practice; if it ever
+        // did, skip dedup for this entry (returns None) instead of panicking.
+        Some(content) => {
+            let serialized = serde_json::to_string(content).ok()?;
+            let mut hasher = DefaultHasher::new();
+            serialized.hash(&mut hasher);
+            hasher.finish()
+        }
+        None => 0,
+    };
+    Some(format!("{base}:{content_hash:x}"))
 }
 
 /// Heuristic fallback used only when a tool_result reaches us with no

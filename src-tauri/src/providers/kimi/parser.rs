@@ -859,13 +859,28 @@ fn collect_subagent_descriptions(parent_wire: &Path) -> HashMap<String, String> 
     // resolved to its agent_id once we see the matching tool.result.
     let mut pending: HashMap<String, String> = HashMap::new();
     for line in BufReader::new(file).lines() {
-        let Ok(line) = line else { continue };
+        let line = match line {
+            Ok(l) => l,
+            Err(e) => {
+                log::warn!(
+                    "kimi: failed to read line from {}: {e}",
+                    parent_wire.display()
+                );
+                continue;
+            }
+        };
         if line.trim().is_empty() {
             continue;
         }
         let entry: Value = match serde_json::from_str(&line) {
             Ok(v) => v,
-            Err(_) => continue,
+            Err(e) => {
+                log::warn!(
+                    "kimi: skipping malformed JSON in {}: {e}",
+                    parent_wire.display()
+                );
+                continue;
+            }
         };
         if entry.get("type").and_then(|v| v.as_str()) != Some("context.append_loop_event") {
             continue;
