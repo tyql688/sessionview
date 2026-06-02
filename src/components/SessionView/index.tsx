@@ -31,10 +31,6 @@ import { ExportDialog } from "../ExportDialog";
 import { terminalApp } from "../../stores/settings";
 import { toast, toastError } from "../../stores/toast";
 import { errorMessage } from "../../lib/errors";
-import {
-  pendingSessionSearch,
-  setPendingSessionSearch,
-} from "../../stores/search";
 import { processMessages } from "./hooks";
 import { SessionToolbar } from "./SessionToolbar";
 import { SessionSearch } from "./SessionSearch";
@@ -42,12 +38,15 @@ import { TimelineMinimap } from "./TimelineMinimap";
 import { useLiveWatch } from "./useLiveWatch";
 import { useFavoriteSync } from "./useFavoriteSync";
 import { useAutoLoad } from "./useAutoLoad";
+import { createRoleFilter } from "./createRoleFilter";
+import { createSessionSearch } from "./createSessionSearch";
 import {
-  SESSION_SEARCH_DEBOUNCE_MS,
-  countMatchingEntries,
-  findNewestMatchingEntryIndex,
-  searchWindowBounds,
-} from "./search-utils";
+  createSessionPagination,
+  BATCH_SIZE,
+  LOAD_MORE_THRESHOLD,
+  MINIMAP_JUMP_BATCH,
+  INITIAL_TAIL,
+} from "./createSessionPagination";
 
 export function SessionView(props: {
   session: SessionRef;
@@ -58,80 +57,7 @@ export function SessionView(props: {
   const { t } = useI18n();
   const [messages, setMessages] = createSignal<Message[]>([]);
   const processedEntries = createMemo(() => processMessages(messages()));
-  const BATCH_SIZE = 80;
-  const LOAD_MORE_THRESHOLD = 1;
-  const MINIMAP_JUMP_BATCH = 1200;
-  const [visibleCount, setVisibleCount] = createSignal(BATCH_SIZE);
-  const [hiddenRoles, setHiddenRoles] = createSignal<Set<MessageRole>>(
-    new Set(),
-  );
-  const [sessionSearch, setSessionSearch] = createSignal("");
-  const [activeSessionSearch, setActiveSessionSearch] = createSignal("");
-  const [searchFocusEntryIndex, setSearchFocusEntryIndex] = createSignal<
-    number | null
-  >(null);
-  const [searchBarOpen, setSearchBarOpen] = createSignal(false);
-  const [searchMatchIdx, setSearchMatchIdx] = createSignal(0);
-  // Apply role filtering
-  const filteredEntries = createMemo(() => {
-    const hidden = hiddenRoles();
-    if (hidden.size === 0) return processedEntries();
-    return processedEntries().filter((e) => {
-      if (e.type === "time-sep") return true;
-      if (e.type === "merged-tools") return !hidden.has("tool");
-      return !hidden.has(e.msg.role);
-    });
-  });
 
-  // Role counts for filter toolbar
-  const roleCounts = createMemo(() => {
-    const counts: Record<string, number> = {
-      user: 0,
-      assistant: 0,
-      tool: 0,
-      system: 0,
-    };
-    for (const e of processedEntries()) {
-      if (e.type === "message")
-        counts[e.msg.role] = (counts[e.msg.role] || 0) + 1;
-      else if (e.type === "merged-tools") counts.tool += e.messages.length;
-    }
-    return counts;
-  });
-
-  // Reversed for column-reverse layout: newest first in DOM = visually at bottom.
-  // Search keeps the existing render window and expands only enough to reveal
-  // the first match. Rendering every entry on each input stalls large sessions.
-  const visibleEntries = createMemo(() => {
-    const all = filteredEntries();
-    const focusedIndex = searchFocusEntryIndex();
-    if (activeSessionSearch().trim() && focusedIndex !== null) {
-      const bounds = searchWindowBounds(all.length, focusedIndex);
-      if (bounds) {
-        return all.slice(bounds.start, bounds.end).reverse();
-      }
-    }
-    const count = visibleCount();
-    const start = count >= all.length ? 0 : all.length - count;
-    return all.slice(start).reverse();
-  });
-  // Streaming pagination state — declared before `hasMore` since it's
-  // read inside that memo.
-  const INITIAL_TAIL = 300;
-  const TAIL_BATCH = 600;
-  const [totalMessages, setTotalMessages] = createSignal(0);
-  const [windowStart, setWindowStart] = createSignal(0);
-
-  // We have more to render if either the in-memory window has unrendered
-  // entries OR the backend still holds older messages we haven't fetched.
-  const hasMore = createMemo(
-    () =>
-      visibleCount() < filteredEntries().length ||
-      (windowStart() > 0 && messages().length < totalMessages()),
-  );
-  const searchMatchCount = createMemo(() =>
-    countMatchingEntries(filteredEntries(), activeSessionSearch()),
-  );
   const [loading, setLoading] = createSignal(true);
   const [error, setError] = createSignal<string | null>(null);
   const [parseWarningCount, setParseWarningCount] = createSignal(0);
@@ -150,9 +76,8 @@ export function SessionView(props: {
   });
   let loadVersion = 0;
   let messagesRef: HTMLDivElement | undefined;
-  let loadOlderDebounce: ReturnType<typeof setTimeout> | undefined;
-  let sessionSearchDebounce: ReturnType<typeof setTimeout> | undefined;
-  let suppressNextSearchEffect = false;
+  let loadOlderDebounce: (() => void) | undefined;
+  let sessionSearchDebounce: (() => void) | undefined;
   let prevSessionId: string | null = null;
 
   function withTokenTotals(
@@ -167,6 +92,58 @@ export function SessionView(props: {
       cache_write_tokens: totals.cache_write_tokens,
     };
   }
+
+  // Role-filter slice: hiddenRoles + filteredEntries + roleCounts.
+  const { hiddenRoles, roleCounts, filteredEntries, toggleRole } =
+    createRoleFilter(processedEntries);
+
+  // In-session search slice: query/active/focus signals + match count + the
+  // pending-consume and debounce effects.
+  const {
+    sessionSearch,
+    setSessionSearch,
+    activeSessionSearch,
+    searchFocusEntryIndex,
+    searchBarOpen,
+    setSearchBarOpen,
+    searchMatchIdx,
+    setSearchMatchIdx,
+    searchMatchCount,
+  } = createSessionSearch({
+    filteredEntries,
+    getMessagesRef: () => messagesRef,
+    loading,
+    sessionId: () => props.session.id,
+    registerDebounce: (clear) => {
+      sessionSearchDebounce = clear;
+    },
+  });
+
+  // Windowed-loading slice: visibleCount/windowStart/totalMessages signals,
+  // visibleEntries/hasMore memos, and the scroll-driven older-page fetch.
+  const {
+    visibleCount,
+    setVisibleCount,
+    setWindowStart,
+    setTotalMessages,
+    visibleEntries,
+    hasMore,
+    loadOlderEntries,
+    handleMessagesScroll,
+  } = createSessionPagination({
+    sessionId: () => props.session.id,
+    filteredEntries,
+    messages,
+    getMessagesRef: () => messagesRef,
+    searchFocusEntryIndex,
+    activeSessionSearch,
+    setMessages,
+    setMeta,
+    withTokenTotals,
+    registerDebounce: (clear) => {
+      loadOlderDebounce = clear;
+    },
+  });
 
   createEffect(
     on(
@@ -228,174 +205,6 @@ export function SessionView(props: {
     }
   });
 
-  // Consume a pending session search set by the global SearchOverlay.
-  // Runs after the session finishes loading; applies the query, opens the
-  // in-session search bar, and scrolls to the first match.
-  createEffect(() => {
-    const pending = pendingSessionSearch();
-    if (!pending || loading()) return;
-    if (pending.sessionId !== props.session.id) return;
-    setPendingSessionSearch(null);
-
-    suppressNextSearchEffect = true;
-    setSessionSearch(pending.query);
-    setSearchBarOpen(true);
-    commitSessionSearch(pending.query);
-  });
-
-  function toggleRole(role: MessageRole) {
-    setHiddenRoles((prev) => {
-      const next = new Set(prev);
-      if (next.has(role)) next.delete(role);
-      else next.add(role);
-      return next;
-    });
-  }
-
-  function focusFirstRenderedSearchMatch() {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (!messagesRef) return;
-        const first = messagesRef.querySelector("mark.search-highlight");
-        if (!first) return;
-        messagesRef
-          .querySelector("mark.search-active")
-          ?.classList.remove("search-active");
-        first.classList.add("search-active");
-        first.scrollIntoView({ behavior: "smooth", block: "center" });
-      });
-    });
-  }
-
-  function commitSessionSearch(raw: string) {
-    const term = raw.trim();
-    setSearchMatchIdx(0);
-    if (!term) {
-      setActiveSessionSearch("");
-      setSearchFocusEntryIndex(null);
-      return;
-    }
-
-    const entries = filteredEntries();
-    const matchIdx = findNewestMatchingEntryIndex(entries, term);
-    setSearchFocusEntryIndex(matchIdx >= 0 ? matchIdx : null);
-    setActiveSessionSearch(term);
-    focusFirstRenderedSearchMatch();
-  }
-
-  createEffect(
-    on(sessionSearch, (raw) => {
-      clearTimeout(sessionSearchDebounce);
-      if (suppressNextSearchEffect) {
-        suppressNextSearchEffect = false;
-        return;
-      }
-      if (!raw.trim()) {
-        commitSessionSearch("");
-        return;
-      }
-      sessionSearchDebounce = setTimeout(
-        () => commitSessionSearch(raw),
-        SESSION_SEARCH_DEBOUNCE_MS,
-      );
-    }),
-  );
-
-  let olderFetchInFlight = false;
-
-  // Re-pin the scroll position to where the user was looking right
-  // before we grew the visible-entries list. In column-reverse, new
-  // rows are appended to the DOM but appear visually *above* the
-  // existing content. Browsers usually preserve `scrollTop` across
-  // this kind of growth, but Solid's `<For>` reconciliation can move
-  // DOM nodes when the array shape changes and Chrome's scroll
-  // anchoring will sometimes shift the viewport away from the
-  // captured row. Snapping `scrollTop` back to the captured value
-  // after two paint frames keeps the user on the row they were
-  // reading.
-  function pinScrollAfterPrepend(scrollBefore: number) {
-    const ref = messagesRef;
-    if (!ref) return;
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (ref === messagesRef && ref.scrollTop !== scrollBefore) {
-          ref.scrollTop = scrollBefore;
-        }
-      });
-    });
-  }
-
-  async function loadOlderTail() {
-    if (olderFetchInFlight || windowStart() <= 0) return;
-    const sessionId = props.session.id;
-    olderFetchInFlight = true;
-    const newStart = Math.max(0, windowStart() - TAIL_BATCH);
-    const span = windowStart() - newStart;
-    const scrollBefore = messagesRef?.scrollTop ?? 0;
-    try {
-      const older = await getSessionMessagesWindow(sessionId, newStart, span);
-      if (sessionId !== props.session.id) return;
-      setMeta((prev) => withTokenTotals(prev, older.token_totals));
-      // Prepend the newly fetched older messages and grow `visibleCount`
-      // by the same amount so the just-fetched entries actually become
-      // visible at the top of the viewport (column-reverse layout).
-      // Without the bump, `visibleEntries` slices from the newer end and
-      // the user sees no change after the round trip.
-      setMessages((prev) => [...older.messages, ...prev]);
-      setWindowStart(newStart);
-      setTotalMessages(older.total);
-      setVisibleCount((count) => count + older.messages.length);
-      pinScrollAfterPrepend(scrollBefore);
-    } catch (e) {
-      if (isLoadCanceledError(e)) return;
-      console.warn("load older messages failed:", e);
-    } finally {
-      olderFetchInFlight = false;
-    }
-  }
-
-  function loadOlderEntries() {
-    if (!messagesRef || !hasMore()) return;
-    // column-reverse: older entries append at the end of the DOM (visual top).
-    // First exhaust the in-memory window via visibleCount, then page in
-    // older messages from the backend cache.
-    if (visibleCount() < filteredEntries().length) {
-      const scrollBefore = messagesRef.scrollTop;
-      setVisibleCount((count) => count + BATCH_SIZE);
-      pinScrollAfterPrepend(scrollBefore);
-      return;
-    }
-    if (windowStart() > 0) {
-      void loadOlderTail();
-    }
-  }
-
-  function handleMessagesScroll(e: Event) {
-    const target = e.currentTarget as HTMLDivElement;
-    clearTimeout(loadOlderDebounce);
-
-    // column-reverse: scrollTop=0 is bottom (newest). User scrolls up -> scrollTop
-    // goes negative. We want to load more when user reaches the visual top.
-    // Visual top = max negative scrollTop = -(scrollHeight - clientHeight).
-    const atVisualTop =
-      target.scrollHeight + target.scrollTop - target.clientHeight <=
-      LOAD_MORE_THRESHOLD;
-
-    if (atVisualTop) {
-      loadOlderDebounce = setTimeout(() => {
-        if (!messagesRef) return;
-        const stillAtTop =
-          messagesRef.scrollHeight +
-            messagesRef.scrollTop -
-            messagesRef.clientHeight <=
-          LOAD_MORE_THRESHOLD;
-        if (stillAtTop) {
-          loadOlderEntries();
-        }
-      }, 80);
-    }
-  }
-
   // Global keyboard shortcut listeners — must be inside lifecycle hooks
   const onResume = () => {
     if (props.active) void handleResume();
@@ -432,8 +241,8 @@ export function SessionView(props: {
   });
 
   onCleanup(() => {
-    clearTimeout(loadOlderDebounce);
-    clearTimeout(sessionSearchDebounce);
+    loadOlderDebounce?.();
+    sessionSearchDebounce?.();
     document.removeEventListener("cc-session:resume", onResume);
     document.removeEventListener("cc-session:export", onExport);
     document.removeEventListener("cc-session:favorite", onFavorite);

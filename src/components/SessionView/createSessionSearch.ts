@@ -1,0 +1,144 @@
+import { createEffect, createMemo, createSignal, on } from "solid-js";
+import type { Accessor, Setter } from "solid-js";
+import {
+  pendingSessionSearch,
+  setPendingSessionSearch,
+} from "../../stores/search";
+import type { ProcessedEntry } from "./hooks";
+import {
+  SESSION_SEARCH_DEBOUNCE_MS,
+  countMatchingEntries,
+  findNewestMatchingEntryIndex,
+} from "./search-utils";
+
+export interface CreateSessionSearchOptions {
+  /** Role-filtered entries the search runs against. */
+  filteredEntries: Accessor<ProcessedEntry[]>;
+  /** Lazy ref getter — the messages container may not exist yet. */
+  getMessagesRef: () => HTMLDivElement | undefined;
+  /** Whether the session is still loading (gates the pending-search effect). */
+  loading: Accessor<boolean>;
+  /** The current session id (matched against a pending global search). */
+  sessionId: Accessor<string>;
+  /** Register the debounce timer for cleanup by the owning component. */
+  registerDebounce: (clear: () => void) => void;
+}
+
+export interface CreateSessionSearchResult {
+  sessionSearch: Accessor<string>;
+  setSessionSearch: Setter<string>;
+  activeSessionSearch: Accessor<string>;
+  searchFocusEntryIndex: Accessor<number | null>;
+  searchBarOpen: Accessor<boolean>;
+  setSearchBarOpen: Setter<boolean>;
+  searchMatchIdx: Accessor<number>;
+  setSearchMatchIdx: Setter<number>;
+  searchMatchCount: Accessor<number>;
+}
+
+/**
+ * Owns the in-session search slice of SessionView: the search query signals,
+ * the active/focus state, the match count memo, and the two effects that
+ * (1) consume a pending global search and (2) debounce typed queries. Bodies
+ * are moved verbatim from the inline component so dependency tracking, the
+ * debounce timing, and the `suppressNextSearchEffect` guard are unchanged.
+ *
+ * The debounce timer is owned here but its cleanup is registered back with the
+ * component via `registerDebounce` so onCleanup stays in one place.
+ */
+export function createSessionSearch(
+  opts: CreateSessionSearchOptions,
+): CreateSessionSearchResult {
+  const [sessionSearch, setSessionSearch] = createSignal("");
+  const [activeSessionSearch, setActiveSessionSearch] = createSignal("");
+  const [searchFocusEntryIndex, setSearchFocusEntryIndex] = createSignal<
+    number | null
+  >(null);
+  const [searchBarOpen, setSearchBarOpen] = createSignal(false);
+  const [searchMatchIdx, setSearchMatchIdx] = createSignal(0);
+
+  const searchMatchCount = createMemo(() =>
+    countMatchingEntries(opts.filteredEntries(), activeSessionSearch()),
+  );
+
+  let sessionSearchDebounce: ReturnType<typeof setTimeout> | undefined;
+  let suppressNextSearchEffect = false;
+  opts.registerDebounce(() => clearTimeout(sessionSearchDebounce));
+
+  function focusFirstRenderedSearchMatch() {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const messagesRef = opts.getMessagesRef();
+        if (!messagesRef) return;
+        const first = messagesRef.querySelector("mark.search-highlight");
+        if (!first) return;
+        messagesRef
+          .querySelector("mark.search-active")
+          ?.classList.remove("search-active");
+        first.classList.add("search-active");
+        first.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    });
+  }
+
+  function commitSessionSearch(raw: string) {
+    const term = raw.trim();
+    setSearchMatchIdx(0);
+    if (!term) {
+      setActiveSessionSearch("");
+      setSearchFocusEntryIndex(null);
+      return;
+    }
+
+    const entries = opts.filteredEntries();
+    const matchIdx = findNewestMatchingEntryIndex(entries, term);
+    setSearchFocusEntryIndex(matchIdx >= 0 ? matchIdx : null);
+    setActiveSessionSearch(term);
+    focusFirstRenderedSearchMatch();
+  }
+
+  // Consume a pending session search set by the global SearchOverlay.
+  // Runs after the session finishes loading; applies the query, opens the
+  // in-session search bar, and scrolls to the first match.
+  createEffect(() => {
+    const pending = pendingSessionSearch();
+    if (!pending || opts.loading()) return;
+    if (pending.sessionId !== opts.sessionId()) return;
+    setPendingSessionSearch(null);
+
+    suppressNextSearchEffect = true;
+    setSessionSearch(pending.query);
+    setSearchBarOpen(true);
+    commitSessionSearch(pending.query);
+  });
+
+  createEffect(
+    on(sessionSearch, (raw) => {
+      clearTimeout(sessionSearchDebounce);
+      if (suppressNextSearchEffect) {
+        suppressNextSearchEffect = false;
+        return;
+      }
+      if (!raw.trim()) {
+        commitSessionSearch("");
+        return;
+      }
+      sessionSearchDebounce = setTimeout(
+        () => commitSessionSearch(raw),
+        SESSION_SEARCH_DEBOUNCE_MS,
+      );
+    }),
+  );
+
+  return {
+    sessionSearch,
+    setSessionSearch,
+    activeSessionSearch,
+    searchFocusEntryIndex,
+    searchBarOpen,
+    setSearchBarOpen,
+    searchMatchIdx,
+    setSearchMatchIdx,
+    searchMatchCount,
+  };
+}
