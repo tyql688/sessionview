@@ -75,7 +75,6 @@ export function ProjectTable(props: ProjectTableProps) {
           <tbody>
             <For each={props.visibleProjects()}>
               {(row) => {
-                const info = props.providerInfo(row.provider);
                 return (
                   <tr>
                     <td>
@@ -95,11 +94,23 @@ export function ProjectTable(props: ProjectTableProps) {
                       </div>
                     </td>
                     <td class="usage-provider-cell">
-                      <span
-                        class="usage-provider-dot"
-                        style={{ background: info.color }}
-                      />
-                      {info.label}
+                      <For each={row.providers}>
+                        {(prov) => {
+                          const info = props.providerInfo(prov);
+                          return (
+                            <span
+                              class="usage-provider-chip"
+                              title={info.label}
+                            >
+                              <span
+                                class="usage-provider-dot"
+                                style={{ background: info.color }}
+                              />
+                              {info.label}
+                            </span>
+                          );
+                        }}
+                      </For>
                     </td>
                     <td class="r">{row.sessions}</td>
                     <td class="r">{row.turns.toLocaleString()}</td>

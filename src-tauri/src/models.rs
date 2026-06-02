@@ -444,7 +444,9 @@ pub struct ModelCost {
 pub struct ProjectCost {
     pub project: String,
     pub project_path: String,
-    pub provider: String,
+    /// Every provider (Claude Code, Codex, ...) that contributed usage to this
+    /// project, sorted. Usage below is summed across all of them.
+    pub providers: Vec<String>,
     pub sessions: u64,
     pub turns: u64,
     pub tokens: u64,

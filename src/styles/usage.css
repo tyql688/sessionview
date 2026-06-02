@@ -278,6 +278,18 @@
   flex: 0 0 auto;
 }
 
+.usage-provider-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 10px;
+  white-space: nowrap;
+}
+
+.usage-provider-chip:last-child {
+  margin-right: 0;
+}
+
 .usage-chip-count {
   min-width: 20px;
   padding: 1px 6px;

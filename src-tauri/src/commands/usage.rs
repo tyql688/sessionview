@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use anyhow::Context;
 use tauri::State;
@@ -213,20 +213,28 @@ fn cutoff_date_for_range_days(days: u32) -> Option<String> {
 }
 
 fn build_project_costs(project_model_rows: Vec<UsageProjectModelDetailRow>) -> Vec<ProjectCost> {
-    let mut project_map: HashMap<(String, String), ProjectCost> = HashMap::new();
-    let mut project_sessions: HashMap<(String, String), HashSet<String>> = HashMap::new();
+    // Merge across providers: one row per project_path, summing usage from every
+    // tool used in that project, and collecting the set of providers that
+    // contributed. Distinct project paths stay separate even if they share a name.
+    let mut project_map: HashMap<String, ProjectCost> = HashMap::new();
+    let mut project_sessions: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut project_providers: HashMap<String, BTreeSet<String>> = HashMap::new();
 
     for row in project_model_rows {
-        let key = (row.project_path.clone(), row.provider.clone());
+        let key = row.project_path.clone();
         project_sessions
             .entry(key.clone())
             .or_default()
             .insert(row.session_id);
+        project_providers
+            .entry(key.clone())
+            .or_default()
+            .insert(row.provider);
 
         let entry = project_map.entry(key).or_insert_with(|| ProjectCost {
             project: row.project_name,
             project_path: row.project_path,
-            provider: row.provider,
+            providers: Vec::new(),
             sessions: 0,
             turns: 0,
             tokens: 0,
@@ -245,6 +253,10 @@ fn build_project_costs(project_model_rows: Vec<UsageProjectModelDetailRow>) -> V
                 .remove(&key)
                 .map(|sessions| sessions.len() as u64)
                 .unwrap_or(0);
+            cost_row.providers = project_providers
+                .remove(&key)
+                .map(|set| set.into_iter().collect())
+                .unwrap_or_default();
             cost_row
         })
         .collect();
@@ -358,6 +370,46 @@ mod tests {
         assert_eq!(project_costs[0].project_path, "/tmp/drama/ccsession");
         assert_eq!(project_costs[0].turns, 24);
         assert_eq!(project_costs[0].tokens, 260);
+    }
+
+    #[test]
+    fn project_costs_merge_providers_for_same_project() {
+        let rows = vec![
+            UsageProjectModelDetailRow {
+                project_path: "/tmp/myproj".to_string(),
+                project_name: "myproj".to_string(),
+                provider: "claude".to_string(),
+                session_id: "session-a".to_string(),
+                turns: 10,
+                input_tokens: 100,
+                output_tokens: 50,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                cost_usd: 2.0,
+            },
+            UsageProjectModelDetailRow {
+                project_path: "/tmp/myproj".to_string(),
+                project_name: "myproj".to_string(),
+                provider: "codex".to_string(),
+                session_id: "session-b".to_string(),
+                turns: 5,
+                input_tokens: 60,
+                output_tokens: 40,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                cost_usd: 1.0,
+            },
+        ];
+
+        // Same project used under two tools merges into ONE row that combines
+        // their usage and lists both providers.
+        let project_costs = build_project_costs(rows);
+        assert_eq!(project_costs.len(), 1);
+        assert_eq!(project_costs[0].providers, vec!["claude", "codex"]);
+        assert_eq!(project_costs[0].sessions, 2);
+        assert_eq!(project_costs[0].turns, 15);
+        assert_eq!(project_costs[0].tokens, 250);
+        assert_eq!(project_costs[0].cost, 3.0);
     }
 
     #[test]

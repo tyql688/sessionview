@@ -216,7 +216,8 @@ export interface ModelCost {
 export interface ProjectCost {
   project: string;
   project_path: string;
-  provider: string;
+  /** Every provider that contributed usage to this project (sorted). */
+  providers: string[];
   sessions: number;
   turns: number;
   tokens: number;
