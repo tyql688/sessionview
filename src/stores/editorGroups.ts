@@ -39,6 +39,26 @@ function updateGroup(groupId: string, fn: (g: EditorGroup) => EditorGroup) {
   setGroups((prev) => prev.map((g) => (g.id === groupId ? fn(g) : g)));
 }
 
+/**
+ * Remove a tab from its source group, returning a new group with the tab
+ * gone, `activeTabId` recomputed (falls back to the last remaining tab, or
+ * null when none remain), and `previewTabId` cleared when the detached tab
+ * was the preview. Pure: does not mutate `group`. Callers layer any
+ * flexBasis change on top of the returned group.
+ */
+function detachTab(group: EditorGroup, sessionId: string): EditorGroup {
+  const tabs = group.tabs.filter((t) => t.id !== sessionId);
+  const activeTabId =
+    group.activeTabId === sessionId
+      ? tabs.length > 0
+        ? tabs[tabs.length - 1].id
+        : null
+      : group.activeTabId;
+  const previewTabId =
+    group.previewTabId === sessionId ? null : group.previewTabId;
+  return { ...group, tabs, activeTabId, previewTabId };
+}
+
 function removeGroupIfEmpty(groupId: string) {
   setGroups((prev) => {
     if (prev.length <= 1) return prev; // keep last group
@@ -189,28 +209,13 @@ function splitToRight(sessionId: string) {
   if (sourceGroup.tabs.length <= 1 && groups().length <= 1) return;
 
   const session = sourceGroup.tabs.find((t) => t.id === sessionId)!;
-  const isPreview = sourceGroup.previewTabId === sessionId;
-  // remove from source
-  const newSourceTabs = sourceGroup.tabs.filter((t) => t.id !== sessionId);
-  const newSourceActive =
-    sourceGroup.activeTabId === sessionId
-      ? newSourceTabs.length > 0
-        ? newSourceTabs[newSourceTabs.length - 1].id
-        : null
-      : sourceGroup.activeTabId;
-  const newSourcePreview = isPreview ? null : sourceGroup.previewTabId;
 
   const sourceIdx = groups().findIndex((g) => g.id === sourceGroup.id);
   const rightNeighbor = groups()[sourceIdx + 1];
 
   if (rightNeighbor) {
     // move to existing right group
-    updateGroup(sourceGroup.id, (g) => ({
-      ...g,
-      tabs: newSourceTabs,
-      activeTabId: newSourceActive,
-      previewTabId: newSourcePreview,
-    }));
+    updateGroup(sourceGroup.id, (g) => detachTab(g, sessionId));
     updateGroup(rightNeighbor.id, (g) => ({
       ...g,
       tabs: [...g.tabs, session],
@@ -221,10 +226,7 @@ function splitToRight(sessionId: string) {
     // create new group, split source width 50/50
     const halfBasis = sourceGroup.flexBasis / 2;
     updateGroup(sourceGroup.id, (g) => ({
-      ...g,
-      tabs: newSourceTabs,
-      activeTabId: newSourceActive,
-      previewTabId: newSourcePreview,
+      ...detachTab(g, sessionId),
       flexBasis: halfBasis,
     }));
     const newGroup = makeGroup([session], halfBasis);
@@ -238,12 +240,7 @@ function splitToRight(sessionId: string) {
     // at max groups, move to rightmost
     const rightmost = groups()[groups().length - 1];
     if (rightmost.id === sourceGroup.id) return; // already rightmost, no split target
-    updateGroup(sourceGroup.id, (g) => ({
-      ...g,
-      tabs: newSourceTabs,
-      activeTabId: newSourceActive,
-      previewTabId: newSourcePreview,
-    }));
+    updateGroup(sourceGroup.id, (g) => detachTab(g, sessionId));
     updateGroup(rightmost.id, (g) => ({
       ...g,
       tabs: [...g.tabs, session],
@@ -277,20 +274,7 @@ function moveTabToGroup(
   }
   const session = sourceGroup.tabs.find((t) => t.id === sessionId)!;
   // remove from source
-  const newSourceTabs = sourceGroup.tabs.filter((t) => t.id !== sessionId);
-  const newSourceActive =
-    sourceGroup.activeTabId === sessionId
-      ? newSourceTabs.length > 0
-        ? newSourceTabs[newSourceTabs.length - 1].id
-        : null
-      : sourceGroup.activeTabId;
-  const isPreview = sourceGroup.previewTabId === sessionId;
-  updateGroup(sourceGroup.id, (g) => ({
-    ...g,
-    tabs: newSourceTabs,
-    activeTabId: newSourceActive,
-    previewTabId: isPreview ? null : g.previewTabId,
-  }));
+  updateGroup(sourceGroup.id, (g) => detachTab(g, sessionId));
   // add to target (drag = pin, so don't set previewTabId)
   updateGroup(targetGroupId, (g) => {
     const tabs =
@@ -315,21 +299,9 @@ function createGroupFromDrop(sessionId: string): void {
   if (sourceGroup.tabs.length <= 1 && groups().length <= 1) return;
   const session = sourceGroup.tabs.find((t) => t.id === sessionId)!;
 
-  const newSourceTabs = sourceGroup.tabs.filter((t) => t.id !== sessionId);
-  const newSourceActive =
-    sourceGroup.activeTabId === sessionId
-      ? newSourceTabs.length > 0
-        ? newSourceTabs[newSourceTabs.length - 1].id
-        : null
-      : sourceGroup.activeTabId;
-
-  const isPreview = sourceGroup.previewTabId === sessionId;
   const halfBasis = sourceGroup.flexBasis / 2;
   updateGroup(sourceGroup.id, (g) => ({
-    ...g,
-    tabs: newSourceTabs,
-    activeTabId: newSourceActive,
-    previewTabId: isPreview ? null : g.previewTabId,
+    ...detachTab(g, sessionId),
     flexBasis: halfBasis,
   }));
 
