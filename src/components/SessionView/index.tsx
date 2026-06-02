@@ -31,7 +31,7 @@ import { ExportDialog } from "../ExportDialog";
 import { terminalApp } from "../../stores/settings";
 import { toast, toastError } from "../../stores/toast";
 import { errorMessage } from "../../lib/errors";
-import { processMessages } from "./hooks";
+import { isSearchableRole, processMessages } from "./hooks";
 import { SessionToolbar } from "./SessionToolbar";
 import { SessionSearch } from "./SessionSearch";
 import { TimelineMinimap } from "./TimelineMinimap";
@@ -433,7 +433,7 @@ export function SessionView(props: {
                         tools={entry.tools}
                         messages={entry.messages}
                         provider={meta().provider}
-                        highlightTerm={activeSessionSearch()}
+                        highlightTerm=""
                       />
                     </div>
                   );
@@ -443,7 +443,11 @@ export function SessionView(props: {
                     <MessageBubble
                       message={entry.msg}
                       provider={meta().provider}
-                      highlightTerm={activeSessionSearch()}
+                      highlightTerm={
+                        isSearchableRole(entry.msg.role)
+                          ? activeSessionSearch()
+                          : ""
+                      }
                     />
                   </div>
                 );

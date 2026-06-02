@@ -8,53 +8,19 @@ use crate::provider_utils::{truncate_to_bytes, FTS_CONTENT_LIMIT};
 
 use super::Database;
 
-/// Build the FTS content text fed to the global index from typed messages.
-///
-/// Includes user + assistant dialogue, thinking text (System messages, with the
-/// `[thinking]` marker stripped), and tool *call* signatures (tool name + input
-/// — commands, file paths, grep patterns, URLs), so a session is findable by
-/// what it did and how the model reasoned. Tool *result* bodies (role `Tool`)
-/// are intentionally left out: they can be megabytes and would crowd real
-/// dialogue out of the `FTS_CONTENT_LIMIT` cap; they stay searchable in-session.
+/// Build the FTS content text from typed messages — user + assistant dialogue
+/// only, so global search matches what was actually said. Tool calls/results,
+/// thinking, and system messages are intentionally excluded, keeping global
+/// search consistent with in-session search (see hooks.ts `isSearchableRole`).
 /// Falls back to the provider-supplied content_text when messages carry no real
 /// content (e.g. OpenCode emits Assistant stubs only for token accounting).
 fn indexable_content_text(messages: &[Message], fallback: &str) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    for m in messages {
-        if let Some(name) = m.tool_name.as_deref() {
-            let name = name.trim();
-            if !name.is_empty() {
-                parts.push(name.to_string());
-            }
-        }
-        if let Some(input) = m.tool_input.as_deref() {
-            let input = input.trim();
-            if !input.is_empty() {
-                parts.push(input.to_string());
-            }
-        }
-
-        let content = m.content.trim();
-        if content.is_empty() {
-            continue;
-        }
-        match m.role {
-            MessageRole::User | MessageRole::Assistant => parts.push(content.to_string()),
-            MessageRole::System => {
-                // Thinking blocks are System messages prefixed with `[thinking]`.
-                let text = content
-                    .strip_prefix("[thinking]\n")
-                    .or_else(|| content.strip_prefix("[thinking]"))
-                    .unwrap_or(content)
-                    .trim();
-                if !text.is_empty() {
-                    parts.push(text.to_string());
-                }
-            }
-            // Tool result bodies are indexed via their name+input above only.
-            MessageRole::Tool => {}
-        }
-    }
+    let parts: Vec<&str> = messages
+        .iter()
+        .filter(|m| matches!(m.role, MessageRole::User | MessageRole::Assistant))
+        .map(|m| m.content.as_str())
+        .filter(|c| !c.trim().is_empty())
+        .collect();
 
     if parts.is_empty() {
         return fallback.to_string();
@@ -916,7 +882,7 @@ mod tests {
     }
 
     #[test]
-    fn indexable_content_indexes_tool_calls_and_thinking_not_result_bodies() {
+    fn indexable_content_indexes_only_user_and_assistant() {
         use crate::models::{Message, MessageRole};
 
         fn msg(
@@ -946,7 +912,7 @@ mod tests {
                 Some("Bash"),
                 Some("grep 配置 src/"),
             ),
-            msg(MessageRole::Tool, "庞大的工具输出里有中文命中", None, None),
+            msg(MessageRole::Tool, "工具输出里有中文命中", None, None),
             msg(
                 MessageRole::System,
                 "[thinking]\n模型在思考问题",
@@ -956,24 +922,22 @@ mod tests {
         ];
 
         let text = super::indexable_content_text(&messages, "fallback");
+        // Only user + assistant dialogue is indexed.
         assert!(text.contains("用户问题"));
         assert!(text.contains("助手回复"));
-        assert!(text.contains("Bash"), "tool name must be indexed");
+        // Tool name/input, tool result bodies, thinking, and system are excluded.
+        assert!(!text.contains("Bash"), "tool name must NOT be indexed");
         assert!(
-            text.contains("grep 配置 src/"),
-            "tool input must be indexed"
+            !text.contains("grep 配置"),
+            "tool input must NOT be indexed"
         );
         assert!(
-            text.contains("模型在思考问题"),
-            "thinking text must be indexed"
+            !text.contains("工具输出"),
+            "tool result body must NOT be indexed"
         );
         assert!(
-            !text.contains("[thinking]"),
-            "thinking marker must be stripped"
-        );
-        assert!(
-            !text.contains("庞大的工具输出"),
-            "bulky tool result body must NOT be indexed"
+            !text.contains("模型在思考"),
+            "thinking text must NOT be indexed"
         );
     }
 

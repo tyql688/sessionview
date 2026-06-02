@@ -1,4 +1,4 @@
-import type { Message } from "../../lib/types";
+import type { Message, MessageRole } from "../../lib/types";
 import { parseTimestamp, formatTimeOnly } from "../../lib/formatters";
 
 /// Lowercased haystack used by in-session search. Computed once when the
@@ -15,19 +15,18 @@ export type ProcessedEntry =
       searchHaystack: string;
     };
 
-function messageHaystack(msg: Message): string {
-  return (msg.content ?? "").toLocaleLowerCase();
+/**
+ * Search covers user + assistant dialogue only, so in-session and global search
+ * stay consistent. Tool calls/results, thinking, and system messages are
+ * excluded from the haystack (here) and from the highlight pass (in index.tsx).
+ */
+export function isSearchableRole(role: MessageRole): boolean {
+  return role === "user" || role === "assistant";
 }
 
-function toolGroupHaystack(messages: Message[]): string {
-  return messages
-    .map((m) =>
-      [m.tool_name, m.tool_input, m.content]
-        .filter((value): value is string => !!value)
-        .join("\n"),
-    )
-    .join("\n")
-    .toLocaleLowerCase();
+function messageHaystack(msg: Message): string {
+  if (!isSearchableRole(msg.role)) return "";
+  return (msg.content ?? "").toLocaleLowerCase();
 }
 
 export function isRenderableMessage(msg: Message): boolean {
@@ -68,7 +67,8 @@ export function processMessages(msgs: Message[]): ProcessedEntry[] {
           type: "merged-tools",
           tools: toolNames,
           messages: toolGroup,
-          searchHaystack: toolGroupHaystack(toolGroup),
+          // Tool groups are not searchable — search covers user + assistant only.
+          searchHaystack: "",
         });
       } else {
         entries.push({
