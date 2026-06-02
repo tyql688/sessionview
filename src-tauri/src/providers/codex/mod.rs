@@ -146,7 +146,12 @@ impl SessionProvider for CodexProvider {
                 .usage_events
                 .iter()
                 .fold(TokenTotals::default(), |mut totals, event| {
-                    totals.input_tokens += event.input_tokens;
+                    // event.input_tokens includes cached tokens; store only the
+                    // non-cached part so input/cache_read stay disjoint (no
+                    // double-count), consistent with compute_token_stats.
+                    totals.input_tokens += event
+                        .input_tokens
+                        .saturating_sub(event.cache_read_input_tokens);
                     totals.output_tokens += event.output_tokens;
                     totals.cache_read_tokens += event.cache_read_input_tokens;
                     totals
@@ -186,12 +191,18 @@ impl SessionProvider for CodexProvider {
                     cost_usd: 0.0,
                 });
             entry.turn_count += 1;
-            entry.input_tokens += event.input_tokens;
-            entry.output_tokens += event.output_tokens;
-            entry.cache_read_tokens += event.cache_read_input_tokens;
+            // Codex's event.input_tokens INCLUDES the cached tokens, so store
+            // only the non-cached part — keeping input_tokens and
+            // cache_read_tokens disjoint, like Claude. Otherwise every token
+            // aggregate that sums input+cache_read double-counts the cached
+            // portion (≈2x inflation for cache-heavy Codex sessions). Cost is
+            // unaffected: it was already computed from non_cached_input.
             let non_cached_input = event
                 .input_tokens
                 .saturating_sub(event.cache_read_input_tokens);
+            entry.input_tokens += non_cached_input;
+            entry.output_tokens += event.output_tokens;
+            entry.cache_read_tokens += event.cache_read_input_tokens;
             entry.cost_usd += pricing::estimate_cost_with_catalog(
                 pricing_catalog,
                 &entry.model,
@@ -209,6 +220,44 @@ impl SessionProvider for CodexProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compute_token_stats_stores_non_cached_input_no_double_count() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("codex.jsonl");
+        fs::write(
+            &file,
+            concat!(
+                "{\"timestamp\":\"2026-04-10T10:00:00Z\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.4\"}}\n",
+                "{\"timestamp\":\"2026-04-10T10:00:01Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}}\n",
+                "{\"timestamp\":\"2026-04-10T10:00:02Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"last_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":600,\"output_tokens\":50,\"reasoning_output_tokens\":25,\"total_tokens\":1050}}}}\n"
+            ),
+        )
+        .unwrap();
+
+        let provider = CodexProvider {
+            home_dir: PathBuf::from("/tmp"),
+        };
+        let parsed = provider.parse_session_file(&file).expect("parsed session");
+        let rows = provider.compute_token_stats(&parsed, None, None);
+
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        // event.input_tokens=1000 INCLUDES the 600 cached tokens; the stored
+        // input must be the non-cached 400 so input + cache_read = 1000 (the true
+        // context), not 1600 — otherwise every token aggregate double-counts.
+        assert_eq!(r.input_tokens, 400, "input must exclude cached tokens");
+        assert_eq!(r.cache_read_tokens, 600);
+        assert_eq!(
+            r.input_tokens + r.cache_read_tokens,
+            1000,
+            "input + cache_read must not double-count cached tokens"
+        );
+        assert_eq!(r.output_tokens, 50);
+    }
 
     #[test]
     fn codex_parent_deletion_plan_includes_children() {
