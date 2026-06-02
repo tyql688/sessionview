@@ -1,3 +1,4 @@
+mod file_access;
 mod search;
 mod sessions;
 mod settings;
@@ -38,6 +39,7 @@ pub struct AppState {
     pub promote_in_flight: Arc<Mutex<HashSet<String>>>,
 }
 
+pub use file_access::*;
 pub use search::*;
 pub use sessions::*;
 pub use settings::*;
