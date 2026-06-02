@@ -4,6 +4,7 @@ use std::sync::Mutex;
 use crate::db::Database;
 use crate::models::TrashMeta;
 use crate::provider::{FileAction, RestoreAction, SessionProvider};
+use crate::services::error::{ServiceError, ServiceResult};
 use crate::services::image_cache::{image_cache_data_dir, ImageCacheService};
 use crate::services::{resolve_session_deletion, SourceSyncService};
 use crate::trash_state::{
@@ -33,7 +34,7 @@ impl<'a> SessionLifecycleService<'a> {
         }
     }
 
-    pub fn trash_session(&self, session_id: &str) -> Result<(), String> {
+    pub fn trash_session(&self, session_id: &str) -> ServiceResult<()> {
         let trash_dir = trash_dir()?;
         let deletion = resolve_session_deletion(self.db, session_id)?;
 
@@ -41,7 +42,7 @@ impl<'a> SessionLifecycleService<'a> {
         let meta_path = trash_meta_path(&trash_dir);
         let _lock = TRASH_META_LOCK
             .lock()
-            .map_err(|_| "trash meta lock poisoned".to_string())?;
+            .map_err(|_| ServiceError::TrashMetaLockPoisoned)?;
 
         let provider_key = deletion.meta.provider.key();
         let mut entries = read_trash_meta(&meta_path);
@@ -67,11 +68,11 @@ impl<'a> SessionLifecycleService<'a> {
         atomic_write_json(&meta_path, &entries)?;
         self.db
             .delete_session(session_id)
-            .map_err(|e| format!("failed to delete from db: {e}"))?;
+            .map_err(|e| ServiceError::DbDelete(e.to_string()))?;
         Ok(())
     }
 
-    pub fn purge_session(&self, session_id: &str) -> Result<(), String> {
+    pub fn purge_session(&self, session_id: &str) -> ServiceResult<()> {
         let deletion = resolve_session_deletion(self.db, session_id)?;
 
         // Clean cached images before deleting session data
@@ -93,7 +94,7 @@ impl<'a> SessionLifecycleService<'a> {
             .cleanup_on_permanent_delete(&deletion.meta.id);
         self.db
             .delete_session(session_id)
-            .map_err(|e| format!("failed to delete from db: {e}"))?;
+            .map_err(|e| ServiceError::DbDelete(e.to_string()))?;
         Ok(())
     }
 
@@ -160,13 +161,13 @@ impl<'a> SessionLifecycleService<'a> {
         }
     }
 
-    pub fn list_trash() -> Result<Vec<TrashMeta>, String> {
+    pub fn list_trash() -> ServiceResult<Vec<TrashMeta>> {
         let trash_dir = trash_dir()?;
         let meta_path = trash_meta_path(&trash_dir);
         let shared_deletions_path = shared_deletions_path(&trash_dir);
         let _lock = TRASH_META_LOCK
             .lock()
-            .map_err(|_| "trash meta lock poisoned".to_string())?;
+            .map_err(|_| ServiceError::TrashMetaLockPoisoned)?;
         prune_unsupported_trash_entries(
             read_trash_meta(&meta_path),
             &meta_path,
@@ -175,17 +176,17 @@ impl<'a> SessionLifecycleService<'a> {
         )
     }
 
-    pub fn restore_session(&self, trash_id: &str) -> Result<(), String> {
+    pub fn restore_session(&self, trash_id: &str) -> ServiceResult<()> {
         let trash_dir = trash_dir()?;
         let meta_path = trash_meta_path(&trash_dir);
         let shared_deletions_path = shared_deletions_path(&trash_dir);
         if !meta_path.exists() {
-            return Err("No trash metadata found".to_string());
+            return Err(ServiceError::NoTrashMetadata);
         }
 
         let lock = TRASH_META_LOCK
             .lock()
-            .map_err(|_| "trash meta lock poisoned".to_string())?;
+            .map_err(|_| ServiceError::TrashMetaLockPoisoned)?;
 
         let entries = prune_unsupported_trash_entries(
             read_trash_meta(&meta_path),
@@ -245,7 +246,7 @@ impl<'a> SessionLifecycleService<'a> {
         Ok(())
     }
 
-    pub fn empty_trash() -> Result<(), String> {
+    pub fn empty_trash() -> ServiceResult<()> {
         let trash_dir = trash_dir()?;
         let meta_path = trash_meta_path(&trash_dir);
         let shared_deletions_path = shared_deletions_path(&trash_dir);
@@ -253,7 +254,7 @@ impl<'a> SessionLifecycleService<'a> {
         if meta_path.exists() {
             let _lock = TRASH_META_LOCK
                 .lock()
-                .map_err(|_| "trash meta lock poisoned".to_string())?;
+                .map_err(|_| ServiceError::TrashMetaLockPoisoned)?;
             let entries = prune_unsupported_trash_entries(
                 read_trash_meta(&meta_path),
                 &meta_path,
@@ -273,17 +274,17 @@ impl<'a> SessionLifecycleService<'a> {
         Ok(())
     }
 
-    pub fn permanent_delete_trash(&self, trash_id: &str) -> Result<(), String> {
+    pub fn permanent_delete_trash(&self, trash_id: &str) -> ServiceResult<()> {
         let trash_dir = trash_dir()?;
         let meta_path = trash_meta_path(&trash_dir);
         let shared_deletions_path = shared_deletions_path(&trash_dir);
         if !meta_path.exists() {
-            return Err("No trash metadata found".to_string());
+            return Err(ServiceError::NoTrashMetadata);
         }
 
         let _lock = TRASH_META_LOCK
             .lock()
-            .map_err(|_| "trash meta lock poisoned".to_string())?;
+            .map_err(|_| ServiceError::TrashMetaLockPoisoned)?;
         let entries = prune_unsupported_trash_entries(
             read_trash_meta(&meta_path),
             &meta_path,
@@ -310,7 +311,7 @@ fn prune_unsupported_trash_entries(
     meta_path: &Path,
     trash_dir: &Path,
     shared_deletions_path: &Path,
-) -> Result<Vec<TrashMeta>, String> {
+) -> ServiceResult<Vec<TrashMeta>> {
     let mut retained = Vec::with_capacity(entries.len());
     let mut removed = false;
 
@@ -340,19 +341,19 @@ fn remove_unsupported_trash_entry(
     entry: &TrashMeta,
     trash_dir: &Path,
     shared_deletions_path: &Path,
-) -> Result<(), String> {
+) -> ServiceResult<()> {
     if !entry.trash_file.is_empty() {
         let trash_file = trash_dir.join(&entry.trash_file);
         if trash_file.exists() {
             let metadata = trash_file
                 .metadata()
-                .map_err(|e| format!("failed to inspect unsupported trash file: {e}"))?;
+                .map_err(|e| ServiceError::InspectUnsupportedTrashFile(e.to_string()))?;
             if metadata.is_dir() {
                 std::fs::remove_dir_all(&trash_file)
-                    .map_err(|e| format!("failed to remove unsupported trash directory: {e}"))?;
+                    .map_err(|e| ServiceError::RemoveUnsupportedTrashDir(e.to_string()))?;
             } else {
                 std::fs::remove_file(&trash_file)
-                    .map_err(|e| format!("failed to remove unsupported trash file: {e}"))?;
+                    .map_err(|e| ServiceError::RemoveUnsupportedTrashFile(e.to_string()))?;
             }
         } else {
             log::warn!(
@@ -418,7 +419,7 @@ fn remove_trash_entry(
     shared_deletions_path: &Path,
     all_entries: &[TrashMeta],
     delete_all: bool,
-) -> Result<(), String> {
+) -> ServiceResult<()> {
     if entry.trash_file.is_empty() && !entry.original_path.is_empty() {
         purge_shared_trash_entry(entry, shared_deletions_path)?;
         if delete_all {
@@ -503,7 +504,7 @@ fn cleanup_cached_images_for_trash(entry: &TrashMeta, trash_dir: &std::path::Pat
     }
 }
 
-fn purge_shared_trash_entry(entry: &TrashMeta, shared_deletions_path: &Path) -> Result<(), String> {
+fn purge_shared_trash_entry(entry: &TrashMeta, shared_deletions_path: &Path) -> ServiceResult<()> {
     if let Some(provider) = runtime_for_trash_entry(entry) {
         if let Err(error) = provider.purge_from_source(&entry.original_path, &entry.id) {
             log::warn!("failed to purge session {} from source: {error}", entry.id);
@@ -515,7 +516,8 @@ fn purge_shared_trash_entry(entry: &TrashMeta, shared_deletions_path: &Path) -> 
         &entry.id,
         &entry.provider,
         &entry.original_path,
-    )
+    )?;
+    Ok(())
 }
 
 fn cleanup_provider_entry(entry: &TrashMeta) {

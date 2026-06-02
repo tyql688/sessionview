@@ -1,3 +1,4 @@
+pub mod error;
 pub(crate) mod image_cache;
 pub(crate) mod image_markers;
 pub mod load_cancel;
@@ -9,6 +10,7 @@ mod session_resolution;
 mod source_sync;
 pub mod tail_reader;
 
+pub use error::{ServiceError, ServiceResult};
 pub use persisted_output_cache::PersistedOutputCache;
 pub use provider_snapshots::ProviderSnapshotService;
 pub use session_cache::SessionCache;

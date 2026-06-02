@@ -4,6 +4,7 @@ use crate::db::Database;
 use crate::models::Provider;
 use crate::pricing::{self, PRICING_CATALOG_JSON_KEY};
 use crate::provider::TokenStatRow;
+use crate::services::error::{ServiceError, ServiceResult};
 use crate::services::image_cache::ImageCacheService;
 
 pub struct SourceSyncService<'a> {
@@ -15,7 +16,7 @@ impl<'a> SourceSyncService<'a> {
         Self { db }
     }
 
-    pub fn sync_source_path(&self, source_path: &str) -> Result<bool, String> {
+    pub fn sync_source_path(&self, source_path: &str) -> ServiceResult<bool> {
         let Some(provider) = Provider::from_source_path(source_path) else {
             return Ok(false);
         };
@@ -24,16 +25,12 @@ impl<'a> SourceSyncService<'a> {
         Ok(true)
     }
 
-    pub fn sync_provider_source(
-        &self,
-        provider: Provider,
-        source_path: &str,
-    ) -> Result<(), String> {
+    pub fn sync_provider_source(&self, provider: Provider, source_path: &str) -> ServiceResult<()> {
         let provider_impl = provider.require_runtime()?;
 
         let mut sessions = provider_impl
             .scan_source(source_path)
-            .map_err(|e| format!("failed to scan source: {e}"))?;
+            .map_err(|e| ServiceError::ScanSource(e.to_string()))?;
 
         let excluded = crate::trash_state::shared_deleted_ids();
         if !excluded.is_empty() {
@@ -42,7 +39,7 @@ impl<'a> SourceSyncService<'a> {
 
         self.db
             .sync_source_snapshot(&provider, source_path, &sessions)
-            .map_err(|e| format!("failed to sync source snapshot: {e}"))?;
+            .map_err(|e| ServiceError::SyncSourceSnapshot(e.to_string()))?;
 
         let pricing_catalog = match self.db.get_meta(PRICING_CATALOG_JSON_KEY) {
             Ok(Some(json)) => match pricing::parse_catalog(&json) {
@@ -100,12 +97,12 @@ impl<'a> SourceSyncService<'a> {
 
         self.db
             .set_meta("usage_last_refreshed_at", &chrono::Utc::now().to_rfc3339())
-            .map_err(|e| format!("failed to store usage_last_refreshed_at: {e}"))?;
+            .map_err(|e| ServiceError::StoreUsageLastRefreshed(e.to_string()))?;
 
         Ok(())
     }
 
-    pub fn sync_provider_key(&self, provider_key: &str, source_path: &str) -> Result<(), String> {
+    pub fn sync_provider_key(&self, provider_key: &str, source_path: &str) -> ServiceResult<()> {
         let provider = Provider::parse_strict(provider_key)?;
         self.sync_provider_source(provider, source_path)
     }

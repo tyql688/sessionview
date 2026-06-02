@@ -178,7 +178,7 @@ pub async fn start_rebuild_index(
         })
         .await
         .map_err(|e| format!("task join error: {e:#}"))
-        .and_then(|result| result);
+        .and_then(|result| result.map_err(|e| e.to_string()));
 
         match result {
             Ok(_) => emit_maintenance(&app, "rebuild_index", "finished", None),
@@ -221,7 +221,11 @@ pub async fn start_refresh_usage(
                     .db
                     .clear_usage_stats()
                     .map_err(|e| format!("failed to clear usage stats: {e:#}"))?;
-                state.indexer.reindex().map(|_| ())
+                state
+                    .indexer
+                    .reindex()
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
             }
         })
         .await

@@ -1,5 +1,6 @@
 use crate::db::Database;
 use crate::models::{Provider, ProviderSnapshot};
+use crate::services::error::{ServiceError, ServiceResult};
 use std::path::{Path, PathBuf};
 
 pub struct ProviderSnapshotService<'a> {
@@ -11,11 +12,11 @@ impl<'a> ProviderSnapshotService<'a> {
         Self { db }
     }
 
-    pub fn list(&self) -> Result<Vec<ProviderSnapshot>, String> {
+    pub fn list(&self) -> ServiceResult<Vec<ProviderSnapshot>> {
         let counts = self
             .db
             .provider_session_counts()
-            .map_err(|e| format!("failed to load provider session counts: {e}"))?;
+            .map_err(|e| ServiceError::LoadProviderSessionCounts(e.to_string()))?;
 
         let mut snapshots = Vec::new();
 

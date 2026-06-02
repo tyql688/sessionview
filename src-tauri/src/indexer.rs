@@ -9,6 +9,7 @@ use crate::db::Database;
 use crate::models::{Provider, SessionMeta, TreeNode, TreeNodeType};
 use crate::pricing::{self, PRICING_CATALOG_JSON_KEY};
 use crate::provider::{ParsedSession, SessionProvider, TokenStatRow};
+use crate::services::error::{ServiceError, ServiceResult};
 use crate::services::image_cache::ImageCacheService;
 
 #[derive(Clone)]
@@ -31,7 +32,7 @@ impl Indexer {
         }
     }
 
-    pub fn reindex(&self) -> Result<usize, String> {
+    pub fn reindex(&self) -> ServiceResult<usize> {
         self.reindex_filtered(None, true)
     }
 
@@ -39,7 +40,7 @@ impl Indexer {
         &self,
         filter: Option<&[Provider]>,
         aggressive: bool,
-    ) -> Result<usize, String> {
+    ) -> ServiceResult<usize> {
         self.reindex_filtered(filter, aggressive)
     }
 
@@ -47,7 +48,7 @@ impl Indexer {
         &self,
         filter: Option<&[Provider]>,
         aggressive: bool,
-    ) -> Result<usize, String> {
+    ) -> ServiceResult<usize> {
         let start = Instant::now();
         let mut total = 0usize;
         let pricing_catalog = match self.db.get_meta(PRICING_CATALOG_JSON_KEY) {
@@ -93,9 +94,9 @@ impl Indexer {
             .map(|p| p.as_ref())
             .collect();
 
-        let works: Result<Vec<ProviderWork>, String> = provider_refs
+        let works: ServiceResult<Vec<ProviderWork>> = provider_refs
             .par_iter()
-            .map(|provider| -> Result<ProviderWork, String> {
+            .map(|provider| -> ServiceResult<ProviderWork> {
                 let provider_kind = provider.provider();
                 // Pre-fetch the per-source `(size, mtime)` snapshot the
                 // provider uses to short-circuit unchanged files. Each
@@ -105,14 +106,13 @@ impl Indexer {
                     .db
                     .source_states_for_provider(provider_kind.key())
                     .map_err(|e| {
-                        format!(
-                            "failed to load {} source snapshot: {}",
-                            provider_kind.key(),
-                            e
+                        ServiceError::LoadProviderSourceSnapshot(
+                            provider_kind.key().to_string(),
+                            e.to_string(),
                         )
                     })?;
                 let outcome = provider.scan_incremental(&known).map_err(|e| {
-                    format!("failed to scan {} provider: {}", provider_kind.key(), e)
+                    ServiceError::ScanProvider(provider_kind.key().to_string(), e.to_string())
                 })?;
                 let mut sessions = outcome.parsed;
                 let unchanged_source_paths = outcome.unchanged_source_paths;
@@ -163,7 +163,9 @@ impl Indexer {
             let count = sessions.len();
             self.db
                 .sync_provider_snapshot(provider_kind, sessions, aggressive, unchanged_source_paths)
-                .map_err(|e| format!("failed to sync {} provider: {}", provider_kind.key(), e))?;
+                .map_err(|e| {
+                    ServiceError::SyncProvider(provider_kind.key().to_string(), e.to_string())
+                })?;
 
             let batch_refs: Vec<(&str, &[TokenStatRow])> = stats_batch
                 .iter()
@@ -186,11 +188,11 @@ impl Indexer {
         if filter.is_none() {
             self.db
                 .set_meta("last_index_time", &now_millis.to_string())
-                .map_err(|e| format!("failed to store last_index_time: {e}"))?;
+                .map_err(|e| ServiceError::StoreLastIndexTime(e.to_string()))?;
         }
         self.db
             .set_meta("usage_last_refreshed_at", &chrono::Utc::now().to_rfc3339())
-            .map_err(|e| format!("failed to store usage_last_refreshed_at: {e}"))?;
+            .map_err(|e| ServiceError::StoreUsageLastRefreshed(e.to_string()))?;
 
         let elapsed = start.elapsed();
         log::info!(
@@ -202,11 +204,11 @@ impl Indexer {
         Ok(total)
     }
 
-    pub fn build_tree(&self) -> Result<Vec<TreeNode>, String> {
+    pub fn build_tree(&self) -> ServiceResult<Vec<TreeNode>> {
         let mut sessions = self
             .db
             .list_sessions()
-            .map_err(|e| format!("failed to list sessions: {e}"))?;
+            .map_err(|e| ServiceError::ListSessions(e.to_string()))?;
         crate::providers::cc_mirror::hydrate_variant_names(&mut sessions);
 
         let mut provider_map: BTreeMap<String, BTreeMap<String, Vec<SessionMeta>>> =

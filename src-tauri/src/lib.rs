@@ -44,7 +44,9 @@ pub mod command_test_helpers {
     }
 
     pub fn get_provider_snapshots(db: &Database) -> Result<Vec<ProviderSnapshot>, String> {
-        ProviderSnapshotService::new(db).list()
+        ProviderSnapshotService::new(db)
+            .list()
+            .map_err(|e| e.to_string())
     }
 
     pub fn get_resume_command(db: &Database, session_id: &str) -> Result<String, String> {
@@ -52,19 +54,25 @@ pub mod command_test_helpers {
     }
 
     pub fn trash_session(db: &Database, session_id: &str) -> Result<(), String> {
-        SessionLifecycleService::new(db).trash_session(session_id)
+        SessionLifecycleService::new(db)
+            .trash_session(session_id)
+            .map_err(|e| e.to_string())
     }
 
     pub fn list_trash() -> Result<Vec<TrashMeta>, String> {
-        SessionLifecycleService::list_trash()
+        SessionLifecycleService::list_trash().map_err(|e| e.to_string())
     }
 
     pub fn restore_session(db: &Database, trash_id: &str) -> Result<(), String> {
-        SessionLifecycleService::new(db).restore_session(trash_id)
+        SessionLifecycleService::new(db)
+            .restore_session(trash_id)
+            .map_err(|e| e.to_string())
     }
 
     pub fn delete_session(db: &Database, session_id: &str) -> Result<(), String> {
-        SessionLifecycleService::new(db).purge_session(session_id)
+        SessionLifecycleService::new(db)
+            .purge_session(session_id)
+            .map_err(|e| e.to_string())
     }
 }
 

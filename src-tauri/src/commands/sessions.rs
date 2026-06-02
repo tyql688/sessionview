@@ -204,7 +204,7 @@ pub async fn sync_sources(paths: Vec<String>, state: State<'_, AppState>) -> Com
             state.session_cache.invalidate_source(&path);
         }
 
-        Ok::<usize, String>(synced)
+        Ok::<usize, crate::services::ServiceError>(synced)
     })
     .await
     .context("task join error")?
@@ -826,5 +826,23 @@ fn load_messages_from_provider_or_canceled(
                 Err(e)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{canceled_error, CANCEL_ERROR};
+    use crate::error::CommandError;
+
+    /// The cancel sentinel must reach the command boundary unchanged so
+    /// the frontend's `isLoadCanceledError` (`msg.includes(...)`) keeps
+    /// suppressing the toast on tab-switch races. This locks the exact
+    /// serialized text the frontend matches against.
+    #[test]
+    fn canceled_error_serializes_with_cancel_sentinel() {
+        let command: CommandError = canceled_error().into();
+        let serialized = format!("{:#}", command.0);
+        assert_eq!(serialized, CANCEL_ERROR);
+        assert!(serialized.contains("__cc_session_load_canceled__"));
     }
 }
