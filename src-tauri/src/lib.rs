@@ -342,6 +342,13 @@ pub fn run() {
                 let _ = win.set_decorations(false);
             }
 
+            // On Linux, the WM also draws its own title bar, which would stack on
+            // top of our custom one — hide native decorations like on Windows.
+            #[cfg(target_os = "linux")]
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.set_decorations(false);
+            }
+
             // Provider instances are lightweight (just PathBuf); create a separate
             // set for the watcher since Indexer consumed the first set.
             let watcher_providers = provider::all_runtimes();

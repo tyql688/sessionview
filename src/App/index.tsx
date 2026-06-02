@@ -57,6 +57,13 @@ import { createKeyboardHandler } from "./KeyboardShortcuts";
 import { createSyncManager } from "./SyncManager";
 import "../styles/index.css";
 
+// Linux derived locally (platform.ts is intentionally minimal). On Linux the
+// app hides native decorations like Windows, so it needs the same custom
+// min/max/close window controls.
+const isLinux =
+  typeof navigator !== "undefined" && /Linux/.test(navigator.platform);
+const showWindowControls = isWindows || isLinux;
+
 export default function App() {
   const { t } = useI18n();
   const [tree, setTree] = createSignal<TreeNode[]>([]);
@@ -66,6 +73,7 @@ export default function App() {
   const [showKeyboardOverlay, setShowKeyboardOverlay] = createSignal(false);
   const [showSearchOverlay, setShowSearchOverlay] = createSignal(false);
   const [sidebarCollapsed, setSidebarCollapsed] = createSignal(false);
+  const [isMaximized, setIsMaximized] = createSignal(false);
   const [lastScanTime, setLastScanTime] = createSignal<number | undefined>();
   const [todayCost, setTodayCost] = createSignal<number | undefined>();
   const [todayTokens, setTodayTokens] = createSignal<
@@ -98,6 +106,7 @@ export default function App() {
 
   let unlistenWatcher: UnlistenFn | undefined;
   let unlistenMaintenance: UnlistenFn | undefined;
+  let unlistenResized: UnlistenFn | undefined;
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
   const sync = createSyncManager({
@@ -139,6 +148,24 @@ export default function App() {
   onMount(async () => {
     if (isMac) {
       document.documentElement.style.setProperty("--titlebar-inset", "78px");
+    }
+
+    // Track maximize state so the custom (Windows/Linux) maximize button can
+    // swap to a "restore" glyph. macOS uses native traffic lights, so skip it.
+    if (showWindowControls) {
+      const win = getCurrentWindow();
+      try {
+        setIsMaximized(await win.isMaximized());
+        unlistenResized = await win.onResized(async () => {
+          try {
+            setIsMaximized(await win.isMaximized());
+          } catch (error) {
+            console.error("Failed to read window maximize state:", error);
+          }
+        });
+      } catch (error) {
+        console.error("Failed to initialize window maximize tracking:", error);
+      }
     }
 
     window.addEventListener("usage-data-changed", handleUsageChanged);
@@ -253,6 +280,7 @@ export default function App() {
     window.removeEventListener("usage-data-changed", handleUsageChanged);
     unlistenWatcher?.();
     unlistenMaintenance?.();
+    unlistenResized?.();
     sync.stopPolling();
     clearTimeout(debounceTimer);
     debouncedChangedPaths.clear();
@@ -340,50 +368,81 @@ export default function App() {
           </div>
           <div class="titlebar-right" />
 
-          <Show when={isWindows}>
+          <Show when={showWindowControls}>
             <div class="win-controls">
               <button
                 class="win-ctrl-btn"
-                onClick={() => getCurrentWindow().minimize()}
-              >
-                <svg viewBox="0 0 10 1">
-                  <rect width="10" height="1" />
-                </svg>
-              </button>
-              <button
-                class="win-ctrl-btn"
-                onClick={() => getCurrentWindow().toggleMaximize()}
-              >
-                <svg viewBox="0 0 10 10">
-                  <rect
-                    x="0.5"
-                    y="0.5"
-                    width="9"
-                    height="9"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1"
-                  />
-                </svg>
-              </button>
-              <button
-                class="win-ctrl-btn close"
-                onClick={() => getCurrentWindow().close()}
+                onClick={() => void getCurrentWindow().minimize()}
               >
                 <svg viewBox="0 0 10 10">
                   <line
                     x1="0"
-                    y1="0"
+                    y1="5"
                     x2="10"
-                    y2="10"
+                    y2="5"
+                    stroke="currentColor"
+                    stroke-width="1.2"
+                  />
+                </svg>
+              </button>
+              <button
+                class="win-ctrl-btn"
+                onClick={() => void getCurrentWindow().toggleMaximize()}
+              >
+                <Show
+                  when={isMaximized()}
+                  fallback={
+                    <svg viewBox="0 0 10 10">
+                      <rect
+                        x="0.6"
+                        y="0.6"
+                        width="8.8"
+                        height="8.8"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.2"
+                      />
+                    </svg>
+                  }
+                >
+                  {/* Restore: two overlapping squares (rear top-right, front bottom-left) */}
+                  <svg viewBox="0 0 10 10">
+                    <path
+                      d="M2.6 2.6 V1.1 H8.9 V7.4 H7.4"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.2"
+                    />
+                    <rect
+                      x="1.1"
+                      y="2.6"
+                      width="6.3"
+                      height="6.3"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.2"
+                    />
+                  </svg>
+                </Show>
+              </button>
+              <button
+                class="win-ctrl-btn close"
+                onClick={() => void getCurrentWindow().close()}
+              >
+                <svg viewBox="0 0 10 10">
+                  <line
+                    x1="0.5"
+                    y1="0.5"
+                    x2="9.5"
+                    y2="9.5"
                     stroke="currentColor"
                     stroke-width="1.2"
                   />
                   <line
-                    x1="10"
-                    y1="0"
-                    x2="0"
-                    y2="10"
+                    x1="9.5"
+                    y1="0.5"
+                    x2="0.5"
+                    y2="9.5"
                     stroke="currentColor"
                     stroke-width="1.2"
                   />
