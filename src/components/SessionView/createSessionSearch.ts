@@ -8,6 +8,7 @@ import type { ProcessedEntry } from "./hooks";
 import {
   SESSION_SEARCH_DEBOUNCE_MS,
   findNewestMatchingEntryIndex,
+  getMarksInVisualOrder,
 } from "./search-utils";
 
 export interface CreateSessionSearchOptions {
@@ -64,7 +65,13 @@ export function createSessionSearch(
       requestAnimationFrame(() => {
         const messagesRef = opts.getMessagesRef();
         if (!messagesRef) return;
-        const first = messagesRef.querySelector("mark.search-highlight");
+        // Activate the FIRST mark in visual order (top->bottom) — the same list
+        // Next/Prev cycles and that searchMatchIdx=0 refers to — so the scroll
+        // target, the active highlight, and the navigation cursor all agree on
+        // the top match. (Previously this used querySelector = DOM order, which
+        // under the column-reverse layout is the opposite end, so the highlight
+        // disagreed with where the view scrolled and where Next started.)
+        const first = getMarksInVisualOrder(messagesRef)[0];
         if (!first) return;
         messagesRef
           .querySelector("mark.search-active")
