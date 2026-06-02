@@ -1,11 +1,11 @@
 //! Codex token-usage parsing and aggregation. Codex emits usage as
-//! `event_msg.token_count` payloads carrying either a per-turn
-//! `last_token_usage` or a running `total_token_usage`; this module
-//! normalizes those raw counts, derives per-event deltas when only the
-//! cumulative total is present, and folds usage onto the most recent
-//! assistant message. The cross-line running total lives on the
-//! accumulator (`previous_token_totals`) so consecutive `token_count`
-//! events resolve deltas correctly.
+//! `event_msg.token_count` payloads carrying a per-turn `last_token_usage`
+//! (with a running `total_token_usage` used as a fallback for older logs
+//! that lack the per-turn field). Codex re-emits some token_count events
+//! verbatim, so events identical in timestamp, model, and every token count
+//! are deduplicated before aggregation to avoid double-counting. The
+//! cross-line running total lives on the accumulator (`previous_token_totals`)
+//! so the delta fallback resolves correctly across events.
 
 use serde_json::Value;
 
@@ -89,12 +89,16 @@ pub(super) fn codex_usage_from_info(
         .and_then(normalize_codex_raw_usage);
 
     match (last_usage, total_usage) {
+        // Per-turn `last_token_usage` is authoritative; keep the running total in
+        // sync for the delta fallback below.
         (Some(last), total) => {
             if let Some((_, total_counts)) = total {
                 *previous_totals = Some(total_counts);
             }
             Some(last)
         }
+        // Older logs carry only the cumulative total — recover the per-turn
+        // amount as the delta from the previous event.
         (None, Some((model, total_counts))) => {
             let delta = subtract_codex_usage(total_counts, *previous_totals);
             *previous_totals = Some(total_counts);

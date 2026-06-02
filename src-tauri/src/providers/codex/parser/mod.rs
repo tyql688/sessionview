@@ -62,6 +62,11 @@ pub(super) struct CodexScanAccum {
     pub(super) thread_name: Option<String>,
     pub(super) current_model: Option<String>,
     pub(super) previous_token_totals: Option<CodexRawUsageCounts>,
+    /// Codex re-emits some token_count events verbatim. Events identical in
+    /// (timestamp, model, input, cached, output, reasoning, total) are counted
+    /// once; this set tracks the ones already recorded.
+    pub(super) seen_token_events:
+        std::collections::HashSet<(String, String, u64, u64, u64, u64, u64)>,
     cc_version: Option<String>,
     git_branch: Option<String>,
     is_sidechain: bool,
@@ -93,6 +98,7 @@ impl CodexScanAccum {
             thread_name: None,
             current_model: None,
             previous_token_totals: None,
+            seen_token_events: std::collections::HashSet::new(),
             cc_version: None,
             git_branch: None,
             is_sidechain: false,
@@ -370,6 +376,7 @@ impl CodexProvider {
             thread_name,
             current_model: _,
             previous_token_totals: _,
+            seen_token_events: _,
             cc_version,
             git_branch,
             is_sidechain,
@@ -709,6 +716,8 @@ mod tests {
         };
         let parsed = provider.parse_session_file(&file).expect("parsed session");
         let events = &parsed.usage_events;
+        // E1, E2, E3 have distinct timestamps, so none are exact duplicates;
+        // each contributes its last_token_usage.
         assert_eq!(events.len(), 3);
         assert_eq!(events[0].input_tokens, 1000);
         assert_eq!(events[0].cache_read_input_tokens, 600);
@@ -748,9 +757,41 @@ mod tests {
         let usage = assistant.token_usage.as_ref().expect("token usage");
 
         assert_eq!(assistant.model.as_deref(), Some("gpt-5.4"));
+        // E1 and E2 have distinct timestamps (not exact duplicates), so both
+        // fold onto the assistant message.
         assert_eq!(usage.input_tokens, 2000);
         assert_eq!(usage.cache_read_input_tokens, 1200);
         assert_eq!(usage.output_tokens, 100);
+    }
+
+    #[test]
+    fn parse_session_dedups_token_count_events_with_identical_timestamp_and_usage() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("codex.jsonl");
+        // A and B are verbatim re-emits (same timestamp AND same usage), so B is
+        // dropped. C is a distinct turn at a later timestamp.
+        fs::write(
+            &file,
+            concat!(
+                "{\"timestamp\":\"2026-04-10T10:00:00Z\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-5.4\"}}\n",
+                "{\"timestamp\":\"2026-04-10T10:00:01Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}}\n",
+                "{\"timestamp\":\"2026-04-10T10:00:02Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":600,\"output_tokens\":50,\"reasoning_output_tokens\":25,\"total_tokens\":1050},\"last_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":600,\"output_tokens\":50,\"reasoning_output_tokens\":25,\"total_tokens\":1050}}}}\n",
+                "{\"timestamp\":\"2026-04-10T10:00:02Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":600,\"output_tokens\":50,\"reasoning_output_tokens\":25,\"total_tokens\":1050},\"last_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":600,\"output_tokens\":50,\"reasoning_output_tokens\":25,\"total_tokens\":1050}}}}\n",
+                "{\"timestamp\":\"2026-04-10T10:00:05Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":1700,\"cached_input_tokens\":1000,\"output_tokens\":70,\"reasoning_output_tokens\":25,\"total_tokens\":1770},\"last_token_usage\":{\"input_tokens\":700,\"cached_input_tokens\":400,\"output_tokens\":20,\"reasoning_output_tokens\":0,\"total_tokens\":720}}}}\n"
+            ),
+        )
+        .unwrap();
+
+        let provider = CodexProvider {
+            home_dir: PathBuf::from("/tmp"),
+        };
+        let parsed = provider.parse_session_file(&file).expect("parsed session");
+        let events = &parsed.usage_events;
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].input_tokens, 1000);
+        assert_eq!(events[0].cache_read_input_tokens, 600);
+        assert_eq!(events[1].input_tokens, 700);
+        assert_eq!(events[1].cache_read_input_tokens, 400);
     }
 
     #[test]

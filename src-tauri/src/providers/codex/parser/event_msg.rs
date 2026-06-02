@@ -171,6 +171,23 @@ impl CodexScanAccum {
                         }
                         return;
                     };
+                    // Codex re-emits some token_count events verbatim. Count an
+                    // event identical in (timestamp, model, input, cached,
+                    // output, reasoning, total) only once.
+                    if let Some(ts) = entry.timestamp.as_ref() {
+                        let key = (
+                            ts.clone(),
+                            resolved_model.clone(),
+                            input,
+                            cached,
+                            output,
+                            reasoning,
+                            total,
+                        );
+                        if !self.seen_token_events.insert(key) {
+                            return;
+                        }
+                    }
                     if any_nonzero {
                         if let Some(ts) = entry.timestamp.as_ref() {
                             self.usage_events.push(UsageEvent {
