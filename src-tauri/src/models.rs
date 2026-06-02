@@ -447,6 +447,18 @@ pub struct ProjectCost {
     /// Every provider (Claude Code, Codex, ...) that contributed usage to this
     /// project, sorted. Usage below is summed across all of them.
     pub providers: Vec<String>,
+    /// Per-provider breakdown for this project (sorted by cost desc), so the
+    /// merged row can be expanded to show how much each tool contributed.
+    pub by_provider: Vec<ProjectProviderUsage>,
+    pub sessions: u64,
+    pub turns: u64,
+    pub tokens: u64,
+    pub cost: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectProviderUsage {
+    pub provider: String,
     pub sessions: u64,
     pub turns: u64,
     pub tokens: u64,

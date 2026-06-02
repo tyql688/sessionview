@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Context;
 use tauri::State;
@@ -218,32 +218,72 @@ fn build_project_costs(project_model_rows: Vec<UsageProjectModelDetailRow>) -> V
     // contributed. Distinct project paths stay separate even if they share a name.
     let mut project_map: HashMap<String, ProjectCost> = HashMap::new();
     let mut project_sessions: HashMap<String, HashSet<String>> = HashMap::new();
-    let mut project_providers: HashMap<String, BTreeSet<String>> = HashMap::new();
+    // Per-(project_path, provider) breakdown so each merged row can expand to
+    // show how much each tool contributed.
+    let mut pp_map: HashMap<(String, String), ProjectProviderUsage> = HashMap::new();
+    let mut pp_sessions: HashMap<(String, String), HashSet<String>> = HashMap::new();
 
     for row in project_model_rows {
-        let key = row.project_path.clone();
+        let path = row.project_path.clone();
+        let provider = row.provider.clone();
+        let tokens =
+            row.input_tokens + row.output_tokens + row.cache_read_tokens + row.cache_write_tokens;
+
         project_sessions
-            .entry(key.clone())
+            .entry(path.clone())
+            .or_default()
+            .insert(row.session_id.clone());
+        pp_sessions
+            .entry((path.clone(), provider.clone()))
             .or_default()
             .insert(row.session_id);
-        project_providers
-            .entry(key.clone())
-            .or_default()
-            .insert(row.provider);
 
-        let entry = project_map.entry(key).or_insert_with(|| ProjectCost {
-            project: row.project_name,
-            project_path: row.project_path,
-            providers: Vec::new(),
-            sessions: 0,
-            turns: 0,
-            tokens: 0,
-            cost: 0.0,
-        });
+        let entry = project_map
+            .entry(path.clone())
+            .or_insert_with(|| ProjectCost {
+                project: row.project_name,
+                project_path: path.clone(),
+                providers: Vec::new(),
+                by_provider: Vec::new(),
+                sessions: 0,
+                turns: 0,
+                tokens: 0,
+                cost: 0.0,
+            });
         entry.turns += row.turns;
-        entry.tokens +=
-            row.input_tokens + row.output_tokens + row.cache_read_tokens + row.cache_write_tokens;
+        entry.tokens += tokens;
         entry.cost += row.cost_usd;
+
+        let pp = pp_map
+            .entry((path, provider.clone()))
+            .or_insert_with(|| ProjectProviderUsage {
+                provider,
+                sessions: 0,
+                turns: 0,
+                tokens: 0,
+                cost: 0.0,
+            });
+        pp.turns += row.turns;
+        pp.tokens += tokens;
+        pp.cost += row.cost_usd;
+    }
+
+    // Group the per-provider rows under their project, with distinct session
+    // counts, each list sorted by cost desc.
+    let mut by_project: HashMap<String, Vec<ProjectProviderUsage>> = HashMap::new();
+    for ((path, provider), mut pp) in pp_map {
+        pp.sessions = pp_sessions
+            .get(&(path.clone(), provider))
+            .map(|sessions| sessions.len() as u64)
+            .unwrap_or(0);
+        by_project.entry(path).or_default().push(pp);
+    }
+    for list in by_project.values_mut() {
+        list.sort_by(|a, b| {
+            b.cost
+                .partial_cmp(&a.cost)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
     }
 
     let mut project_costs: Vec<ProjectCost> = project_map
@@ -253,10 +293,11 @@ fn build_project_costs(project_model_rows: Vec<UsageProjectModelDetailRow>) -> V
                 .remove(&key)
                 .map(|sessions| sessions.len() as u64)
                 .unwrap_or(0);
-            cost_row.providers = project_providers
-                .remove(&key)
-                .map(|set| set.into_iter().collect())
-                .unwrap_or_default();
+            let breakdown = by_project.remove(&key).unwrap_or_default();
+            let mut providers: Vec<String> = breakdown.iter().map(|p| p.provider.clone()).collect();
+            providers.sort();
+            cost_row.providers = providers;
+            cost_row.by_provider = breakdown;
             cost_row
         })
         .collect();
@@ -410,6 +451,16 @@ mod tests {
         assert_eq!(project_costs[0].turns, 15);
         assert_eq!(project_costs[0].tokens, 250);
         assert_eq!(project_costs[0].cost, 3.0);
+        // Per-provider breakdown, sorted by cost desc (claude $2 before codex $1).
+        let bp = &project_costs[0].by_provider;
+        assert_eq!(bp.len(), 2);
+        assert_eq!(bp[0].provider, "claude");
+        assert_eq!(bp[0].sessions, 1);
+        assert_eq!(bp[0].turns, 10);
+        assert_eq!(bp[0].tokens, 150);
+        assert_eq!(bp[0].cost, 2.0);
+        assert_eq!(bp[1].provider, "codex");
+        assert_eq!(bp[1].cost, 1.0);
     }
 
     #[test]

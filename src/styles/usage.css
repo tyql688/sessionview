@@ -756,6 +756,33 @@
   color: var(--text-primary);
 }
 
+.usage-row-expandable {
+  cursor: pointer;
+}
+
+.usage-expand-icon {
+  display: inline-block;
+  width: 14px;
+  margin-right: 2px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+
+.usage-subrow td {
+  background: color-mix(in srgb, var(--bg-sidebar) 38%, transparent);
+  color: var(--text-secondary);
+}
+
+.usage-subrow td:first-child {
+  padding-left: 34px;
+}
+
+.usage-subrow-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .usage-model-tag {
   display: inline-flex;
   align-items: center;

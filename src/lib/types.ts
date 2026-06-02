@@ -213,11 +213,21 @@ export interface ModelCost {
   cost: number;
 }
 
+export interface ProjectProviderUsage {
+  provider: string;
+  sessions: number;
+  turns: number;
+  tokens: number;
+  cost: number;
+}
+
 export interface ProjectCost {
   project: string;
   project_path: string;
   /** Every provider that contributed usage to this project (sorted). */
   providers: string[];
+  /** Per-provider breakdown (sorted by cost desc) for the expandable row. */
+  by_provider: ProjectProviderUsage[];
   sessions: number;
   turns: number;
   tokens: number;
