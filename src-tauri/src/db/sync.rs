@@ -8,19 +8,53 @@ use crate::provider_utils::{truncate_to_bytes, FTS_CONTENT_LIMIT};
 
 use super::Database;
 
-/// Rebuild the FTS content text from typed messages, keeping only the
-/// dialogue roles (user + assistant). This excludes tool calls, tool output,
-/// and system/thinking messages so the global search matches what the user
-/// actually said or what the model actually replied. Falls back to the
-/// provider-supplied content_text when messages carry no real content
-/// (e.g. OpenCode emits Assistant stubs only for token accounting).
-fn dialogue_content_text(messages: &[Message], fallback: &str) -> String {
-    let parts: Vec<&str> = messages
-        .iter()
-        .filter(|m| matches!(m.role, MessageRole::User | MessageRole::Assistant))
-        .map(|m| m.content.as_str())
-        .filter(|c| !c.trim().is_empty())
-        .collect();
+/// Build the FTS content text fed to the global index from typed messages.
+///
+/// Includes user + assistant dialogue, thinking text (System messages, with the
+/// `[thinking]` marker stripped), and tool *call* signatures (tool name + input
+/// — commands, file paths, grep patterns, URLs), so a session is findable by
+/// what it did and how the model reasoned. Tool *result* bodies (role `Tool`)
+/// are intentionally left out: they can be megabytes and would crowd real
+/// dialogue out of the `FTS_CONTENT_LIMIT` cap; they stay searchable in-session.
+/// Falls back to the provider-supplied content_text when messages carry no real
+/// content (e.g. OpenCode emits Assistant stubs only for token accounting).
+fn indexable_content_text(messages: &[Message], fallback: &str) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for m in messages {
+        if let Some(name) = m.tool_name.as_deref() {
+            let name = name.trim();
+            if !name.is_empty() {
+                parts.push(name.to_string());
+            }
+        }
+        if let Some(input) = m.tool_input.as_deref() {
+            let input = input.trim();
+            if !input.is_empty() {
+                parts.push(input.to_string());
+            }
+        }
+
+        let content = m.content.trim();
+        if content.is_empty() {
+            continue;
+        }
+        match m.role {
+            MessageRole::User | MessageRole::Assistant => parts.push(content.to_string()),
+            MessageRole::System => {
+                // Thinking blocks are System messages prefixed with `[thinking]`.
+                let text = content
+                    .strip_prefix("[thinking]\n")
+                    .or_else(|| content.strip_prefix("[thinking]"))
+                    .unwrap_or(content)
+                    .trim();
+                if !text.is_empty() {
+                    parts.push(text.to_string());
+                }
+            }
+            // Tool result bodies are indexed via their name+input above only.
+            MessageRole::Tool => {}
+        }
+    }
 
     if parts.is_empty() {
         return fallback.to_string();
@@ -96,7 +130,7 @@ impl Database {
 
         self.with_transaction(|conn| {
             for parsed in sessions {
-                let content = dialogue_content_text(&parsed.messages, &parsed.content_text);
+                let content = indexable_content_text(&parsed.messages, &parsed.content_text);
                 upsert_session_on(
                     conn,
                     &parsed.meta,
@@ -150,7 +184,7 @@ impl Database {
 
         self.with_transaction(|conn| {
             for parsed in sessions {
-                let content = dialogue_content_text(&parsed.messages, &parsed.content_text);
+                let content = indexable_content_text(&parsed.messages, &parsed.content_text);
                 upsert_session_on(
                     conn,
                     &parsed.meta,
@@ -879,5 +913,67 @@ mod tests {
 
         let loaded = db.get_session(child_id).unwrap().unwrap();
         assert_eq!(loaded.parent_id, Some(true_parent.to_string()));
+    }
+
+    #[test]
+    fn indexable_content_indexes_tool_calls_and_thinking_not_result_bodies() {
+        use crate::models::{Message, MessageRole};
+
+        fn msg(
+            role: MessageRole,
+            content: &str,
+            tool_name: Option<&str>,
+            tool_input: Option<&str>,
+        ) -> Message {
+            Message {
+                role,
+                content: content.to_string(),
+                timestamp: None,
+                tool_name: tool_name.map(str::to_string),
+                tool_input: tool_input.map(str::to_string),
+                tool_metadata: None,
+                token_usage: None,
+                model: None,
+                usage_hash: None,
+            }
+        }
+
+        let messages = vec![
+            msg(MessageRole::User, "用户问题", None, None),
+            msg(
+                MessageRole::Assistant,
+                "助手回复",
+                Some("Bash"),
+                Some("grep 配置 src/"),
+            ),
+            msg(MessageRole::Tool, "庞大的工具输出里有中文命中", None, None),
+            msg(
+                MessageRole::System,
+                "[thinking]\n模型在思考问题",
+                None,
+                None,
+            ),
+        ];
+
+        let text = super::indexable_content_text(&messages, "fallback");
+        assert!(text.contains("用户问题"));
+        assert!(text.contains("助手回复"));
+        assert!(text.contains("Bash"), "tool name must be indexed");
+        assert!(
+            text.contains("grep 配置 src/"),
+            "tool input must be indexed"
+        );
+        assert!(
+            text.contains("模型在思考问题"),
+            "thinking text must be indexed"
+        );
+        assert!(
+            !text.contains("[thinking]"),
+            "thinking marker must be stripped"
+        );
+        assert!(
+            !text.contains("庞大的工具输出"),
+            "bulky tool result body must NOT be indexed"
+        );
     }
 }
