@@ -22,6 +22,15 @@ import {
   loadPersistedOutput,
   substitutePersistedOutputs,
 } from "../../lib/persisted-output";
+import {
+  SUBAGENT_FILE_PROVIDERS,
+  extractAgentChildIds,
+  extractAgentChildPrompts,
+  extractAgentDescription,
+  extractAgentId,
+  extractAgentNickname,
+  parseToolJsonObject,
+} from "../../lib/subagent";
 import { parseContent } from "./MarkdownRenderer";
 import {
   ImagePreview,
@@ -44,16 +53,6 @@ function openSubagent(
     }),
   );
 }
-
-/** Providers where subagents are stored as separate session files (can be opened). */
-const SUBAGENT_FILE_PROVIDERS = new Set([
-  "claude",
-  "codex",
-  "kimi",
-  "cursor",
-  "cc-mirror",
-  "antigravity",
-]);
 
 function DiffRows(props: { lines: ToolDiffLine[] }) {
   return (
@@ -86,28 +85,6 @@ function DiffRows(props: { lines: ToolDiffLine[] }) {
 
 function LineDiff(props: { oldText: string; newText: string }) {
   return <DiffRows lines={buildToolLineDiff(props.oldText, props.newText)} />;
-}
-
-/** Parse a possibly-JSON tool payload into an object. Returns undefined
- *  silently for plain-text payloads (Bash stdout, file contents, etc.)
- *  — most tool outputs aren't JSON, and calling JSON.parse on them spams
- *  SyntaxError into the console. We only attempt a parse when the value
- *  looks like a JSON object/array, and only log a warning when something
- *  that *looked* like JSON failed to parse (a real anomaly worth seeing). */
-function parseToolJsonObject(
-  raw: string | undefined | null,
-  label: string,
-): Record<string, unknown> | undefined {
-  if (typeof raw !== "string") return undefined;
-  const trimmed = raw.trimStart();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return undefined;
-  try {
-    const parsed = JSON.parse(trimmed);
-    return typeof parsed === "object" && parsed !== null ? parsed : undefined;
-  } catch (error) {
-    console.warn(`Failed to parse ${label} JSON:`, error);
-    return undefined;
-  }
 }
 
 export function ToolMessage(props: { message: Message; provider?: string }) {
@@ -193,6 +170,7 @@ export function ToolMessage(props: { message: Message; provider?: string }) {
   const resultHasDiff = () =>
     !!resultMetadata()?.diff || !!resultMetadata()?.patchDiff;
   const showInputDetail = () => !!formatted() && !resultHasDiff();
+  const isAgent = () => name() === "Agent";
   /** Parsed tool_input/tool_output JSON, memoized so each downstream
    *  extractor reuses the same JSON.parse call. Most tool outputs are
    *  plain text (Bash stdout, file contents, …), so we pre-screen the
@@ -205,100 +183,29 @@ export function ToolMessage(props: { message: Message; provider?: string }) {
   const toolOutputObj = createMemo<Record<string, unknown> | undefined>(() =>
     parseToolJsonObject(props.message.content, "tool output"),
   );
-  /** Extract nickname from Agent tool output (Codex: {"nickname":"Faraday"}) */
-  const agentNickname = createMemo(() => {
-    if (name() !== "Agent") return undefined;
-    const obj = toolOutputObj();
-    return typeof obj?.nickname === "string" ? obj.nickname : undefined;
-  });
-  /** Full description from Agent tool input (not truncated, for subagent matching).
-   *  Codex spawn_agent carries the task text in `message`, not `description`/`prompt`. */
-  const agentDescription = createMemo(() => {
-    if (name() !== "Agent") return undefined;
-    const obj = toolInputObj();
-    if (!obj) return undefined;
-    const candidate = obj.description ?? obj.prompt ?? obj.message;
-    return typeof candidate === "string" ? candidate : undefined;
-  });
-  /** Extract agent_id from Agent tool output/structured/input.
-   *  Priority:
-   *    1. Kimi output format: "agent_id: xxx"
-   *    2. Structured metadata agentId (set by successful spawn_agent)
-   *    3. Tool input target / agent_id (codex wait_agent / send_input / close_agent) */
-  const agentId = createMemo(() => {
-    if (name() !== "Agent") return undefined;
-    if (hasOutput()) {
-      const m = props.message.content.match(/^agent_id:\s*(\S+)/m);
-      if (m) return m[1];
-    }
-    const structured = props.message.tool_metadata?.structured;
-    if (
-      structured &&
-      typeof structured === "object" &&
-      !Array.isArray(structured) &&
-      "agentId" in structured
-    ) {
-      return String(structured.agentId);
-    }
-    const obj = toolInputObj();
-    if (obj) {
-      const single = obj.target ?? obj.agent_id ?? obj.agentId;
-      if (typeof single === "string") return single;
-      const targets = obj.targets;
-      if (
-        Array.isArray(targets) &&
-        targets.length === 1 &&
-        typeof targets[0] === "string"
-      ) {
-        return targets[0];
-      }
-    }
-    return undefined;
-  });
-  /**
-   * Antigravity's `invoke_subagent` tool spawns one or many subagents in a
-   * single call; the conversationIds are written by the parser to
-   * `tool_metadata.structured.childConversationIds`. When this list is
-   * present we render one "Open" link per child instead of the single-button
-   * path used by Claude/Codex/Kimi.
-   */
-  const agentChildIds = createMemo<string[] | undefined>(() => {
-    if (name() !== "Agent") return undefined;
-    const structured = props.message.tool_metadata?.structured;
-    if (
-      !structured ||
-      typeof structured !== "object" ||
-      Array.isArray(structured)
-    ) {
-      return undefined;
-    }
-    const raw = (structured as Record<string, unknown>).childConversationIds;
-    if (!Array.isArray(raw)) return undefined;
-    const ids = raw.filter(
-      (v): v is string => typeof v === "string" && v.length > 0,
-    );
-    return ids.length > 0 ? ids : undefined;
-  });
-  /**
-   * Positional list of subagent prompts (one per `agentChildIds()` entry).
-   * The parser pulls these from the parent's `invoke_subagent` tool input so
-   * each "Open" button can display *what* the subagent was asked to do
-   * instead of an opaque "Open #2".
-   */
-  const agentChildPrompts = createMemo<string[]>(() => {
-    if (name() !== "Agent") return [];
-    const structured = props.message.tool_metadata?.structured;
-    if (
-      !structured ||
-      typeof structured !== "object" ||
-      Array.isArray(structured)
-    ) {
-      return [];
-    }
-    const raw = (structured as Record<string, unknown>).childPrompts;
-    if (!Array.isArray(raw)) return [];
-    return raw.map((v) => (typeof v === "string" ? v : ""));
-  });
+  // Subagent extraction lives in lib/subagent.ts (pure, provider-specific);
+  // these memos are thin wrappers gated on the Agent tool name.
+  const agentNickname = createMemo(() =>
+    isAgent() ? extractAgentNickname(toolOutputObj()) : undefined,
+  );
+  const agentDescription = createMemo(() =>
+    isAgent() ? extractAgentDescription(toolInputObj()) : undefined,
+  );
+  const agentId = createMemo(() =>
+    isAgent()
+      ? extractAgentId(
+          props.message.content,
+          props.message.tool_metadata,
+          toolInputObj(),
+        )
+      : undefined,
+  );
+  const agentChildIds = createMemo<string[] | undefined>(() =>
+    isAgent() ? extractAgentChildIds(props.message.tool_metadata) : undefined,
+  );
+  const agentChildPrompts = createMemo<string[]>(() =>
+    isAgent() ? extractAgentChildPrompts(props.message.tool_metadata) : [],
+  );
 
   async function loadFullResult() {
     const path = persistedOutputPath();

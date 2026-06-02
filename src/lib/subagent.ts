@@ -1,0 +1,177 @@
+import type { Message, ToolMetadata } from "./types";
+
+/** Providers where subagents are stored as separate session files (can be opened). */
+export const SUBAGENT_FILE_PROVIDERS = new Set([
+  "claude",
+  "codex",
+  "kimi",
+  "cursor",
+  "cc-mirror",
+  "antigravity",
+]);
+
+/**
+ * Subagent metadata extracted from an Agent tool message. Each field is
+ * optional/empty when the underlying source doesn't carry it; the "Open"
+ * button(s) in ToolMessage resolve a child session from whichever of these
+ * are present (priority: agentId → nickname → description).
+ */
+export interface SubagentInfo {
+  /** Codex agent nickname from tool output ({"nickname":"Faraday"}). */
+  nickname?: string;
+  /** Full (untruncated) task description from tool input JSON. */
+  description?: string;
+  /** Resolved agent id (Kimi output line / structured metadata / tool input). */
+  agentId?: string;
+  /** Antigravity multi-spawn child conversation ids (one "Open" per entry). */
+  childIds?: string[];
+  /** Positional prompts aligned with childIds (empty string when absent). */
+  childPrompts: string[];
+}
+
+/** Narrow `structured` metadata to a plain object record (not array/null). */
+function structuredRecord(
+  metadata: ToolMetadata | undefined,
+): Record<string, unknown> | null {
+  const structured = metadata?.structured;
+  return structured &&
+    typeof structured === "object" &&
+    !Array.isArray(structured)
+    ? (structured as Record<string, unknown>)
+    : null;
+}
+
+/** Parse a possibly-JSON tool payload into an object record. Returns undefined
+ *  silently for plain-text payloads (Bash stdout, file contents, etc.) — most
+ *  tool inputs/outputs aren't JSON, and calling JSON.parse on them spams
+ *  SyntaxError into the console. We only attempt a parse when the value looks
+ *  like a JSON object/array, and only log a warning when something that
+ *  *looked* like JSON failed to parse (a real anomaly worth seeing). */
+export function parseToolJsonObject(
+  raw: string | undefined | null,
+  label: string,
+): Record<string, unknown> | undefined {
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trimStart();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return typeof parsed === "object" && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch (error) {
+    console.warn(`Failed to parse ${label} JSON:`, error);
+    return undefined;
+  }
+}
+
+/** Extract nickname from Agent tool output (Codex: {"nickname":"Faraday"}). */
+export function extractAgentNickname(
+  output: Record<string, unknown> | undefined,
+): string | undefined {
+  return typeof output?.nickname === "string" ? output.nickname : undefined;
+}
+
+/** Full description from Agent tool input (not truncated, for subagent matching).
+ *  Codex spawn_agent carries the task text in `message`, not `description`/`prompt`. */
+export function extractAgentDescription(
+  input: Record<string, unknown> | undefined,
+): string | undefined {
+  if (!input) return undefined;
+  const candidate = input.description ?? input.prompt ?? input.message;
+  return typeof candidate === "string" ? candidate : undefined;
+}
+
+/** Extract agent_id from Agent tool output text / structured metadata / input.
+ *  Priority:
+ *    1. Kimi output format: "agent_id: xxx"
+ *    2. Structured metadata agentId (set by successful spawn_agent)
+ *    3. Tool input target / agent_id (codex wait_agent / send_input / close_agent) */
+export function extractAgentId(
+  outputText: string | undefined,
+  metadata: ToolMetadata | undefined,
+  input: Record<string, unknown> | undefined,
+): string | undefined {
+  if (typeof outputText === "string" && outputText.length > 0) {
+    const m = outputText.match(/^agent_id:\s*(\S+)/m);
+    if (m) return m[1];
+  }
+  const structured = metadata?.structured;
+  if (
+    structured &&
+    typeof structured === "object" &&
+    !Array.isArray(structured) &&
+    "agentId" in structured
+  ) {
+    return String((structured as Record<string, unknown>).agentId);
+  }
+  if (input) {
+    const single = input.target ?? input.agent_id ?? input.agentId;
+    if (typeof single === "string") return single;
+    const targets = input.targets;
+    if (
+      Array.isArray(targets) &&
+      targets.length === 1 &&
+      typeof targets[0] === "string"
+    ) {
+      return targets[0];
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Antigravity's `invoke_subagent` tool spawns one or many subagents in a single
+ * call; the conversationIds are written by the parser to
+ * `tool_metadata.structured.childConversationIds`. When this list is present we
+ * render one "Open" link per child instead of the single-button path used by
+ * Claude/Codex/Kimi.
+ */
+export function extractAgentChildIds(
+  metadata: ToolMetadata | undefined,
+): string[] | undefined {
+  const structured = structuredRecord(metadata);
+  if (!structured) return undefined;
+  const raw = structured.childConversationIds;
+  if (!Array.isArray(raw)) return undefined;
+  const ids = raw.filter(
+    (v): v is string => typeof v === "string" && v.length > 0,
+  );
+  return ids.length > 0 ? ids : undefined;
+}
+
+/**
+ * Positional list of subagent prompts (one per `extractAgentChildIds` entry).
+ * The parser pulls these from the parent's `invoke_subagent` tool input so each
+ * "Open" button can display *what* the subagent was asked to do instead of an
+ * opaque "Open #2".
+ */
+export function extractAgentChildPrompts(
+  metadata: ToolMetadata | undefined,
+): string[] {
+  const structured = structuredRecord(metadata);
+  if (!structured) return [];
+  const raw = structured.childPrompts;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((v) => (typeof v === "string" ? v : ""));
+}
+
+/**
+ * Extract all subagent metadata for an Agent tool message. Non-Agent messages
+ * yield an empty info (`childPrompts: []`, all others undefined). Pure: takes
+ * the message and returns derived data with no side effects.
+ */
+export function extractSubagentInfo(message: Message): SubagentInfo {
+  if (message.tool_name !== "Agent") {
+    return { childPrompts: [] };
+  }
+  const input = parseToolJsonObject(message.tool_input, "tool_input");
+  const output = parseToolJsonObject(message.content, "tool output");
+  return {
+    nickname: extractAgentNickname(output),
+    description: extractAgentDescription(input),
+    agentId: extractAgentId(message.content, message.tool_metadata, input),
+    childIds: extractAgentChildIds(message.tool_metadata),
+    childPrompts: extractAgentChildPrompts(message.tool_metadata),
+  };
+}
