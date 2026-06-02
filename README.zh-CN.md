@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  浏览、搜索、恢复和管理你的 AI 编程会话，一个桌面应用搞定。
+  <b>一个桌面应用，浏览、搜索、恢复和管理你所有的 AI 编程会话。</b>
 </p>
 
 <p align="center">
@@ -17,68 +17,78 @@
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/tyql688/cc-session?style=flat-square"></a>
 </p>
 
+<p align="center">
+  <a href="assets/show.png"><img src="assets/show.png" alt="CC Session — 会话浏览器" width="860"></a>
+</p>
+
 ---
 
 ## 为什么需要 CC Session？
 
-Claude Code、Codex、Antigravity、Kimi Code、Cursor CLI 等 AI 编程工具会在本地存储会话数据，但没有方便的方式来浏览、搜索和回顾历史对话。CC Session 将所有工具的会话集中到一个统一界面 — 查看完整对话历史、跨工具全文搜索、导出记录、或直接在终端中恢复任意会话。
+Claude Code、Codex、Antigravity、Kimi Code、Cursor CLI 等工具都把会话数据存在本地 —— 但各有各的格式、各自的目录，回头查找全无门路。**CC Session 把所有 provider 汇到一个原生快应用里：** 阅读完整对话历史、一次性跨工具搜索、导出干净的归档，并直接在终端里恢复任意会话。
 
-> **把所有本地 AI 编程会话集中到一个应用里**
->
-> 浏览历史、跨工具搜索、恢复误删会话、导出归档，并且一键继续当前会话。
+> 💡 **所有本地编程会话，一个窗口搞定** —— 不用再翻 `~/.claude`、`~/.codex` 和一堆其它目录。
 
-## 功能
+## ✨ 功能
 
-- **统一视图** — 多种 AI 编程工具的所有会话集中展示
-- **全文搜索** — SQLite FTS5，跨所有会话内容搜索
-- **恢复会话** — 直接从当前会话跳回终端继续
-- **实时监听** — 文件型 provider 通过 OS watcher 自动刷新；OpenCode 使用 provider-aware 轮询
-- **丰富渲染** — Markdown、语法高亮、Mermaid 图表、KaTeX 数学公式、内嵌图片、结构化工具调用 diff
-- **Token 统计** — 单条消息和会话级别 Token 计数，区分缓存命中/写入
-- **导出** — JSON、Markdown 或独立 HTML（暗色模式、可折叠工具和思考块）
-- **会话管理** — 重命名、回收站/恢复、收藏、批量操作
-- **自动更新** — 内置更新器自动检查新版本
-- **键盘友好** — 常用导航和操作都可以快速用键盘完成
-- **双语** — 英文 / 中文
-- **屏蔽文件夹** — 隐藏特定项目目录的会话
+- 🗂️ **统一视图** —— 所有支持的 provider 的会话，集中在一个资源管理器里
+- 🔍 **全文搜索** —— 跨所有会话内容的即时搜索（SQLite FTS5），外加会话内查找
+- ↩️ **一键恢复** —— 直接跳回终端继续任意会话
+- 📊 **用量分析** —— 成本、Token、按模型拆分，区分缓存命中/写入
+- 🎨 **丰富渲染** —— Markdown、语法高亮、Mermaid 图表、KaTeX 数学公式、内嵌图片、结构化工具调用 diff
+- 👀 **实时监听** —— 文件型 provider 通过 OS watcher 自动刷新；OpenCode 使用 provider-aware 轮询
+- 📤 **导出** —— JSON、Markdown 或独立 HTML（暗色模式、可折叠工具与思考块）
+- 🗃️ **会话管理** —— 重命名、收藏、回收站/恢复、批量操作
+- ⌨️ **键盘优先** —— 不碰鼠标也能导航和操作
+- 🔄 **自动更新**、🌐 **中文 / English**、🚫 **屏蔽文件夹**（隐藏吵闹的项目目录）
 
-## 支持的工具
+## 📊 用量分析
 
-当前支持：
+清楚看到自己在每个 provider 上的实际花费 —— 每日成本趋势、按模型的 Token 总量、缓存效率，全在一个看板里。
 
-- Claude Code
-- Codex CLI
-- Antigravity
-- Kimi Code
-- Cursor CLI
-- OpenCode
-- CC-Mirror
+<p align="center">
+  <a href="assets/usage.png"><img src="assets/usage.png" alt="CC Session — 用量分析" width="860"></a>
+</p>
 
-跨工具统一解析：消息、工具调用（含输入/输出）、思考/推理块、Token 用量、内嵌图片，以及源格式支持时的 Markdown、Mermaid 图表和 KaTeX 数学公式。
+## 🧩 支持的工具
 
-## 安装
+| Provider | 源格式 | 实时监听 | 恢复命令 |
+|----------|--------|:--------:|----------|
+| **Claude Code** | JSONL | FS | `claude --resume` |
+| **Codex CLI** | JSONL | FS | `codex resume` |
+| **Antigravity** | JSONL | FS | `agy --conversation` |
+| **Kimi Code** | JSONL | FS | `kimi --session` |
+| **Cursor CLI** | JSONL + SQLite | FS | `cursor agent --resume` |
+| **OpenCode** | SQLite | 轮询 | `opencode -s` |
+| **CC-Mirror** | JSONL | FS | 按变体 |
 
-从 [Releases](https://github.com/tyql688/cc-session/releases) 下载最新版本：
+跨工具统一解析：消息、工具调用（含输入/输出）、思考/推理块、Token 用量、内嵌图片，以及源格式支持时的 Markdown、Mermaid 图表和 KaTeX 数学公式 —— 含子代理/子会话。
 
-- **macOS** — `.dmg`
-- **Windows** — `.exe`（NSIS 安装包）
-- **Linux** — `.deb` / `.AppImage`
+## 📥 安装
 
-> **macOS Gatekeeper：** 应用未经代码签名。首次打开时 macOS 可能会阻止运行，执行以下命令修复：
+从 [**Releases**](https://github.com/tyql688/cc-session/releases) 下载最新版本：
+
+| 平台 | 文件 |
+|------|------|
+| macOS | `.dmg` |
+| Windows | `.exe`（NSIS 安装包） |
+| Linux | `.deb` / `.AppImage` |
+
+> **macOS Gatekeeper：** 应用未经代码签名，首次打开时 macOS 可能会阻止运行，执行以下命令清除隔离标记：
 >
 > ```bash
 > xattr -cr "/Applications/CC Session.app"
 > ```
 
-## 快速开始
+## 🚀 快速开始
 
 1. 安装并启动 CC Session
-2. 等待它索引本地支持的 provider 数据
-3. 打开任意会话，搜索历史记录，或从中断处继续
+2. 等待它索引本地的 provider 数据
+3. 打开任意会话、搜索历史，或从中断处继续
 
-## 从源码构建
+## 🛠️ 从源码构建
 
-需要 [Rust](https://rustup.rs/) 和 [Node.js](https://nodejs.org/) 18+。
+需要 [Rust](https://rustup.rs/) 和 [Node.js](https://nodejs.org/) 20+。
 
 ```bash
 git clone https://github.com/tyql688/cc-session.git
@@ -88,26 +98,26 @@ npm run tauri build              # 生产构建
 npx tauri build --bundles dmg    # 仅 DMG
 ```
 
-## 开发
+## 💻 开发
 
 ```bash
 npm run tauri dev                # 热重载开发
-npm test                         # 前端测试
-npx tsc --noEmit                 # 前端类型检查
+npm run check                    # 类型检查 + Biome + ESLint（前端）
+npm test                         # 前端测试（Vitest）
 cd src-tauri && cargo test       # Rust 测试
-cd src-tauri && cargo clippy     # Rust 检查
+cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-在 macOS 上，文件型实时监听使用 `notify` 的 `kqueue` 后端，以保证文件级更新更稳定。
+代码规范见 [`style/ts.md`](style/ts.md) 与 [`style/rust.md`](style/rust.md)，由 Biome、ESLint、Clippy 和 lefthook 预提交钩子强制执行。在 macOS 上，文件型实时监听使用 `notify` 的 `kqueue` 后端，以保证文件级更新更稳定。
 
-## 技术栈
+## 🏗️ 技术栈
 
-- [Tauri 2](https://v2.tauri.app/)：桌面壳与原生集成
-- [SolidJS](https://www.solidjs.com/)：前端 UI
-- [Rust](https://www.rust-lang.org/)：provider 解析、索引、导出与会话生命周期管理
-- [SQLite](https://www.sqlite.org/) + FTS5：本地存储与全文搜索
-- [Vitest](https://vitest.dev/)、[ESLint](https://eslint.org/)、[Prettier](https://prettier.io/)、[Clippy](https://doc.rust-lang.org/clippy/)：测试与代码质量保障
+- [Tauri 2](https://v2.tauri.app/) —— 桌面壳与原生集成
+- [SolidJS](https://www.solidjs.com/) —— 响应式前端 UI
+- [Rust](https://www.rust-lang.org/) —— provider 解析、索引、导出与会话生命周期管理
+- [SQLite](https://www.sqlite.org/) + FTS5 —— 本地存储与全文搜索
+- [Vitest](https://vitest.dev/)、[Biome](https://biomejs.dev/)、[ESLint](https://eslint.org/)、[Clippy](https://doc.rust-lang.org/clippy/) —— 测试与代码质量保障
 
-## 许可证
+## 📄 许可证
 
-[MIT](LICENSE)
+[MIT](LICENSE) © tyql688
