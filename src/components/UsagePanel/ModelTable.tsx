@@ -1,4 +1,4 @@
-import { For, Show } from "solid-js";
+import { For, Show, createMemo } from "solid-js";
 import type { Accessor } from "solid-js";
 import { useI18n } from "../../i18n/index";
 import type { ModelCost } from "../../lib/types";
@@ -15,6 +15,20 @@ export interface ModelTableProps {
 export function ModelTable(props: ModelTableProps) {
   const { t } = useI18n();
   const icon = (col: string) => sortIcon(props.modelSort(), col);
+  const totals = createMemo(() =>
+    props.sortedModels().reduce(
+      (acc, r) => {
+        acc.count += 1;
+        acc.turns += r.turns;
+        acc.input += r.input_tokens;
+        acc.output += r.output_tokens;
+        acc.cache += r.cache_tokens;
+        acc.cost += r.cost;
+        return acc;
+      },
+      { count: 0, turns: 0, input: 0, output: 0, cache: 0, cost: 0 },
+    ),
+  );
 
   return (
     <section class="usage-card usage-table-card">
@@ -84,6 +98,20 @@ export function ModelTable(props: ModelTableProps) {
               )}
             </For>
           </tbody>
+          <Show when={totals().count > 0}>
+            <tfoot>
+              <tr class="usage-total-row">
+                <td>
+                  {t("usage.total")} ({totals().count})
+                </td>
+                <td class="r">{totals().turns.toLocaleString()}</td>
+                <td class="r">{fmtTokens(totals().input)}</td>
+                <td class="r">{fmtTokens(totals().output)}</td>
+                <td class="r">{fmtTokens(totals().cache)}</td>
+                <td class="r usage-cost-val">{fmtCost(totals().cost)}</td>
+              </tr>
+            </tfoot>
+          </Show>
         </table>
       </div>
     </section>

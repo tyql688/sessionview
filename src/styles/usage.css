@@ -749,6 +749,13 @@
   background: color-mix(in srgb, var(--bg-sidebar) 62%, transparent);
 }
 
+.usage-table tfoot .usage-total-row td {
+  font-weight: 700;
+  border-top: 2px solid var(--border);
+  border-bottom: none;
+  color: var(--text-primary);
+}
+
 .usage-model-tag {
   display: inline-flex;
   align-items: center;

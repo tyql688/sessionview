@@ -267,6 +267,7 @@
     "rangeAll": "All",
     "dailyUsage": "Daily Usage",
     "costByModel": "Cost by Model",
+    "total": "Total",
     "costByProject": "Cost by Project",
     "recentSessions": "Recent Sessions",
     "topModels": "Top Models",
