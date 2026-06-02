@@ -22,6 +22,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 rayon = "1.10"
+# macos_kqueue requires kqueue >= 1.2.0 (pinned in Cargo.lock): 1.1.1 panics the
+# notify event loop on `find_file_ident().unwrap()` when a watched fd is removed
+# mid-drain (session file rotation), silently killing live-watch. 1.2.0 returns an
+# Err instead, which our watcher callback already swallows. Do not downgrade.
 notify = { version = "7", default-features = false, features = ["macos_kqueue"] }
 memmap2 = "0.9"
 memchr = "2"
