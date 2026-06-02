@@ -9,17 +9,19 @@ export function SessionSearch(props: {
   searchMatchCount: Accessor<number>;
   setSearchMatchIdx: Setter<number>;
   setSearchBarOpen: Setter<boolean>;
-  messagesRef: HTMLDivElement | undefined;
+  // Accessor (not a bare ref) so it reflects the live messages container even
+  // when the search bar is opened before the messages div mounts (Cmd+F during
+  // load). Passing the ref by value would capture `undefined` permanently.
+  messagesRef: Accessor<HTMLDivElement | undefined>;
 }) {
   const { t } = useI18n();
 
   /** Get marks in visual order (top->bottom). Sort by position since column-reverse
    *  flips message order but not text order within each message. */
   function getMarksInVisualOrder(): Element[] {
-    if (!props.messagesRef) return [];
-    const marks = Array.from(
-      props.messagesRef.querySelectorAll("mark.search-highlight"),
-    );
+    const ref = props.messagesRef();
+    if (!ref) return [];
+    const marks = Array.from(ref.querySelectorAll("mark.search-highlight"));
     marks.sort((a, b) => {
       const ra = a.getBoundingClientRect();
       const rb = b.getBoundingClientRect();
@@ -34,7 +36,8 @@ export function SessionSearch(props: {
     const marks = getMarksInVisualOrder();
     if (marks.length === 0) return;
     // Remove previous active highlight
-    props.messagesRef
+    props
+      .messagesRef()
       ?.querySelector("mark.search-active")
       ?.classList.remove("search-active");
     const newIdx =

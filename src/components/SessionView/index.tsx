@@ -586,7 +586,7 @@ export function SessionView(props: {
           searchMatchCount={searchMatchCount}
           setSearchMatchIdx={setSearchMatchIdx}
           setSearchBarOpen={setSearchBarOpen}
-          messagesRef={messagesRef}
+          messagesRef={() => messagesRef}
         />
       </Show>
 
