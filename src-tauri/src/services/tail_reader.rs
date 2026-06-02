@@ -14,6 +14,7 @@
 //! `\n` boundary.
 
 use std::fs::File;
+use std::io::{BufReader, Seek, SeekFrom};
 use std::path::Path;
 
 use memchr::memrchr;
@@ -90,6 +91,60 @@ pub fn tail_byte_offset(path: &Path, target_lines: usize) -> std::io::Result<Tai
         file_size,
         covers_whole_file: true,
     })
+}
+
+/// Open `path`'s tail window for line-by-line parsing: locate the byte
+/// offset of the last `scan_lines` lines, open the file, wrap it in a
+/// `BufReader`, and seek past the leading partial region. Returns the
+/// reader positioned at the start of the tail window, paired with the
+/// `TailWindow` (so callers that need `start_offset`/`covers_whole_file`
+/// — e.g. to decide whether to prime fallback state from the file head —
+/// don't have to recompute it).
+///
+/// `label` is the human-readable provider name spliced into the warn
+/// logs on IO failure ("failed to locate <label> session tail", etc.).
+/// Returns `None` on any locate/open/seek failure (after logging), so
+/// the provider's tail parser falls back to the full-file parse — this
+/// matches the per-parser scaffold each provider previously inlined.
+pub fn open_tail_reader(
+    path: &Path,
+    scan_lines: usize,
+    label: &str,
+) -> Option<(BufReader<File>, TailWindow)> {
+    let window = match tail_byte_offset(path, scan_lines) {
+        Ok(w) => w,
+        Err(error) => {
+            log::warn!(
+                "failed to locate {label} session tail in '{}': {error}",
+                path.display()
+            );
+            return None;
+        }
+    };
+
+    let file = match File::open(path) {
+        Ok(f) => f,
+        Err(error) => {
+            log::warn!(
+                "failed to open {label} session for tail parse '{}': {error}",
+                path.display()
+            );
+            return None;
+        }
+    };
+
+    let mut reader = BufReader::new(file);
+    if window.start_offset > 0 {
+        if let Err(error) = reader.seek(SeekFrom::Start(window.start_offset)) {
+            log::warn!(
+                "failed to seek {label} session for tail parse '{}': {error}",
+                path.display()
+            );
+            return None;
+        }
+    }
+
+    Some((reader, window))
 }
 
 #[cfg(test)]

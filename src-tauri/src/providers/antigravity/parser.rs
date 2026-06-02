@@ -2,7 +2,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use crate::models::{
@@ -10,7 +10,7 @@ use crate::models::{
 };
 use crate::provider::ParsedSession;
 use crate::provider_utils::{parse_rfc3339_timestamp, project_name_from_path, session_title};
-use crate::services::tail_reader::tail_byte_offset;
+use crate::services::tail_reader::open_tail_reader;
 use crate::tool_metadata::{
     build_tool_metadata, enrich_tool_metadata, ToolCallFacts, ToolResultFacts,
 };
@@ -740,40 +740,7 @@ pub fn parse_session_tail(path: &Path, target_messages: usize) -> Option<Antigra
     // good chance of landing fully inside the parsed range.
     let safety_buffer = target_messages / 2 + 100;
     let scan_lines = target_messages.saturating_add(safety_buffer);
-    let window = match tail_byte_offset(path, scan_lines) {
-        Ok(w) => w,
-        Err(error) => {
-            log::warn!(
-                "failed to locate Antigravity session tail in '{}': {}",
-                path.display(),
-                error
-            );
-            return None;
-        }
-    };
-
-    let file = match File::open(path) {
-        Ok(f) => f,
-        Err(error) => {
-            log::warn!(
-                "failed to open Antigravity session for tail parse '{}': {}",
-                path.display(),
-                error
-            );
-            return None;
-        }
-    };
-    let mut reader = BufReader::new(file);
-    if window.start_offset > 0 {
-        if let Err(error) = reader.seek(SeekFrom::Start(window.start_offset)) {
-            log::warn!(
-                "failed to seek Antigravity session for tail parse '{}': {}",
-                path.display(),
-                error
-            );
-            return None;
-        }
-    }
+    let (reader, _window) = open_tail_reader(path, scan_lines, "Antigravity")?;
 
     let mut accum = AntigravityScanAccum::new();
     scan_antigravity_lines(reader, path, &conversation_id, &mut accum);

@@ -23,7 +23,7 @@ mod index;
 mod subagents;
 
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use serde_json::Value;
@@ -33,7 +33,7 @@ use crate::provider::ParsedSession;
 use crate::provider_utils::{
     project_name_from_path, session_title, truncate_to_bytes, FTS_CONTENT_LIMIT, NO_PROJECT,
 };
-use crate::services::tail_reader::tail_byte_offset;
+use crate::services::tail_reader::open_tail_reader;
 
 use dispatch::{dispatch_line, ScanAccum};
 use index::{split_session_path, StateJson};
@@ -302,17 +302,8 @@ pub struct KimiTailResult {
 pub fn parse_session_tail(path: &Path, target_messages: usize) -> Option<KimiTailResult> {
     let safety_buffer = target_messages / 4 + 50;
     let scan_lines_count = target_messages.saturating_add(safety_buffer);
-    let window = match tail_byte_offset(path, scan_lines_count) {
-        Ok(w) => w,
-        Err(error) => {
-            log::warn!(
-                "failed to locate Kimi wire.jsonl tail in '{}': {}",
-                path.display(),
-                error
-            );
-            return None;
-        }
-    };
+    let (reader, window) = open_tail_reader(path, scan_lines_count, "Kimi wire.jsonl")?;
+
     let mut accum = ScanAccum::new();
     // Migrated (Format A) wires only carry a timestamp on the
     // `metadata` header line — every `context.append_message` after it
@@ -334,28 +325,6 @@ pub fn parse_session_tail(path: &Path, target_messages: usize) -> Option<KimiTai
                     }
                 }
             }
-        }
-    }
-    let file = match File::open(path) {
-        Ok(f) => f,
-        Err(error) => {
-            log::warn!(
-                "failed to open Kimi wire.jsonl for tail '{}': {}",
-                path.display(),
-                error
-            );
-            return None;
-        }
-    };
-    let mut reader = BufReader::new(file);
-    if window.start_offset > 0 {
-        if let Err(error) = reader.seek(SeekFrom::Start(window.start_offset)) {
-            log::warn!(
-                "failed to seek Kimi wire.jsonl tail in '{}': {}",
-                path.display(),
-                error
-            );
-            return None;
         }
     }
     scan_lines(reader, path, &mut accum);

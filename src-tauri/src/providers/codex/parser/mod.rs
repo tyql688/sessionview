@@ -1,8 +1,8 @@
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-use crate::services::tail_reader::tail_byte_offset;
+use crate::services::tail_reader::open_tail_reader;
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -502,40 +502,7 @@ pub fn parse_session_tail(path: &Path, target_messages: usize) -> Option<CodexTa
     // actual message-emit further into the file than expected.
     let safety_buffer = target_messages / 2 + 100;
     let scan_lines = target_messages.saturating_add(safety_buffer);
-    let window = match tail_byte_offset(path, scan_lines) {
-        Ok(w) => w,
-        Err(error) => {
-            log::warn!(
-                "failed to locate Codex session tail in '{}': {}",
-                path.display(),
-                error
-            );
-            return None;
-        }
-    };
-
-    let file = match File::open(path) {
-        Ok(f) => f,
-        Err(error) => {
-            log::warn!(
-                "failed to open Codex session for tail parse '{}': {}",
-                path.display(),
-                error
-            );
-            return None;
-        }
-    };
-    let mut reader = BufReader::new(file);
-    if window.start_offset > 0 {
-        if let Err(error) = reader.seek(SeekFrom::Start(window.start_offset)) {
-            log::warn!(
-                "failed to seek Codex session for tail parse '{}': {}",
-                path.display(),
-                error
-            );
-            return None;
-        }
-    }
+    let (reader, _window) = open_tail_reader(path, scan_lines, "Codex")?;
 
     let mut accum = CodexScanAccum::new();
     accum.scan_lines(reader, path);

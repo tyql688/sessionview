@@ -346,19 +346,13 @@ fn try_tail_fast_path(
     if offset >= 0 {
         return Ok(None);
     }
-    // CC-Mirror sessions are parsed by the Claude parser; Codex,
-    // Antigravity, and Kimi each have their own `parse_session_tail`.
-    // OpenCode is SQLite-backed and doesn't fit the line-tail model.
-    if !matches!(
-        meta.provider,
-        Provider::Claude
-            | Provider::CcMirror
-            | Provider::Codex
-            | Provider::Antigravity
-            | Provider::Kimi
-    ) {
+    // Resolve the provider's tail parser up front. `None` means the
+    // provider has no line-tail entry point (OpenCode is SQLite-backed;
+    // Cursor isn't wired) — bail before paying for the stat below.
+    // CC-Mirror reuses the Claude parser.
+    let Some(parse_tail) = tail_parser_for(&meta.provider) else {
         return Ok(None);
-    }
+    };
     if meta.source_path.is_empty() {
         return Ok(None);
     }
@@ -379,37 +373,12 @@ fn try_tail_fast_path(
 
     let target_messages = limit.max(offset.unsigned_abs() as usize).max(1);
     let path = std::path::PathBuf::from(&meta.source_path);
-    // Dispatch to the right parser's tail entry. Both return the same
-    // shape we need — messages + parse warnings — but use distinct
-    // result types because the per-provider parsers may add fields
-    // later (e.g. usage events for Codex).
-    let (tail_messages, parse_warning_count) = match meta.provider {
-        Provider::Claude | Provider::CcMirror => {
-            match crate::providers::claude::parser::parse_session_tail(&path, target_messages) {
-                Some(t) => (t.messages, t.parse_warning_count),
-                None => return Ok(None),
-            }
-        }
-        Provider::Codex => {
-            match crate::providers::codex::parser::parse_session_tail(&path, target_messages) {
-                Some(t) => (t.messages, t.parse_warning_count),
-                None => return Ok(None),
-            }
-        }
-        Provider::Antigravity => {
-            match crate::providers::antigravity::parser::parse_session_tail(&path, target_messages)
-            {
-                Some(t) => (t.messages, t.parse_warning_count),
-                None => return Ok(None),
-            }
-        }
-        Provider::Kimi => {
-            match crate::providers::kimi::parser::parse_session_tail(&path, target_messages) {
-                Some(t) => (t.messages, t.parse_warning_count),
-                None => return Ok(None),
-            }
-        }
-        _ => return Ok(None),
+    // Run the provider's tail parser (resolved above). It returns the
+    // common shape — messages + parse warnings — projected from each
+    // provider's distinct result type by the adapter in `tail_parser_for`.
+    let (tail_messages, parse_warning_count) = match parse_tail(&path, target_messages) {
+        Some(tail) => tail,
+        None => return Ok(None),
     };
     if load_cancel::is_canceled() {
         return Err(canceled_error());
@@ -445,6 +414,48 @@ fn try_tail_fast_path(
         parse_warning_count,
         token_totals,
     }))
+}
+
+/// A provider's tail parser projected onto the shape `try_tail_fast_path`
+/// needs: given the source path and a target window size, return the
+/// trailing messages plus the per-record parse-warning count, or `None`
+/// when the tail came up empty / unreadable (caller falls back to the
+/// full parse).
+type TailParseFn = fn(&Path, usize) -> Option<(Vec<Message>, u32)>;
+
+/// Map a provider to its tail-parser adapter, or `None` for providers
+/// that don't expose a line-tail entry point (OpenCode is SQLite-backed;
+/// Cursor is JSONL but has no tail parser wired yet). CC-Mirror reuses
+/// the Claude parser. The match is exhaustive so adding a `Provider`
+/// variant forces a decision here.
+fn tail_parser_for(provider: &Provider) -> Option<TailParseFn> {
+    match provider {
+        Provider::Claude | Provider::CcMirror => Some(claude_tail),
+        Provider::Codex => Some(codex_tail),
+        Provider::Antigravity => Some(antigravity_tail),
+        Provider::Kimi => Some(kimi_tail),
+        Provider::OpenCode | Provider::Cursor => None,
+    }
+}
+
+fn claude_tail(path: &Path, target_messages: usize) -> Option<(Vec<Message>, u32)> {
+    crate::providers::claude::parser::parse_session_tail(path, target_messages)
+        .map(|t| (t.messages, t.parse_warning_count))
+}
+
+fn codex_tail(path: &Path, target_messages: usize) -> Option<(Vec<Message>, u32)> {
+    crate::providers::codex::parser::parse_session_tail(path, target_messages)
+        .map(|t| (t.messages, t.parse_warning_count))
+}
+
+fn antigravity_tail(path: &Path, target_messages: usize) -> Option<(Vec<Message>, u32)> {
+    crate::providers::antigravity::parser::parse_session_tail(path, target_messages)
+        .map(|t| (t.messages, t.parse_warning_count))
+}
+
+fn kimi_tail(path: &Path, target_messages: usize) -> Option<(Vec<Message>, u32)> {
+    crate::providers::kimi::parser::parse_session_tail(path, target_messages)
+        .map(|t| (t.messages, t.parse_warning_count))
 }
 
 /// Fire-and-forget background full parse that overwrites the in-memory
