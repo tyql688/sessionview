@@ -976,4 +976,38 @@ mod tests {
             "bulky tool result body must NOT be indexed"
         );
     }
+
+    #[test]
+    fn indexable_content_retains_dialogue_past_the_old_64kib_cap() {
+        use crate::models::{Message, MessageRole};
+
+        // ~100 KiB of dialogue with a unique marker near the end — past the old
+        // 64 KiB cap but well within the 1 MiB limit. Before the cap was raised
+        // this marker (like a phrase deep in a long real session) was truncated
+        // out of the index, so global search could not find it.
+        let filler = "搜索内容 ".repeat(8000);
+        let marker = "悬停飞出标记";
+        let messages = vec![Message {
+            role: MessageRole::Assistant,
+            content: format!("{filler}{marker}"),
+            timestamp: None,
+            tool_name: None,
+            tool_input: None,
+            tool_metadata: None,
+            token_usage: None,
+            model: None,
+            usage_hash: None,
+        }];
+
+        let text = super::indexable_content_text(&messages, "");
+        assert!(
+            text.len() > 64 * 1024,
+            "dialogue beyond the old 64 KiB cap must now be retained"
+        );
+        assert!(
+            text.contains(marker),
+            "a marker past the old cap must be indexable for global search"
+        );
+        assert!(text.len() <= super::FTS_CONTENT_LIMIT);
+    }
 }
