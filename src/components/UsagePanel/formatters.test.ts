@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import {
   fmtTokens,
   fmtCost,
@@ -9,8 +9,20 @@ import {
   sortIcon,
   makeFmtChartValue,
 } from "./formatters";
+import { locale, setLocale } from "../../i18n/index";
+
+// fmtTokens follows the UI language; pin it so assertions don't depend on the
+// machine's navigator.language.
+const initialLocale = locale();
+beforeEach(() => setLocale("en"));
+afterAll(() => setLocale(initialLocale));
 
 describe("fmtTokens", () => {
+  it("uses 万/亿 scale when the UI language is Chinese", () => {
+    setLocale("zh");
+    expect(fmtTokens(15_000)).toBe("1.5万");
+    expect(fmtTokens(340_000_000)).toBe("3.4亿");
+  });
   it("returns localized integer under 1K", () => {
     expect(fmtTokens(0)).toBe("0");
     expect(fmtTokens(999)).toBe("999");

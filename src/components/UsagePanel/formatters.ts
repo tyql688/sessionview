@@ -1,4 +1,7 @@
-import { fmtK, shortenHomePath } from "../../lib/formatters";
+import {
+  fmtTokens as fmtTokensShared,
+  shortenHomePath,
+} from "../../lib/formatters";
 import type { ChartMetric, UsageSortState } from "../../lib/usage";
 
 export const SHORT_PROVIDER_LABELS: Record<string, string> = {
@@ -12,7 +15,7 @@ export const SHORT_PROVIDER_LABELS: Record<string, string> = {
 } as const;
 
 /** Compact token formatter, shared with the rest of the app. */
-export const fmtTokens = fmtK;
+export const fmtTokens = fmtTokensShared;
 
 export function fmtCost(n: number): string {
   return `$${n.toFixed(2)}`;

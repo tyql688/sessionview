@@ -4,7 +4,7 @@ import type { Locale } from "../i18n/index";
 import { theme, setTheme, applyTheme } from "../stores/theme";
 import type { Theme } from "../stores/theme";
 import { phase, availableVersion, downloadAndInstall } from "../stores/updater";
-import { fmtK } from "../lib/formatters";
+import { fmtTokens } from "../lib/formatters";
 import type { TodayTokens } from "../lib/tauri";
 
 export function StatusBar(props: {
@@ -132,9 +132,9 @@ export function StatusBar(props: {
                 })()}
               >
                 {"\u2191"}
-                {fmtK(props.todayTokens!.input)}
+                {fmtTokens(props.todayTokens!.input)}
                 {" \u2193"}
-                {fmtK(props.todayTokens!.output)} {t("common.tokens")}
+                {fmtTokens(props.todayTokens!.output)} {t("common.tokens")}
                 <Show
                   when={
                     props.todayTokens!.cache_read +
@@ -145,11 +145,11 @@ export function StatusBar(props: {
                   {" · "}
                   <span class="cache-read-label">
                     {t("common.cacheRead")}{" "}
-                    {fmtK(props.todayTokens!.cache_read)}
+                    {fmtTokens(props.todayTokens!.cache_read)}
                   </span>
                   {" · "}
                   {t("common.cacheWrite")}{" "}
-                  {fmtK(props.todayTokens!.cache_write)}
+                  {fmtTokens(props.todayTokens!.cache_write)}
                 </Show>
               </span>
             </Show>

@@ -1,11 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
   parseTimestamp,
   fmtK,
+  fmtWan,
+  fmtTokens,
   formatFileSize,
   formatTimestamp,
   shortenHomePath,
 } from "./formatters";
+import { locale, setLocale } from "../i18n/index";
 
 describe("parseTimestamp", () => {
   it("parses epoch seconds and converts to ms", () => {
@@ -27,6 +30,12 @@ describe("parseTimestamp", () => {
 });
 
 describe("fmtK", () => {
+  it("formats trillions", () => {
+    expect(fmtK(1_230_000_000_000)).toBe("1.2T");
+  });
+  it("formats billions", () => {
+    expect(fmtK(3_400_000_000)).toBe("3.4B");
+  });
   it("formats millions", () => {
     expect(fmtK(1_500_000)).toBe("1.5M");
   });
@@ -35,6 +44,35 @@ describe("fmtK", () => {
   });
   it("returns raw number for small values", () => {
     expect(fmtK(42)).toBe("42");
+  });
+});
+
+describe("fmtWan", () => {
+  it("formats 万亿 (1e12)", () => {
+    expect(fmtWan(1_230_000_000_000)).toBe("1.2万亿");
+  });
+  it("formats 亿 (1e8)", () => {
+    expect(fmtWan(340_000_000)).toBe("3.4亿");
+  });
+  it("formats 万 (1e4)", () => {
+    expect(fmtWan(15_000)).toBe("1.5万");
+  });
+  it("returns raw number below 1万", () => {
+    expect(fmtWan(9_999)).toBe("9999");
+  });
+});
+
+describe("fmtTokens", () => {
+  const initialLocale = locale();
+  afterEach(() => setLocale(initialLocale));
+
+  it("uses 万/亿 scale for zh locale", () => {
+    setLocale("zh");
+    expect(fmtTokens(340_000_000)).toBe("3.4亿");
+  });
+  it("uses K/M/B scale for en locale", () => {
+    setLocale("en");
+    expect(fmtTokens(340_000_000)).toBe("340.0M");
   });
 });
 

@@ -1,3 +1,5 @@
+import { locale } from "../i18n/index";
+
 export function parseTimestamp(ts: string | null): number | null {
   if (!ts) return null;
   const n = Number(ts);
@@ -63,11 +65,26 @@ export function formatLocalDateTime(value: string | null): string {
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
 
-/** Compact token/number formatter: `1.5M` / `2.5K` / `42`. */
+/** Compact token/number formatter: `1.2T` / `3.4B` / `1.5M` / `2.5K` / `42`. */
 export function fmtK(n: number): string {
+  if (n >= 1_000_000_000_000) return `${(n / 1_000_000_000_000).toFixed(1)}T`;
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
+}
+
+/** Chinese-scale token/number formatter: `1.2万亿` / `3.4亿` / `1.5万` / `42`. */
+export function fmtWan(n: number): string {
+  if (n >= 1_0000_0000_0000) return `${(n / 1_0000_0000_0000).toFixed(1)}万亿`;
+  if (n >= 1_0000_0000) return `${(n / 1_0000_0000).toFixed(1)}亿`;
+  if (n >= 1_0000) return `${(n / 1_0000).toFixed(1)}万`;
+  return String(n);
+}
+
+/** Token formatter following the UI language: 万/亿 for zh, K/M/B/T otherwise. */
+export function fmtTokens(n: number): string {
+  return locale() === "zh" ? fmtWan(n) : fmtK(n);
 }
 
 export function formatFileSize(bytes: number): string {

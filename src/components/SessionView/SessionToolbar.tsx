@@ -6,7 +6,7 @@ import { getProviderLabel } from "../../stores/providerSnapshots";
 import {
   formatTimestamp,
   formatDuration,
-  fmtK,
+  fmtTokens,
   formatFileSize,
   shortenHomePath,
 } from "../../lib/formatters";
@@ -151,17 +151,17 @@ export function SessionToolbar(props: {
             title={`${t("common.inputTokens")}: ${totalTokens()!.input.toLocaleString()}, ${t("common.outputTokens")}: ${totalTokens()!.output.toLocaleString()}${totalTokens()!.cacheWrite > 0 ? `, ${t("common.cacheWriteTokens")}: ${totalTokens()!.cacheWrite.toLocaleString()}` : ""}${totalTokens()!.cacheRead > 0 ? `, ${t("common.cacheReadTokens")}: ${totalTokens()!.cacheRead.toLocaleString()}` : ""}`}
           >
             {"\u2191"}
-            {fmtK(totalTokens()!.input)} {"\u2193"}
-            {fmtK(totalTokens()!.output)} {t("common.tokens")}
+            {fmtTokens(totalTokens()!.input)} {"\u2193"}
+            {fmtTokens(totalTokens()!.output)} {t("common.tokens")}
             <Show
               when={totalTokens()!.cacheWrite + totalTokens()!.cacheRead > 0}
             >
               {" · "}
               <span class="cache-read-label">
-                {t("common.cacheRead")} {fmtK(totalTokens()!.cacheRead)}
+                {t("common.cacheRead")} {fmtTokens(totalTokens()!.cacheRead)}
               </span>
               {" · "}
-              {t("common.cacheWrite")} {fmtK(totalTokens()!.cacheWrite)}
+              {t("common.cacheWrite")} {fmtTokens(totalTokens()!.cacheWrite)}
             </Show>
           </span>
         </Show>
