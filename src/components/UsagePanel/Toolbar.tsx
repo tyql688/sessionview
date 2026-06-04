@@ -2,6 +2,7 @@ import { For, Show } from "solid-js";
 import type { Accessor } from "solid-js";
 import { useI18n } from "../../i18n/index";
 import type { MaintenanceJob, ProviderSnapshot } from "../../lib/types";
+import type { CustomDateRange } from "../../stores/usageView";
 
 export interface ProviderChipInfo {
   color: string;
@@ -17,6 +18,8 @@ export interface ToolbarProps {
 
   rangeDays: Accessor<number | null>;
   onRangeChange: (days: number | null) => void;
+  customRange: Accessor<CustomDateRange | null>;
+  onCustomRangeChange: (range: CustomDateRange) => void;
 
   isRefreshingPricing: Accessor<boolean>;
   onRefreshPricing: () => void;
@@ -49,6 +52,51 @@ export function Toolbar(props: ToolbarProps) {
     { days: null, label: () => t("usage.rangeAll") },
   ];
 
+  const toIsoDate = (d: Date): string => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  // Native date inputs commit half-typed years like 0001-05-31; anything
+  // before this floor is treated as a typo and the field is restored.
+  const MIN_USAGE_DATE = "2000-01-01";
+
+  const enterCustomRange = () => {
+    if (props.customRange()) return;
+    // Seed with the last 7 days so the panel shows data immediately.
+    const end = new Date();
+    const start = new Date(end);
+    start.setDate(start.getDate() - 6);
+    props.onCustomRangeChange({ start: toIsoDate(start), end: toIsoDate(end) });
+  };
+
+  const updateCustomRange = (
+    field: keyof CustomDateRange,
+    input: HTMLInputElement,
+  ) => {
+    const current = props.customRange();
+    if (!current) return;
+    const value = input.value;
+    if (!value || value < MIN_USAGE_DATE) {
+      // Cleared or absurd value: restore the field instead of querying with it.
+      input.value = current[field];
+      return;
+    }
+    const next = { ...current, [field]: value };
+    // Keep the window ordered no matter which side the user moved.
+    if (next.start > next.end) {
+      props.onCustomRangeChange(
+        field === "start"
+          ? { start: next.start, end: next.start }
+          : { start: next.end, end: next.end },
+      );
+      return;
+    }
+    props.onCustomRangeChange(next);
+  };
+
   return (
     <section class="usage-card usage-toolbar-card">
       <div class="usage-toolbar-main">
@@ -72,18 +120,55 @@ export function Toolbar(props: ToolbarProps) {
         <div class="usage-toolbar-actions">
           <div class="usage-range-group">
             <For each={ranges}>
-              {(range) => (
-                <button
-                  class={`usage-range-btn${props.rangeDays() === range.days ? " active" : ""}`}
-                  aria-pressed={props.rangeDays() === range.days}
-                  onClick={() => props.onRangeChange(range.days)}
-                  type="button"
-                >
-                  {range.label()}
-                </button>
-              )}
+              {(range) => {
+                const active = () =>
+                  props.customRange() === null &&
+                  props.rangeDays() === range.days;
+                return (
+                  <button
+                    class={`usage-range-btn${active() ? " active" : ""}`}
+                    aria-pressed={active()}
+                    onClick={() => props.onRangeChange(range.days)}
+                    type="button"
+                  >
+                    {range.label()}
+                  </button>
+                );
+              }}
             </For>
+            <button
+              class={`usage-range-btn${props.customRange() ? " active" : ""}`}
+              aria-pressed={props.customRange() !== null}
+              onClick={enterCustomRange}
+              type="button"
+            >
+              {t("usage.rangeCustom")}
+            </button>
           </div>
+          <Show when={props.customRange()}>
+            {(range) => (
+              <div class="usage-custom-range">
+                <input
+                  type="date"
+                  class="usage-date-input"
+                  aria-label={t("usage.customRangeStart")}
+                  value={range().start}
+                  min={MIN_USAGE_DATE}
+                  max={range().end}
+                  onChange={(e) => updateCustomRange("start", e.currentTarget)}
+                />
+                <span class="usage-custom-range-sep">~</span>
+                <input
+                  type="date"
+                  class="usage-date-input"
+                  aria-label={t("usage.customRangeEnd")}
+                  value={range().end}
+                  min={range().start}
+                  onChange={(e) => updateCustomRange("end", e.currentTarget)}
+                />
+              </div>
+            )}
+          </Show>
           <button
             class="usage-action-btn"
             onClick={props.onRefreshPricing}

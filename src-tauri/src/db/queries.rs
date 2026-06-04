@@ -11,6 +11,7 @@ mod search;
 mod usage;
 
 use search::{build_fts_query, list_sessions_from_query, search_with_fts, search_with_like};
+pub(crate) use usage::UsageDateBounds;
 
 #[derive(Debug, Clone)]
 pub(crate) struct UsageByModelRow {
@@ -720,7 +721,10 @@ mod tests {
         let rows = db
             .usage_session_model_detail(
                 &[Provider::Claude.key().to_string()],
-                Some("2026-05-10"),
+                UsageDateBounds {
+                    start: Some("2026-05-10"),
+                    end: None,
+                },
                 50,
             )
             .unwrap();
@@ -733,6 +737,42 @@ mod tests {
         assert_eq!(
             total_input, 10,
             "per-session detail must exclude rows dated before the cutoff"
+        );
+
+        // Custom range [2026-04-25, 2026-05-10]: the 05-20 row falls after the
+        // inclusive end bound and must be excluded everywhere the bounds apply.
+        let rows = db
+            .usage_session_model_detail(
+                &[Provider::Claude.key().to_string()],
+                UsageDateBounds {
+                    start: Some("2026-04-25"),
+                    end: Some("2026-05-10"),
+                },
+                50,
+            )
+            .unwrap();
+        let total_input: u64 = rows
+            .iter()
+            .filter(|r| r.session_id == "session-range")
+            .map(|r| r.input_tokens)
+            .sum();
+        assert_eq!(
+            total_input, 1000,
+            "per-session detail must exclude rows dated after the end bound"
+        );
+
+        let (_, total_in, _, _, _) = db
+            .usage_totals(
+                &[Provider::Claude.key().to_string()],
+                UsageDateBounds {
+                    start: Some("2026-05-01"),
+                    end: Some("2026-05-01"),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            total_in, 1000,
+            "single-day bounds must include only that day's rows (inclusive end)"
         );
     }
 

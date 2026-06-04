@@ -25,6 +25,8 @@ import {
 import {
   rangeDays,
   setRangeDays,
+  customRange,
+  setCustomRange,
   selectedProviders,
   setSelectedProviders,
   didInitProviders,
@@ -147,11 +149,24 @@ export function UsagePanel() {
   const [stats, { refetch: refetchStats }] = createResource(
     () =>
       didInitProviders()
-        ? { providers: selectedProviderKeys(), range: rangeDays() }
+        ? {
+            providers: selectedProviderKeys(),
+            range: rangeDays(),
+            custom: customRange(),
+          }
         : null,
     async (params) => {
       if (!params || params.providers.length === 0) {
         return makeEmptyUsageStats();
+      }
+      // A custom date window overrides the preset day count.
+      if (params.custom) {
+        return getUsageStats(
+          params.providers,
+          null,
+          params.custom.start,
+          params.custom.end,
+        );
       }
       return getUsageStats(params.providers, params.range);
     },
@@ -307,6 +322,8 @@ export function UsagePanel() {
   const maxTopModelCost = createMemo(() => topModels()[0]?.cost ?? 0);
 
   const activeRangeLabel = createMemo(() => {
+    const custom = customRange();
+    if (custom) return `${custom.start} ~ ${custom.end}`;
     switch (rangeDays()) {
       case 1:
         return t("usage.rangeToday");
@@ -327,6 +344,7 @@ export function UsagePanel() {
     if (selectedProviderKeys().length === 0) return false;
     return (
       rangeDays() === null &&
+      customRange() === null &&
       allProvidersSelected() &&
       (sessionCount() ?? 0) > 0
     );
@@ -481,7 +499,12 @@ export function UsagePanel() {
         activeMaintenanceJob={activeMaintenanceJob}
         maintenanceStatusText={maintenanceStatusText}
         rangeDays={rangeDays}
-        onRangeChange={setRangeDays}
+        onRangeChange={(days) => {
+          setCustomRange(null);
+          setRangeDays(days);
+        }}
+        customRange={customRange}
+        onCustomRangeChange={setCustomRange}
         isRefreshingPricing={isRefreshingPricing}
         onRefreshPricing={() => void handleRefreshPricing()}
         onRequestRefreshUsage={() => setShowClearUsageConfirm(true)}

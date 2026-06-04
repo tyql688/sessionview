@@ -312,8 +312,15 @@ export async function exportSessionsBatch(
 export async function getUsageStats(
   providers: string[],
   rangeDays: number | null,
+  dateStart: string | null = null,
+  dateEnd: string | null = null,
 ): Promise<UsageStats> {
-  return invoke<UsageStats>("get_usage_stats", { providers, rangeDays });
+  return invoke<UsageStats>("get_usage_stats", {
+    providers,
+    rangeDays,
+    dateStart,
+    dateEnd,
+  });
 }
 
 export async function getTodayCost(): Promise<number> {

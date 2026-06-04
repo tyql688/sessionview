@@ -4,7 +4,7 @@ use anyhow::Context;
 use tauri::State;
 
 use super::AppState;
-use crate::db::queries::{UsageProjectModelDetailRow, UsageSessionModelDetailRow};
+use crate::db::queries::{UsageDateBounds, UsageProjectModelDetailRow, UsageSessionModelDetailRow};
 use crate::error::CommandResult;
 use crate::models::*;
 
@@ -12,14 +12,41 @@ use crate::models::*;
 pub async fn get_usage_stats(
     providers: Vec<String>,
     range_days: Option<u32>,
+    date_start: Option<String>,
+    date_end: Option<String>,
     state: State<'_, AppState>,
 ) -> CommandResult<UsageStats> {
+    // Tauri commands are a trust boundary: reject malformed dates instead of
+    // silently passing them into SQL string comparisons.
+    let custom_range = parse_custom_range(date_start.as_deref(), date_end.as_deref())?;
     let state = state.inner().clone();
-    let stats =
-        tokio::task::spawn_blocking(move || build_usage_stats(&state, &providers, range_days))
-            .await
-            .context("task join error")??;
+    let stats = tokio::task::spawn_blocking(move || {
+        build_usage_stats(&state, &providers, range_days, custom_range)
+    })
+    .await
+    .context("task join error")??;
     Ok(stats)
+}
+
+/// Validate and order an optional custom `[start, end]` date range (inclusive).
+fn parse_custom_range(
+    date_start: Option<&str>,
+    date_end: Option<&str>,
+) -> anyhow::Result<Option<(chrono::NaiveDate, chrono::NaiveDate)>> {
+    let (Some(start), Some(end)) = (date_start, date_end) else {
+        if date_start.is_some() || date_end.is_some() {
+            anyhow::bail!("custom date range requires both date_start and date_end");
+        }
+        return Ok(None);
+    };
+    let start = chrono::NaiveDate::parse_from_str(start, "%Y-%m-%d")
+        .with_context(|| format!("invalid date_start '{start}', expected YYYY-MM-DD"))?;
+    let end = chrono::NaiveDate::parse_from_str(end, "%Y-%m-%d")
+        .with_context(|| format!("invalid date_end '{end}', expected YYYY-MM-DD"))?;
+    if start > end {
+        anyhow::bail!("date_start must not be after date_end");
+    }
+    Ok(Some((start, end)))
 }
 
 #[tauri::command]
@@ -71,23 +98,34 @@ fn build_usage_stats(
     state: &AppState,
     providers: &[String],
     range_days: Option<u32>,
+    custom_range: Option<(chrono::NaiveDate, chrono::NaiveDate)>,
 ) -> anyhow::Result<UsageStats> {
-    let cutoff_date = range_days.and_then(cutoff_date_for_range_days);
-    let cutoff_ref = cutoff_date.as_deref();
+    // A validated custom range takes precedence over the preset day count.
+    let (start_date, end_date) = match custom_range {
+        Some((start, end)) => (
+            Some(start.format("%Y-%m-%d").to_string()),
+            Some(end.format("%Y-%m-%d").to_string()),
+        ),
+        None => (range_days.and_then(cutoff_date_for_range_days), None),
+    };
+    let bounds = UsageDateBounds {
+        start: start_date.as_deref(),
+        end: end_date.as_deref(),
+    };
 
     let total_sessions = state
         .db
-        .usage_session_count(providers, cutoff_ref)
+        .usage_session_count(providers, bounds)
         .context("failed to count usage sessions")?;
 
     let (total_turns, total_in, total_out, total_cr, total_cw) = state
         .db
-        .usage_totals(providers, cutoff_ref)
+        .usage_totals(providers, bounds)
         .context("failed to query usage totals")?;
 
     let daily_rows = state
         .db
-        .usage_daily(providers, cutoff_ref)
+        .usage_daily(providers, bounds)
         .context("failed to query daily usage")?;
     let daily_usage: Vec<DailyUsage> = daily_rows
         .into_iter()
@@ -101,7 +139,7 @@ fn build_usage_stats(
 
     let model_rows = state
         .db
-        .usage_by_model(providers, cutoff_ref)
+        .usage_by_model(providers, bounds)
         .context("failed to query usage by model")?;
     let model_costs: Vec<ModelCost> = model_rows
         .into_iter()
@@ -121,7 +159,7 @@ fn build_usage_stats(
     // per-model pricing while deduplicating session counts exactly.
     let project_model_rows = state
         .db
-        .usage_project_model_detail(providers, cutoff_ref)
+        .usage_project_model_detail(providers, bounds)
         .context("failed to query project model detail")?;
 
     let project_costs = build_project_costs(project_model_rows);
@@ -130,7 +168,7 @@ fn build_usage_stats(
     // then aggregate by session with the dominant model label.
     let session_model_rows = state
         .db
-        .usage_session_model_detail(providers, cutoff_ref, 100)
+        .usage_session_model_detail(providers, bounds, 100)
         .context("failed to query session model detail")?;
 
     let recent_sessions = build_recent_sessions(session_model_rows);
@@ -142,35 +180,43 @@ fn build_usage_stats(
         0.0
     };
 
-    // Previous period for trend comparison.
-    // Only computed when a concrete range is given and enough historical data exists.
-    let prev_period = if let Some(days) = range_days {
-        if days == 0 {
-            None
-        } else {
+    // Previous period for trend comparison: the same number of days
+    // immediately before the current window. Only computed when a concrete
+    // range is given (preset days or custom dates).
+    let prev_window = match custom_range {
+        Some((start, end)) => {
+            let days = (end - start).num_days() + 1;
+            Some((start - chrono::Duration::days(days), start))
+        }
+        None => range_days.filter(|days| *days > 0).map(|days| {
             let today = chrono::Local::now().date_naive();
             let cur_start = today - chrono::Duration::days(i64::from(days.saturating_sub(1)));
-            let prev_start = cur_start - chrono::Duration::days(i64::from(days));
-            let prev_start_str = prev_start.format("%Y-%m-%d").to_string();
-            let prev_end_str = cur_start.format("%Y-%m-%d").to_string();
+            (
+                cur_start - chrono::Duration::days(i64::from(days)),
+                cur_start,
+            )
+        }),
+    };
+    let prev_period = if let Some((prev_start, prev_end)) = prev_window {
+        let prev_start_str = prev_start.format("%Y-%m-%d").to_string();
+        let prev_end_str = prev_end.format("%Y-%m-%d").to_string();
 
-            let (sessions, turns, inp, out, cr, cw, cost) = state
-                .db
-                .usage_totals_range(providers, &prev_start_str, &prev_end_str)
-                .context("failed to query previous-period usage totals")?;
+        let (sessions, turns, inp, out, cr, cw, cost) = state
+            .db
+            .usage_totals_range(providers, &prev_start_str, &prev_end_str)
+            .context("failed to query previous-period usage totals")?;
 
-            // Only return if prev period has data
-            let total_tokens = inp + out + cr + cw;
-            if sessions == 0 && turns == 0 {
-                None
-            } else {
-                Some(PrevPeriodTotals {
-                    total_sessions: sessions,
-                    total_turns: turns,
-                    total_tokens,
-                    total_cost: cost,
-                })
-            }
+        // Only return if prev period has data
+        let total_tokens = inp + out + cr + cw;
+        if sessions == 0 && turns == 0 {
+            None
+        } else {
+            Some(PrevPeriodTotals {
+                total_sessions: sessions,
+                total_turns: turns,
+                total_tokens,
+                total_cost: cost,
+            })
         }
     } else {
         None
@@ -178,7 +224,7 @@ fn build_usage_stats(
 
     let provider_session_counts = state
         .db
-        .usage_session_count_by_provider(providers, cutoff_ref)
+        .usage_session_count_by_provider(providers, bounds)
         .context("failed to count sessions by provider")?
         .into_iter()
         .map(|(provider, count)| ProviderSessionCount { provider, count })
@@ -361,8 +407,36 @@ fn build_recent_sessions(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_project_costs, build_recent_sessions, cutoff_date_for_range_days};
+    use super::{
+        build_project_costs, build_recent_sessions, cutoff_date_for_range_days, parse_custom_range,
+    };
     use crate::db::queries::{UsageProjectModelDetailRow, UsageSessionModelDetailRow};
+
+    #[test]
+    fn custom_range_parses_valid_inclusive_dates() {
+        let range = parse_custom_range(Some("2026-05-01"), Some("2026-05-20"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(range.0.to_string(), "2026-05-01");
+        assert_eq!(range.1.to_string(), "2026-05-20");
+    }
+
+    #[test]
+    fn custom_range_absent_when_no_dates_given() {
+        assert!(parse_custom_range(None, None).unwrap().is_none());
+    }
+
+    #[test]
+    fn custom_range_rejects_malformed_or_partial_input() {
+        assert!(parse_custom_range(Some("05/01/2026"), Some("2026-05-20")).is_err());
+        assert!(parse_custom_range(Some("2026-05-01"), Some("not-a-date")).is_err());
+        assert!(parse_custom_range(Some("2026-05-01"), None).is_err());
+        assert!(parse_custom_range(None, Some("2026-05-20")).is_err());
+        assert!(
+            parse_custom_range(Some("2026-05-21"), Some("2026-05-20")).is_err(),
+            "start after end must be rejected"
+        );
+    }
 
     #[test]
     fn project_costs_count_distinct_sessions_exactly() {

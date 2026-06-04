@@ -10,7 +10,16 @@ import type { LimitOption } from "../components/UsagePanel/ProjectTable";
 // across remounts. Ephemeral per-visit state (hover, dialogs, in-flight flags)
 // stays local in the component.
 
+export interface CustomDateRange {
+  start: string; // YYYY-MM-DD, inclusive
+  end: string; // YYYY-MM-DD, inclusive
+}
+
 const [rangeDays, setRangeDays] = createSignal<number | null>(7);
+// Non-null overrides rangeDays with an explicit [start, end] date window.
+const [customRange, setCustomRange] = createSignal<CustomDateRange | null>(
+  null,
+);
 const [selectedProviders, setSelectedProviders] = createSignal<Set<string>>(
   new Set(),
 );
@@ -39,6 +48,8 @@ export type { LimitOption } from "../components/UsagePanel/ProjectTable";
 export {
   rangeDays,
   setRangeDays,
+  customRange,
+  setCustomRange,
   selectedProviders,
   setSelectedProviders,
   didInitProviders,

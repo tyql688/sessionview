@@ -3,14 +3,22 @@ use super::{
     UsageTotalsRow,
 };
 
+/// Inclusive `[start, end]` date bounds (`YYYY-MM-DD`) for usage queries.
+/// `None` on either side leaves that side unbounded.
+#[derive(Clone, Copy, Default)]
+pub struct UsageDateBounds<'a> {
+    pub start: Option<&'a str>,
+    pub end: Option<&'a str>,
+}
+
 impl Database {
     pub fn usage_session_count(
         &self,
         providers: &[String],
-        cutoff_date: Option<&str>,
+        bounds: UsageDateBounds<'_>,
     ) -> Result<u64, rusqlite::Error> {
         let conn = self.lock_read()?;
-        let (where_clause, params) = build_usage_where(providers, cutoff_date);
+        let (where_clause, params) = build_usage_where(providers, bounds);
         let sql = format!(
             "SELECT COUNT(DISTINCT s.session_id) \
              FROM session_token_stats s \
@@ -25,10 +33,10 @@ impl Database {
     pub fn usage_session_count_by_provider(
         &self,
         providers: &[String],
-        cutoff_date: Option<&str>,
+        bounds: UsageDateBounds<'_>,
     ) -> Result<Vec<(String, u64)>, rusqlite::Error> {
         let conn = self.lock_read()?;
-        let (where_clause, params) = build_usage_where(providers, cutoff_date);
+        let (where_clause, params) = build_usage_where(providers, bounds);
         let sql = format!(
             "SELECT sess.provider, COUNT(DISTINCT s.session_id) \
              FROM session_token_stats s \
@@ -48,10 +56,10 @@ impl Database {
     pub fn usage_totals(
         &self,
         providers: &[String],
-        cutoff_date: Option<&str>,
+        bounds: UsageDateBounds<'_>,
     ) -> Result<(u64, u64, u64, u64, u64), rusqlite::Error> {
         let conn = self.lock_read()?;
-        let (where_clause, params) = build_usage_where(providers, cutoff_date);
+        let (where_clause, params) = build_usage_where(providers, bounds);
         let sql = format!(
             "SELECT COALESCE(SUM(s.turn_count),0), \
                     COALESCE(SUM(s.input_tokens),0), \
@@ -78,10 +86,10 @@ impl Database {
     pub fn usage_daily(
         &self,
         providers: &[String],
-        cutoff_date: Option<&str>,
+        bounds: UsageDateBounds<'_>,
     ) -> Result<Vec<(String, String, u64, f64)>, rusqlite::Error> {
         let conn = self.lock_read()?;
-        let (where_clause, params) = build_usage_where(providers, cutoff_date);
+        let (where_clause, params) = build_usage_where(providers, bounds);
         let sql = format!(
             "SELECT s.date, sess.provider, \
                     SUM(s.input_tokens + s.output_tokens + s.cache_read_tokens + s.cache_write_tokens), \
@@ -108,10 +116,10 @@ impl Database {
     pub(crate) fn usage_by_model(
         &self,
         providers: &[String],
-        cutoff_date: Option<&str>,
+        bounds: UsageDateBounds<'_>,
     ) -> Result<Vec<UsageByModelRow>, rusqlite::Error> {
         let conn = self.lock_read()?;
-        let (where_clause, params) = build_usage_where(providers, cutoff_date);
+        let (where_clause, params) = build_usage_where(providers, bounds);
         let sql = format!(
             "SELECT COALESCE(NULLIF(s.model, ''), sess.model, ''), \
                     SUM(s.turn_count), \
@@ -152,10 +160,10 @@ impl Database {
     pub(crate) fn usage_project_model_detail(
         &self,
         providers: &[String],
-        cutoff_date: Option<&str>,
+        bounds: UsageDateBounds<'_>,
     ) -> Result<Vec<UsageProjectModelDetailRow>, rusqlite::Error> {
         let conn = self.lock_read()?;
-        let (where_clause, params) = build_usage_where(providers, cutoff_date);
+        let (where_clause, params) = build_usage_where(providers, bounds);
         let sql = format!(
             "SELECT sess.project_path, sess.project_name, sess.provider, s.session_id, \
                     SUM(s.turn_count), \
@@ -199,13 +207,13 @@ impl Database {
     pub(crate) fn usage_session_model_detail(
         &self,
         providers: &[String],
-        cutoff_date: Option<&str>,
+        bounds: UsageDateBounds<'_>,
         limit: u32,
     ) -> Result<Vec<UsageSessionModelDetailRow>, rusqlite::Error> {
         let conn = self.lock_read()?;
 
         // Two-step approach: find the top N session IDs, then fetch per-model detail.
-        let (where_clause, params) = build_usage_where(providers, cutoff_date);
+        let (where_clause, params) = build_usage_where(providers, bounds);
         let session_sql = format!(
             "SELECT DISTINCT s.session_id, MAX(sess.updated_at) as max_updated \
              FROM session_token_stats s \
@@ -232,9 +240,9 @@ impl Database {
             return Ok(Vec::new());
         }
 
-        // Now query detail for those sessions. Re-apply the SAME date cutoff
+        // Now query detail for those sessions. Re-apply the SAME date bounds
         // used to pick them: session_token_stats grain is (session_id, date,
-        // model), so without it a session active both inside and outside the
+        // model), so without them a session active both inside and outside the
         // range would sum ALL its dated rows, inflating per-session totals so
         // the Recent Sessions table no longer reconciles with the headline
         // total_cost / chart for any bounded range.
@@ -246,9 +254,13 @@ impl Database {
             .map(|id| Box::new(id) as _)
             .collect();
         let mut detail_where = format!("WHERE s.session_id IN ({})", id_placeholders.join(","));
-        if let Some(cutoff) = cutoff_date {
+        if let Some(start) = bounds.start {
             detail_where.push_str(&format!(" AND s.date >= ?{}", detail_params.len() + 1));
-            detail_params.push(Box::new(cutoff.to_string()));
+            detail_params.push(Box::new(start.to_string()));
+        }
+        if let Some(end) = bounds.end {
+            detail_where.push_str(&format!(" AND s.date <= ?{}", detail_params.len() + 1));
+            detail_params.push(Box::new(end.to_string()));
         }
         let detail_sql = format!(
             "SELECT s.session_id, sess.project_path, sess.project_name, sess.provider, sess.updated_at, \
@@ -366,7 +378,7 @@ impl Database {
 
 fn build_usage_where(
     providers: &[String],
-    cutoff_date: Option<&str>,
+    bounds: UsageDateBounds<'_>,
 ) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
     if providers.is_empty() {
         return (" WHERE 1 = 0".to_string(), Vec::new());
@@ -382,9 +394,13 @@ fn build_usage_where(
     for p in providers {
         params.push(Box::new(p.clone()));
     }
-    if let Some(date) = cutoff_date {
+    if let Some(date) = bounds.start {
         params.push(Box::new(date.to_string()));
         conditions.push(format!("s.date >= ?{}", params.len()));
+    }
+    if let Some(date) = bounds.end {
+        params.push(Box::new(date.to_string()));
+        conditions.push(format!("s.date <= ?{}", params.len()));
     }
 
     // conditions always has at least the provider IN clause (empty providers early-return above)
