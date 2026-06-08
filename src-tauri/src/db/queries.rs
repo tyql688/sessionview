@@ -530,6 +530,105 @@ mod tests {
     }
 
     #[test]
+    fn activity_daily_groups_by_date_with_distinct_sessions() {
+        let dir = TempDir::new().unwrap();
+        let db = Database::open(dir.path()).unwrap();
+        let meta_a = sample_meta("session-a");
+        let meta_b = sample_meta("session-b");
+        db.sync_provider_snapshot(
+            &Provider::Claude,
+            &[
+                parsed_session(meta_a.clone(), String::new()),
+                parsed_session(meta_b.clone(), String::new()),
+            ],
+            true,
+            &[],
+        )
+        .unwrap();
+
+        // Two sessions both active on 2026-04-09 (session-a across two models),
+        // one trailing day on 2026-04-10, and a 2025 day to exercise the year list.
+        db.replace_token_stats(
+            &meta_a.id,
+            &[
+                TokenStatRow {
+                    date: "2026-04-09".into(),
+                    model: "claude-opus-4-6".into(),
+                    turn_count: 3,
+                    input_tokens: 100,
+                    output_tokens: 50,
+                    cache_read_tokens: 20,
+                    cache_write_tokens: 10,
+                    cost_usd: 0.10,
+                },
+                TokenStatRow {
+                    date: "2026-04-09".into(),
+                    model: "claude-sonnet-4-6".into(),
+                    turn_count: 2,
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                    cost_usd: 0.02,
+                },
+                TokenStatRow {
+                    date: "2025-12-31".into(),
+                    model: "claude-opus-4-6".into(),
+                    turn_count: 1,
+                    input_tokens: 1,
+                    output_tokens: 1,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                    cost_usd: 0.001,
+                },
+            ],
+        )
+        .unwrap();
+        db.replace_token_stats(
+            &meta_b.id,
+            &[TokenStatRow {
+                date: "2026-04-09".into(),
+                model: "claude-opus-4-6".into(),
+                turn_count: 4,
+                input_tokens: 200,
+                output_tokens: 100,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                cost_usd: 0.30,
+            }],
+        )
+        .unwrap();
+
+        let providers = vec!["claude".to_string()];
+        let bounds = UsageDateBounds {
+            start: Some("2026-01-01"),
+            end: Some("2026-12-31"),
+        };
+        let days = db.activity_daily(&providers, bounds).unwrap();
+        assert_eq!(days.len(), 1, "only 2026-04-09 falls inside the bounds");
+        let (date, sessions, turns, tokens, cost) = &days[0];
+        assert_eq!(date, "2026-04-09");
+        assert_eq!(*sessions, 2, "session-a and session-b are distinct");
+        assert_eq!(*turns, 3 + 2 + 4);
+        assert_eq!(*tokens, 100 + 50 + 20 + 10 + 10 + 5 + 200 + 100);
+        assert!((*cost - 0.42).abs() < 1e-9);
+
+        // available_years ignores the date window and is descending.
+        let years = db.activity_years(&providers).unwrap();
+        assert_eq!(years, vec![2026, 2025]);
+
+        // An unselected provider yields no data and no years.
+        assert!(db
+            .activity_daily(&["codex".to_string()], bounds)
+            .unwrap()
+            .is_empty());
+        assert!(db
+            .activity_years(&["codex".to_string()])
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
     fn search_filtered_caps_fts_results_at_100() {
         let dir = TempDir::new().unwrap();
         let db = Database::open(dir.path()).unwrap();

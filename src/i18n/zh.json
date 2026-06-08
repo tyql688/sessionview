@@ -304,6 +304,14 @@
     "pricingSourceNote": "费用来自缓存的远程模型价格清单。如果还没有缓存价格目录，相关模型会显示为“未定价”，直到你刷新价格并重建索引。",
     "firstUseBootstrap": "首次启动：正在自动获取模型价格并统计用量…",
     "firstUseBootstrapFailed": "自动获取价格失败，费用将显示为“未定价”。下次启动会自动重试，也可在用量页手动刷新价格",
-    "unpriced": "未定价"
+    "unpriced": "未定价",
+    "activityHint": "悬停到某一天可查看当日活跃度",
+    "activityInYear": "于 {year} 年",
+    "activityTrailing": "近一年",
+    "activityYearTrailing": "近一年",
+    "activityDayTooltip": "{date} · {value}",
+    "activityLess": "少",
+    "activityMore": "多",
+    "activityNoData": "暂无活跃记录"
   }
 }

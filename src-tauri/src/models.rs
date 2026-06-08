@@ -430,6 +430,30 @@ pub struct DailyUsage {
     pub cost: f64,
 }
 
+/// GitHub-style activity calendar: per-day aggregates over a date window plus
+/// the set of years that have any data (drives the year selector). The grid
+/// layout (week alignment, gap-filling, intensity buckets) is computed on the
+/// frontend; the backend only aggregates.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivityCalendar {
+    /// Days with at least one record, ascending by date. Days with no activity
+    /// are absent — the frontend fills the gaps when laying out the grid.
+    pub days: Vec<ActivityDay>,
+    /// Distinct calendar years (descending) that have any data for the selected
+    /// providers, ignoring the requested date window.
+    pub available_years: Vec<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivityDay {
+    pub date: String,
+    /// Distinct sessions active on this day.
+    pub sessions: u64,
+    pub turns: u64,
+    pub tokens: u64,
+    pub cost: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelCost {
     pub model: String,

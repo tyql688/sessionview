@@ -333,6 +333,7 @@ pub fn run() {
             commands::open_in_folder,
             commands::open_external,
             commands::get_usage_stats,
+            commands::get_activity_calendar,
             commands::get_today_cost,
             commands::get_today_tokens,
         ])

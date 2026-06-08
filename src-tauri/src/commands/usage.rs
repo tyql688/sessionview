@@ -49,6 +49,52 @@ fn parse_custom_range(
     Ok(Some((start, end)))
 }
 
+/// GitHub-style activity calendar: per-day aggregates over `[date_start,
+/// date_end]` (inclusive) plus the years that have data. The window is computed
+/// on the frontend from the selected year, so the calendar is independent of
+/// the usage panel's range filter.
+#[tauri::command]
+pub async fn get_activity_calendar(
+    providers: Vec<String>,
+    date_start: String,
+    date_end: String,
+    state: State<'_, AppState>,
+) -> CommandResult<ActivityCalendar> {
+    // Trust boundary: reject malformed dates instead of passing them into SQL.
+    parse_custom_range(Some(&date_start), Some(&date_end))?;
+    let state = state.inner().clone();
+    let calendar = tokio::task::spawn_blocking(move || -> anyhow::Result<ActivityCalendar> {
+        let bounds = UsageDateBounds {
+            start: Some(&date_start),
+            end: Some(&date_end),
+        };
+        let days = state
+            .db
+            .activity_daily(&providers, bounds)
+            .context("failed to query activity calendar")?
+            .into_iter()
+            .map(|(date, sessions, turns, tokens, cost)| ActivityDay {
+                date,
+                sessions,
+                turns,
+                tokens,
+                cost,
+            })
+            .collect();
+        let available_years = state
+            .db
+            .activity_years(&providers)
+            .context("failed to query activity years")?;
+        Ok(ActivityCalendar {
+            days,
+            available_years,
+        })
+    })
+    .await
+    .context("task join error")??;
+    Ok(calendar)
+}
+
 #[tauri::command]
 pub async fn get_today_cost(state: State<'_, AppState>) -> CommandResult<f64> {
     let state = state.inner().clone();

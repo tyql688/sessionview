@@ -11,6 +11,9 @@ pub struct UsageDateBounds<'a> {
     pub end: Option<&'a str>,
 }
 
+/// One row of the activity calendar: `(date, sessions, turns, tokens, cost)`.
+pub type ActivityDailyRow = (String, u64, u64, u64, f64);
+
 impl Database {
     pub fn usage_session_count(
         &self,
@@ -106,6 +109,72 @@ impl Database {
         let rows = stmt.query_map(param_refs.as_slice(), |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    /// Per-day activity over `bounds`, grouped by date only (providers merged):
+    /// distinct sessions, turns, tokens, and cost. Powers the activity calendar.
+    pub fn activity_daily(
+        &self,
+        providers: &[String],
+        bounds: UsageDateBounds<'_>,
+    ) -> Result<Vec<ActivityDailyRow>, rusqlite::Error> {
+        let conn = self.lock_read()?;
+        let (where_clause, params) = build_usage_where(providers, bounds);
+        let sql = format!(
+            "SELECT s.date, \
+                    COUNT(DISTINCT s.session_id), \
+                    COALESCE(SUM(s.turn_count),0), \
+                    COALESCE(SUM(s.input_tokens + s.output_tokens + s.cache_read_tokens + s.cache_write_tokens),0), \
+                    COALESCE(SUM(s.cost_usd),0.0) \
+             FROM session_token_stats s \
+             JOIN sessions sess ON s.session_id = sess.id{} \
+             GROUP BY s.date \
+             ORDER BY s.date",
+            where_clause
+        );
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(param_refs.as_slice(), |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
+        })?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    /// Distinct calendar years (descending) that have any data for `providers`,
+    /// ignoring any date window. Drives the activity-calendar year selector.
+    pub fn activity_years(&self, providers: &[String]) -> Result<Vec<i32>, rusqlite::Error> {
+        if providers.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.lock_read()?;
+        let (where_clause, params) = build_usage_where(providers, UsageDateBounds::default());
+        let sql = format!(
+            "SELECT DISTINCT CAST(substr(s.date, 1, 4) AS INTEGER) AS yr \
+             FROM session_token_stats s \
+             JOIN sessions sess ON s.session_id = sess.id{} \
+             ORDER BY yr DESC",
+            where_clause
+        );
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(param_refs.as_slice(), |row| row.get::<_, i32>(0))?;
         let mut result = Vec::new();
         for row in rows {
             result.push(row?);

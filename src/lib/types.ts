@@ -204,6 +204,21 @@ export interface DailyUsage {
   cost: number;
 }
 
+export interface ActivityDay {
+  date: string;
+  sessions: number;
+  turns: number;
+  tokens: number;
+  cost: number;
+}
+
+export interface ActivityCalendar {
+  /** Days with activity, ascending; gaps are filled client-side. */
+  days: ActivityDay[];
+  /** Years with data (descending) for the year selector. */
+  available_years: number[];
+}
+
 export interface ModelCost {
   model: string;
   turns: number;

@@ -14,6 +14,7 @@ import {
   startRefreshUsage,
   getIndexStats,
   getUsageStats,
+  getActivityCalendar,
   getSessionCount,
   refreshPricingCatalog,
 } from "../../lib/tauri";
@@ -39,6 +40,10 @@ import {
   setSessionLimit,
   chartMetric,
   setChartMetric,
+  calendarMetric,
+  setCalendarMetric,
+  calendarYear,
+  setCalendarYear,
   modelSort,
   setModelSort,
   projectSort,
@@ -60,6 +65,12 @@ import {
   trendPercent,
   type UsageSortState,
 } from "../../lib/usage";
+import {
+  buildHeatmapGrid,
+  dateRangeForYear,
+  todayISO,
+  type HeatmapGrid,
+} from "../../lib/heatmap";
 import type {
   MaintenanceEvent,
   MaintenanceJob,
@@ -77,6 +88,7 @@ import {
 } from "./formatters";
 import { Toolbar, type ProviderChipInfo } from "./Toolbar";
 import { SummaryCards } from "./SummaryCards";
+import { ActivityHeatmap } from "./ActivityHeatmap";
 import { Chart } from "./Chart";
 import { TopModels } from "./TopModels";
 import { ModelTable } from "./ModelTable";
@@ -172,6 +184,47 @@ export function UsagePanel() {
     },
   );
 
+  // Activity calendar: its own data window (a year), independent of the range
+  // filter that drives the stats above. The window is derived once here so the
+  // fetched range and the laid-out grid can never disagree (e.g. across a
+  // midnight tick if today were read twice). Refetches on provider/window change.
+  const calendarWindow = createMemo(() =>
+    dateRangeForYear(calendarYear(), todayISO()),
+  );
+  const [calendar, { refetch: refetchCalendar }] = createResource(
+    () =>
+      didInitProviders()
+        ? { providers: selectedProviderKeys(), window: calendarWindow() }
+        : null,
+    async (params) => {
+      if (!params || params.providers.length === 0) {
+        return { days: [], available_years: [] };
+      }
+      return getActivityCalendar(
+        params.providers,
+        params.window.start,
+        params.window.end,
+      );
+    },
+  );
+
+  createEffect(() => {
+    if (calendar.error) {
+      console.error("failed to load activity calendar", calendar.error);
+    }
+  });
+
+  const availableYears = createMemo(() => calendar()?.available_years ?? []);
+  const heatmapGrid = createMemo<HeatmapGrid>(() => {
+    const { start, end } = calendarWindow();
+    return buildHeatmapGrid(
+      calendar()?.days ?? [],
+      calendarMetric(),
+      start,
+      end,
+    );
+  });
+
   const [sessionCount, { refetch: refetchSessionCount }] = createResource(() =>
     getSessionCount(),
   );
@@ -185,6 +238,7 @@ export function UsagePanel() {
   const handleUsageDataChanged = () => {
     void refreshProviderSnapshots();
     void refetchStats();
+    void refetchCalendar();
     void refetchSessionCount();
     void refetchPricingStatus();
     void refetchIndexStats();
@@ -526,26 +580,37 @@ export function UsagePanel() {
         }}
       />
 
-      <Show
-        when={stats()}
-        fallback={<div class="usage-loading">{t("common.loading")}</div>}
-      >
-        {(data) => (
-          <Show
-            when={data().total_turns > 0}
-            fallback={
-              <section class="usage-card usage-empty">
-                <p class="usage-empty-text">{emptyMessage()}</p>
-              </section>
-            }
-          >
-            <div class="usage-content-stack">
-              <SummaryCards
-                totalCost={() => data().total_cost}
-                totalCostTrend={totalCostTrend}
-                summaryStats={summaryStats}
-                tokenBreakdown={tokenBreakdown}
-              />
+      <div class="usage-content-stack">
+        <Show
+          when={stats()}
+          fallback={<div class="usage-loading">{t("common.loading")}</div>}
+        >
+          {(data) => (
+            <Show
+              when={data().total_turns > 0}
+              fallback={
+                <section class="usage-card usage-empty">
+                  <p class="usage-empty-text">{emptyMessage()}</p>
+                </section>
+              }
+            >
+              <div class="usage-summary-row">
+                <SummaryCards
+                  totalCost={() => data().total_cost}
+                  totalCostTrend={totalCostTrend}
+                  summaryStats={summaryStats}
+                  tokenBreakdown={tokenBreakdown}
+                />
+                <ActivityHeatmap
+                  grid={heatmapGrid}
+                  metric={calendarMetric}
+                  setMetric={setCalendarMetric}
+                  year={calendarYear}
+                  setYear={setCalendarYear}
+                  availableYears={availableYears}
+                  loading={() => calendar.loading}
+                />
+              </div>
 
               <div class="usage-overview-grid">
                 <Chart
@@ -597,10 +662,10 @@ export function UsagePanel() {
                 formatProjectPath={formatProjectPath}
                 formatModelName={formatModelName}
               />
-            </div>
-          </Show>
-        )}
-      </Show>
+            </Show>
+          )}
+        </Show>
+      </div>
 
       <ConfirmDialog
         open={showClearUsageConfirm()}

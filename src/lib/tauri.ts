@@ -14,6 +14,7 @@ import type {
   SessionMeta,
   TokenTotals,
   UsageStats,
+  ActivityCalendar,
   Message,
 } from "./types";
 
@@ -322,6 +323,20 @@ export async function getUsageStats(
   return invoke<UsageStats>("get_usage_stats", {
     providers,
     rangeDays,
+    dateStart,
+    dateEnd,
+  });
+}
+
+/** GitHub-style activity calendar over an inclusive [dateStart, dateEnd] window.
+ *  The window is independent of the usage panel's range filter. */
+export async function getActivityCalendar(
+  providers: string[],
+  dateStart: string,
+  dateEnd: string,
+): Promise<ActivityCalendar> {
+  return invoke<ActivityCalendar>("get_activity_calendar", {
+    providers,
     dateStart,
     dateEnd,
   });

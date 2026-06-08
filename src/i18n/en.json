@@ -304,6 +304,14 @@
     "pricingSourceNote": "Pricing comes from the cached remote model-rate manifest. If no catalog is cached yet, affected models will show as unpriced until you refresh pricing and rebuild the index.",
     "firstUseBootstrap": "First launch: fetching model pricing and computing usage automatically…",
     "firstUseBootstrapFailed": "Automatic pricing fetch failed — costs will show as unpriced. It will retry on next launch, or use Refresh pricing in the Usage panel",
-    "unpriced": "unpriced"
+    "unpriced": "unpriced",
+    "activityHint": "Hover a day to see its activity",
+    "activityInYear": "in {year}",
+    "activityTrailing": "in the last year",
+    "activityYearTrailing": "Last year",
+    "activityDayTooltip": "{value} on {date}",
+    "activityLess": "Less",
+    "activityMore": "More",
+    "activityNoData": "No activity yet"
   }
 }

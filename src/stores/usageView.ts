@@ -1,5 +1,6 @@
 import { createSignal } from "solid-js";
 import type { ChartMetric, UsageSortState } from "../lib/usage";
+import type { HeatmapMetric } from "../lib/heatmap";
 import type { LimitOption } from "../components/UsagePanel/ProjectTable";
 
 // Persistent Usage-panel UI state. UsagePanel is mounted under a `<Show>` in
@@ -29,6 +30,10 @@ const [providerSelectionTouched, setProviderSelectionTouched] =
 const [projectLimit, setProjectLimit] = createSignal<LimitOption>(10);
 const [sessionLimit, setSessionLimit] = createSignal<LimitOption>(10);
 const [chartMetric, setChartMetric] = createSignal<ChartMetric>("tokens");
+// Activity-calendar coloring metric and selected year (null = trailing 52 weeks).
+const [calendarMetric, setCalendarMetric] =
+  createSignal<HeatmapMetric>("tokens");
+const [calendarYear, setCalendarYear] = createSignal<number | null>(null);
 const [modelSort, setModelSort] = createSignal<UsageSortState>({
   col: "cost",
   asc: false,
@@ -43,6 +48,7 @@ const [sessionSort, setSessionSort] = createSignal<UsageSortState>({
 });
 
 export type { ChartMetric, UsageSortState } from "../lib/usage";
+export type { HeatmapMetric } from "../lib/heatmap";
 export type { LimitOption } from "../components/UsagePanel/ProjectTable";
 
 export {
@@ -62,6 +68,10 @@ export {
   setSessionLimit,
   chartMetric,
   setChartMetric,
+  calendarMetric,
+  setCalendarMetric,
+  calendarYear,
+  setCalendarYear,
   modelSort,
   setModelSort,
   projectSort,

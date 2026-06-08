@@ -130,6 +130,13 @@
   --diff-new-border: #22c55e;
   --diff-new-text: #166534;
 
+  /* Activity calendar intensity ramp (GitHub-style) */
+  --cal-level-0: #ebedf0;
+  --cal-level-1: #9be9a8;
+  --cal-level-2: #40c463;
+  --cal-level-3: #30a14e;
+  --cal-level-4: #216e39;
+
   /* Aliases for tokens that were referenced before they were defined */
   --bg-hover: var(--bg-tab-hover);
   --bg-subtle: var(--bg-tab-hover);
@@ -231,6 +238,13 @@
   --diff-new-bg: rgba(34, 197, 94, 0.12);
   --diff-new-border: #4ade80;
   --diff-new-text: #86efac;
+
+  /* Activity calendar intensity ramp (GitHub-style, dark) */
+  --cal-level-0: rgba(255, 255, 255, 0.06);
+  --cal-level-1: #0e4429;
+  --cal-level-2: #006d32;
+  --cal-level-3: #26a641;
+  --cal-level-4: #39d353;
 
   /* Aliases for tokens that were referenced before they were defined */
   --bg-hover: var(--bg-tab-hover);
