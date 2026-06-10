@@ -9,6 +9,7 @@ mod session_lifecycle;
 mod session_resolution;
 mod source_sync;
 pub mod tail_reader;
+pub(crate) mod terminal;
 
 pub use error::{ServiceError, ServiceResult};
 pub use persisted_output_cache::PersistedOutputCache;

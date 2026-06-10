@@ -9,7 +9,6 @@ pub mod provider;
 pub mod provider_utils;
 pub mod providers;
 pub mod services;
-mod terminal;
 pub mod tool_metadata;
 pub mod trash_state;
 mod watcher;
