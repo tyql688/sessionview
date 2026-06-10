@@ -211,16 +211,14 @@ fn extract_messages(entries: &[PiEntry], branch: &[String]) -> Vec<Message> {
                     None,
                 );
             }
-            PiEntry::CustomMessage(custom) => {
-                if custom.display {
-                    let content = extract_content_text(&custom.content);
-                    push_system_message(
-                        &mut messages,
-                        format!("[{}] {}", custom.custom_type, content),
-                        parse_timestamp(&custom.base.timestamp).map(format_timestamp),
-                        None,
-                    );
-                }
+            PiEntry::CustomMessage(custom) if custom.display => {
+                let content = extract_content_text(&custom.content);
+                push_system_message(
+                    &mut messages,
+                    format!("[{}] {}", custom.custom_type, content),
+                    parse_timestamp(&custom.base.timestamp).map(format_timestamp),
+                    None,
+                );
             }
             _ => {}
         }
