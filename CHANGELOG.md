@@ -7,6 +7,12 @@ versioned with [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-10
+
+### Added
+
+- Usage panel shows a GitHub-style activity heatmap: a year of daily activity colored by your choice of sessions, turns, tokens, or cost, with a year selector and per-day hover details (3ae7a64)
+
 ## [0.4.8] - 2026-06-04
 
 ### Added
