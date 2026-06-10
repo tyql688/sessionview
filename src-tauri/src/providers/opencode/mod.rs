@@ -428,11 +428,7 @@ impl SessionProvider for OpenCodeProvider {
                 }
                 Err(error) => {
                     log::warn!(
-                        "skipping malformed OpenCode part JSON for session {} message {}: {}",
-                        session_id,
-                        mid,
-                        error
-                    );
+                        "skipping malformed OpenCode part JSON for session {session_id} message {mid}: {error}");
                 }
             }
         }
@@ -444,11 +440,7 @@ impl SessionProvider for OpenCodeProvider {
                 Ok(value) => value,
                 Err(error) => {
                     log::warn!(
-                        "skipping malformed OpenCode message JSON for session {} message {}: {}",
-                        session_id,
-                        msg_id,
-                        error
-                    );
+                        "skipping malformed OpenCode message JSON for session {session_id} message {msg_id}: {error}");
                     continue;
                 }
             };

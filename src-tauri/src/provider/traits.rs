@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use crate::models::{Provider, SessionMeta, TrashMeta};
 use crate::pricing::PricingCatalog;
 
@@ -10,7 +12,7 @@ use super::{
 };
 
 /// How the frontend should watch for changes from this provider.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WatchStrategy {
     Fs,

@@ -72,16 +72,12 @@ impl Database {
         let should_delete = if aggressive {
             if alive_count == 0 {
                 log::info!(
-                    "provider {:?} aggressive reindex: scan returned 0 sessions, clearing stale entries",
-                    provider
-                );
+                    "provider {provider:?} aggressive reindex: scan returned 0 sessions, clearing stale entries");
             }
             true
         } else if alive_count == 0 {
             log::warn!(
-                "provider {:?} scan returned 0 sessions, skipping deletion to protect index",
-                provider
-            );
+                "provider {provider:?} scan returned 0 sessions, skipping deletion to protect index");
             false
         } else {
             current_count <= 10 || (alive_count as f64 / current_count as f64) > 0.5
@@ -89,9 +85,7 @@ impl Database {
 
         if !should_delete {
             log::warn!(
-                "provider {:?} scan returned {} sessions ({} unchanged) but DB has {}, skipping destructive sync",
-                provider, scan_count, preserve_source_paths.len(), current_count
-            );
+                "provider {provider:?} scan returned {scan_count} sessions ({} unchanged) but DB has {current_count}, skipping destructive sync", preserve_source_paths.len());
         }
 
         self.with_transaction(|conn| {
@@ -143,9 +137,7 @@ impl Database {
 
         if !should_delete {
             log::warn!(
-                "provider {:?} source {:?} scan returned {} sessions but DB has {}, skipping destructive sync",
-                provider, source_path, scan_count, current_count
-            );
+                "provider {provider:?} source {source_path:?} scan returned {scan_count} sessions but DB has {current_count}, skipping destructive sync");
         }
 
         self.with_transaction(|conn| {

@@ -71,9 +71,8 @@ fn scan_lines<R: BufRead>(reader: R, path: &Path, accum: &mut ScanAccum) {
             Ok(l) => l,
             Err(error) => {
                 log::warn!(
-                    "failed to read Kimi wire.jsonl line from '{}': {}",
-                    path.display(),
-                    error
+                    "failed to read Kimi wire.jsonl line from '{}': {error}",
+                    path.display()
                 );
                 accum.note_warning();
                 continue;
@@ -86,9 +85,8 @@ fn scan_lines<R: BufRead>(reader: R, path: &Path, accum: &mut ScanAccum) {
             Ok(v) => v,
             Err(error) => {
                 log::warn!(
-                    "skipping malformed Kimi wire.jsonl line in '{}': {}",
-                    path.display(),
-                    error
+                    "skipping malformed Kimi wire.jsonl line in '{}': {error}",
+                    path.display()
                 );
                 accum.note_warning();
                 continue;
@@ -122,9 +120,8 @@ pub(crate) fn parse_session(path: &Path, index: &SessionIndex) -> Option<ParsedS
         Ok(file) => file,
         Err(error) => {
             log::warn!(
-                "failed to open Kimi wire.jsonl '{}': {}",
-                path.display(),
-                error
+                "failed to open Kimi wire.jsonl '{}': {error}",
+                path.display()
             );
             return None;
         }
@@ -133,9 +130,8 @@ pub(crate) fn parse_session(path: &Path, index: &SessionIndex) -> Option<ParsedS
         Ok(m) => m,
         Err(error) => {
             log::warn!(
-                "failed to stat Kimi wire.jsonl '{}': {}",
-                path.display(),
-                error
+                "failed to stat Kimi wire.jsonl '{}': {error}",
+                path.display()
             );
             return None;
         }

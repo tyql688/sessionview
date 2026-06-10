@@ -270,10 +270,7 @@ impl CodexScanAccum {
                 };
                 let Some(idx) = self.call_id_map.get(call_id).copied() else {
                     log::warn!(
-                        "missing Codex image generation tool message for event call_id {} in '{}'",
-                        call_id,
-                        path.display()
-                    );
+                        "missing Codex image generation tool message for event call_id {call_id} in '{}'", path.display());
                     return;
                 };
                 if idx >= self.messages.len() {
@@ -382,10 +379,7 @@ impl CodexScanAccum {
                 };
                 let Some(idx) = self.call_id_map.get(call_id).copied() else {
                     log::warn!(
-                        "missing Codex exec_command tool message for event call_id {} in '{}'",
-                        call_id,
-                        path.display()
-                    );
+                        "missing Codex exec_command tool message for event call_id {call_id} in '{}'", path.display());
                     return;
                 };
                 if idx >= self.messages.len() {
@@ -432,8 +426,7 @@ impl CodexScanAccum {
                 };
                 let Some(idx) = self.call_id_map.get(call_id).copied() else {
                     log::warn!(
-                        "missing Codex MCP tool message for event call_id {} in '{}'",
-                        call_id,
+                        "missing Codex MCP tool message for event call_id {call_id} in '{}'",
                         path.display()
                     );
                     return;
@@ -455,10 +448,7 @@ impl CodexScanAccum {
                 };
                 let Some(idx) = self.call_id_map.get(call_id).copied() else {
                     log::warn!(
-                        "missing Codex apply_patch tool message for event call_id {} in '{}'",
-                        call_id,
-                        path.display()
-                    );
+                        "missing Codex apply_patch tool message for event call_id {call_id} in '{}'", path.display());
                     return;
                 };
                 if idx >= self.messages.len() {
@@ -492,10 +482,7 @@ impl CodexScanAccum {
                 };
                 let Some(idx) = self.call_id_map.get(call_id).copied() else {
                     log::warn!(
-                        "missing Codex spawn_agent tool message for event call_id {} in '{}'",
-                        call_id,
-                        path.display()
-                    );
+                        "missing Codex spawn_agent tool message for event call_id {call_id} in '{}'", path.display());
                     return;
                 };
                 if idx >= self.messages.len() {
@@ -516,8 +503,7 @@ impl CodexScanAccum {
                 };
                 let Some(idx) = self.call_id_map.get(call_id).copied() else {
                     log::warn!(
-                        "missing Codex wait_agent tool message for event call_id {} in '{}'",
-                        call_id,
+                        "missing Codex wait_agent tool message for event call_id {call_id} in '{}'",
                         path.display()
                     );
                     return;
@@ -547,8 +533,7 @@ impl CodexScanAccum {
                 };
                 let Some(idx) = self.call_id_map.get(call_id).copied() else {
                     log::warn!(
-                        "missing Codex send_input tool message for event call_id {} in '{}'",
-                        call_id,
+                        "missing Codex send_input tool message for event call_id {call_id} in '{}'",
                         path.display()
                     );
                     return;
@@ -574,10 +559,7 @@ impl CodexScanAccum {
                 };
                 let Some(idx) = self.call_id_map.get(call_id).copied() else {
                     log::warn!(
-                        "missing Codex close_agent tool message for event call_id {} in '{}'",
-                        call_id,
-                        path.display()
-                    );
+                        "missing Codex close_agent tool message for event call_id {call_id} in '{}'", path.display());
                     return;
                 };
                 if idx >= self.messages.len() {

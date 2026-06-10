@@ -112,9 +112,8 @@ impl CodexScanAccum {
                                 Ok(value) => value,
                                 Err(error) => {
                                     log::warn!(
-                                        "failed to parse Codex tool arguments in '{}': {}",
-                                        path.display(),
-                                        error
+                                        "failed to parse Codex tool arguments in '{}': {error}",
+                                        path.display()
                                     );
                                     return None;
                                 }
@@ -136,10 +135,7 @@ impl CodexScanAccum {
                                     .map(|s| s.to_string()),
                                 Err(error) => {
                                     log::warn!(
-                                        "failed to parse Codex view_image arguments in '{}': {}",
-                                        path.display(),
-                                        error
-                                    );
+                                        "failed to parse Codex view_image arguments in '{}': {error}", path.display());
                                     None
                                 }
                             })

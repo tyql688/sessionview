@@ -120,9 +120,8 @@ impl CodexScanAccum {
                 Ok(l) => l,
                 Err(error) => {
                     log::warn!(
-                        "failed to read Codex session line from '{}': {}",
-                        path.display(),
-                        error
+                        "failed to read Codex session line from '{}': {error}",
+                        path.display()
                     );
                     continue;
                 }
@@ -135,9 +134,8 @@ impl CodexScanAccum {
                 Ok(e) => e,
                 Err(error) => {
                     log::warn!(
-                        "skipping malformed Codex JSONL in '{}': {}",
-                        path.display(),
-                        error
+                        "skipping malformed Codex JSONL in '{}': {error}",
+                        path.display()
                     );
                     self.parse_warning_count = self.parse_warning_count.saturating_add(1);
                     continue;
@@ -321,11 +319,7 @@ impl CodexProvider {
         let file = match File::open(path) {
             Ok(file) => file,
             Err(error) => {
-                log::warn!(
-                    "failed to open Codex session '{}': {}",
-                    path.display(),
-                    error
-                );
+                log::warn!("failed to open Codex session '{}': {error}", path.display());
                 return None;
             }
         };
@@ -333,9 +327,8 @@ impl CodexProvider {
             Ok(metadata) => metadata,
             Err(error) => {
                 log::warn!(
-                    "failed to read Codex session metadata '{}': {}",
-                    path.display(),
-                    error
+                    "failed to read Codex session metadata '{}': {error}",
+                    path.display()
                 );
                 return None;
             }

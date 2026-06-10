@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Context;
+use serde::Serialize;
 use tauri::State;
 
 use super::AppState;
@@ -111,7 +112,7 @@ pub async fn get_today_cost(state: State<'_, AppState>) -> CommandResult<f64> {
     Ok(cost)
 }
 
-#[derive(serde::Serialize)]
+#[derive(Serialize)]
 pub struct TodayTokens {
     pub input: u64,
     pub output: u64,

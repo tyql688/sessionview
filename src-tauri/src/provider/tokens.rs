@@ -67,8 +67,7 @@ pub fn default_compute_token_stats_from_messages(
         };
         let Some(date) = timestamp_to_local_date(timestamp) else {
             log::warn!(
-                "skipping token usage with invalid timestamp '{}' in session {}",
-                timestamp,
+                "skipping token usage with invalid timestamp '{timestamp}' in session {}",
                 parsed.meta.id
             );
             continue;

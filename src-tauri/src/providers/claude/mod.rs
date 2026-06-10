@@ -70,9 +70,8 @@ impl ClaudeProvider {
             Ok(d) => d,
             Err(e) => {
                 log::warn!(
-                    "cannot read Claude projects dir '{}': {}",
-                    projects_dir.display(),
-                    e
+                    "cannot read Claude projects dir '{}': {e}",
+                    projects_dir.display()
                 );
                 return Vec::new();
             }

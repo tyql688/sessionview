@@ -128,7 +128,7 @@ fn discover_variants(mirror_root: &Path) -> Vec<Variant> {
                 Ok(content) => match serde_json::from_str::<VariantMeta>(&content) {
                     Ok(meta) => Some(meta),
                     Err(error) => {
-                        log::warn!("failed to parse '{}': {}", variant_json.display(), error);
+                        log::warn!("failed to parse '{}': {error}", variant_json.display());
                         None
                     }
                 },
