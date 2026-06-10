@@ -33,6 +33,14 @@ fn string_field<'a>(obj: &'a serde_json::Map<String, Value>, keys: &[&str]) -> O
         .find_map(|key| obj.get(*key).and_then(|v| v.as_str()))
 }
 
+fn join_non_empty(parts: impl IntoIterator<Item = String>) -> String {
+    parts
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
 fn render_field(label: &str, value: &str) -> String {
     let display_value = if is_path_label(label) {
         shorten_home_path(value)
@@ -52,6 +60,34 @@ fn render_pre_field(label: &str, value: &str) -> String {
         html_escape(label),
         html_escape(value)
     )
+}
+
+fn render_call_metadata(structured: &serde_json::Map<String, Value>) -> String {
+    let mut html = String::new();
+    if let Some(description) = string_field(structured, &["callDescription"]) {
+        html.push_str(&render_field("description", description));
+    }
+
+    let Some(display) = structured
+        .get("callDisplay")
+        .and_then(|value| value.as_object())
+    else {
+        return html;
+    };
+    for key in [
+        "kind",
+        "operation",
+        "path",
+        "cwd",
+        "language",
+        "command",
+        "agent_name",
+    ] {
+        if let Some(value) = string_field(display, &[key]) {
+            html.push_str(&render_field(key, value));
+        }
+    }
+    html
 }
 
 fn render_diff_line(kind: &str, text: &str) -> String {
@@ -175,14 +211,16 @@ pub(crate) fn tool_icon(name: &str, metadata: Option<&ToolMetadata>) -> &'static
         "Glob" => "🔍",
         "Grep" => "🔎",
         "Agent" => "🤖",
-        "Plan" | "TaskCreate" | "TaskUpdate" | "TaskList" => "📋",
+        "Plan" | "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskOutput" => "📋",
         "TaskStop" => "🛑",
         "WebSearch" | "WebFetch" => "🌐",
-        "ImageGeneration" => "🖼️",
+        "ImageGeneration" | "ReadMediaFile" => "🖼️",
         "DynamicTool" => "🧩",
         "ToolSearch" => "🧰",
         "Skill" => "⚡",
         "AskUserQuestion" => "❓",
+        "CronCreate" | "CronList" | "CronDelete" | "ScheduleWakeup" => "⏰",
+        "CreateGoal" | "GetGoal" | "SetGoalBudget" | "UpdateGoal" => "🎯",
         _ => "⚙",
     }
 }
@@ -233,6 +271,96 @@ pub(crate) fn tool_summary(name: &str, input: &str, metadata: Option<&ToolMetada
             .unwrap_or_default()
             .to_string(),
         "Plan" => string_field(&obj, &["explanation"])
+            .unwrap_or_default()
+            .to_string(),
+        "TaskList" => {
+            let active = obj
+                .get("active_only")
+                .and_then(|v| v.as_bool())
+                .map(|value| if value { "active" } else { "all" }.to_string())
+                .unwrap_or_default();
+            let limit = obj
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .map(|value| format!("limit {value}"))
+                .unwrap_or_default();
+            join_non_empty([active, limit])
+        }
+        "TaskOutput" => {
+            let task = string_field(&obj, &["task_id", "taskId"])
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            let mode = obj
+                .get("block")
+                .and_then(|v| v.as_bool())
+                .filter(|value| *value)
+                .map(|_| "wait".to_string())
+                .unwrap_or_default();
+            join_non_empty([task, mode])
+        }
+        "TaskStop" => {
+            let task = string_field(&obj, &["task_id", "taskId"])
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            let reason = string_field(&obj, &["reason"])
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            join_non_empty([task, reason])
+        }
+        "CronCreate" => {
+            let cron = string_field(&obj, &["cron"])
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            let prompt = string_field(&obj, &["prompt"])
+                .map(|s| {
+                    if s.len() > 60 {
+                        format!("{}...", truncate_char_boundary(s, 57))
+                    } else {
+                        s.to_string()
+                    }
+                })
+                .unwrap_or_default();
+            join_non_empty([cron, prompt])
+        }
+        "CronDelete" => string_field(&obj, &["id"]).unwrap_or_default().to_string(),
+        "ReadMediaFile" => string_field(&obj, &["path"])
+            .map(shorten_home_path)
+            .unwrap_or_default(),
+        "AskUserQuestion" => {
+            let questions = obj
+                .get("questions")
+                .and_then(|v| v.as_array())
+                .map(|questions| format!("{} question(s)", questions.len()))
+                .unwrap_or_default();
+            let background = obj
+                .get("background")
+                .and_then(|v| v.as_bool())
+                .filter(|value| *value)
+                .map(|_| "background".to_string())
+                .unwrap_or_default();
+            join_non_empty([questions, background])
+        }
+        "CreateGoal" => string_field(&obj, &["objective"])
+            .map(|s| {
+                if s.len() > 60 {
+                    format!("{}...", truncate_char_boundary(s, 57))
+                } else {
+                    s.to_string()
+                }
+            })
+            .unwrap_or_default(),
+        "SetGoalBudget" => {
+            let value = obj
+                .get("value")
+                .and_then(|v| v.as_u64())
+                .map(|value| value.to_string())
+                .unwrap_or_default();
+            let unit = string_field(&obj, &["unit"])
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            join_non_empty([value, unit])
+        }
+        "UpdateGoal" => string_field(&obj, &["status"])
             .unwrap_or_default()
             .to_string(),
         _ => String::new(),
@@ -336,7 +464,7 @@ pub(crate) fn render_tool_input_detail(tool_name: &str, tool_input: &str) -> Str
                 html.push_str("</div>");
             }
         }
-        "Read" | "Write" => {
+        "Read" | "Write" | "ReadMediaFile" => {
             if let Some(fp) = string_field(
                 &obj,
                 &[
@@ -388,10 +516,11 @@ pub(crate) fn render_tool_result_detail(metadata: Option<&ToolMetadata>) -> Stri
     if let Some(status) = metadata.status.as_deref() {
         html.push_str(&render_field("status", status));
     }
+    html.push_str(&render_call_metadata(structured));
 
     match metadata.canonical_name.as_str() {
         "Bash" => {
-            if let Some(stdout) = string_field(structured, &["stdout"]) {
+            if let Some(stdout) = string_field(structured, &["stdout", "output"]) {
                 if !stdout.is_empty() {
                     html.push_str(&render_pre_field("stdout", stdout));
                 }
@@ -612,6 +741,10 @@ mod tests {
     fn tool_icon_uses_canonical_name_then_falls_back() {
         assert_eq!(tool_icon("Read", None), "📄");
         assert_eq!(tool_icon("Bash", None), "💻");
+        assert_eq!(tool_icon("ReadMediaFile", None), "🖼️");
+        assert_eq!(tool_icon("TaskOutput", None), "📋");
+        assert_eq!(tool_icon("CronList", None), "⏰");
+        assert_eq!(tool_icon("SetGoalBudget", None), "🎯");
         // Unknown tool → default gear.
         assert_eq!(tool_icon("Frobnicate", None), "⚙");
         // mcp category / mcp__ prefix → plug.
@@ -664,6 +797,26 @@ mod tests {
     }
 
     #[test]
+    fn tool_summary_handles_kimi_specific_tools() {
+        assert_eq!(
+            tool_summary("TaskOutput", r#"{"task_id":"task-123","block":true}"#, None),
+            "task-123 · wait"
+        );
+        assert_eq!(
+            tool_summary("SetGoalBudget", r#"{"value":3,"unit":"turns"}"#, None),
+            "3 · turns"
+        );
+        assert_eq!(
+            tool_summary(
+                "ReadMediaFile",
+                r#"{"path":"/Users/alice/image.png"}"#,
+                None
+            ),
+            "~/image.png"
+        );
+    }
+
+    #[test]
     fn render_tool_input_detail_renders_bash_command_block() {
         let html = render_tool_input_detail("Bash", r#"{"command":"echo hi"}"#);
         assert!(html.contains(r#"<pre class="tool-cmd">echo hi</pre>"#));
@@ -695,12 +848,31 @@ mod tests {
     fn render_tool_result_detail_renders_bash_stdout_and_status() {
         let mut md = metadata("Bash", "shell");
         md.status = Some("completed".into());
-        md.structured = Some(json!({ "stdout": "hello world", "stderr": "" }));
+        md.structured = Some(json!({ "output": "hello world", "stderr": "" }));
         let html = render_tool_result_detail(Some(&md));
         assert!(html.contains(r#"<span class="tool-field-value">completed</span>"#));
         assert!(html.contains(r#"<pre class="tool-cmd">hello world</pre>"#));
         // empty stderr is suppressed.
         assert!(!html.contains("stderr"));
+    }
+
+    #[test]
+    fn render_tool_result_detail_keeps_kimi_call_display_metadata() {
+        let mut md = metadata("Bash", "shell");
+        md.status = Some("completed".into());
+        md.structured = Some(json!({
+            "callDescription": "Run pwd",
+            "callDisplay": {
+                "kind": "bash",
+                "cwd": "/Users/alice/project",
+                "command": "pwd"
+            },
+            "output": "hello world"
+        }));
+        let html = render_tool_result_detail(Some(&md));
+        assert!(html.contains("Run pwd"));
+        assert!(html.contains("/Users/alice/project"));
+        assert!(html.contains(r#"<pre class="tool-cmd">hello world</pre>"#));
     }
 
     #[test]

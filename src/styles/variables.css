@@ -64,6 +64,7 @@
   --kimi: #1783ff;
   --cursor: #3b82f6;
   --cc-mirror: #f472b6;
+  --pi: #000000;
   --code-bg: #f3f4f6;
   --code-text: #24292e;
   --inline-code-bg: rgba(0, 0, 0, 0.06);
@@ -181,6 +182,7 @@
   --kimi: #4da3ff;
   --cursor: #60a5fa;
   --cc-mirror: #f9a8d4;
+  --pi: #ffffff;
   --code-bg: #22272e;
   --code-text: #adbac7;
   --inline-code-bg: rgba(255, 255, 255, 0.1);

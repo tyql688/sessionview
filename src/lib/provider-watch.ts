@@ -22,6 +22,7 @@ const WATCH_BEHAVIORS: Record<Provider, ProviderWatchBehavior> = {
   kimi: { debounceMs: 300 },
   cursor: { debounceMs: 300 },
   "cc-mirror": { debounceMs: 300 },
+  pi: { debounceMs: 300 },
 };
 
 export function getProviderWatchConfig(

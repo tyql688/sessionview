@@ -29,6 +29,17 @@ export interface SubagentInfo {
   childPrompts: string[];
 }
 
+export interface SubagentMatchRequest {
+  description?: string;
+  nickname?: string;
+  agentId?: string;
+}
+
+export interface SubagentMatchCandidate {
+  id: string;
+  title: string;
+}
+
 /** Narrow `structured` metadata to a plain object record (not array/null). */
 function structuredRecord(
   metadata: ToolMetadata | undefined,
@@ -174,4 +185,39 @@ export function extractSubagentInfo(message: Message): SubagentInfo {
     childIds: extractAgentChildIds(message.tool_metadata),
     childPrompts: extractAgentChildPrompts(message.tool_metadata),
   };
+}
+
+function stripTitleTruncation(value: string): string {
+  return value.trim().replace(/(\.\.\.|…)$/, "");
+}
+
+export function matchesSubagentSession(
+  candidate: SubagentMatchCandidate,
+  parentId: string,
+  request: SubagentMatchRequest,
+): boolean {
+  const agentId = request.agentId?.trim();
+  if (
+    agentId &&
+    (candidate.id === agentId ||
+      candidate.id === `agent-${agentId}` ||
+      candidate.id === `${parentId}:${agentId}`)
+  ) {
+    return true;
+  }
+
+  const nickname = request.nickname?.trim();
+  if (nickname && candidate.title === nickname) {
+    return true;
+  }
+
+  const description = request.description?.trim();
+  if (!description) return false;
+  const title = candidate.title.trim();
+  if (title === description || title.startsWith(description)) {
+    return true;
+  }
+
+  const titlePrefix = stripTitleTruncation(title);
+  return titlePrefix.length > 0 && description.startsWith(titlePrefix);
 }

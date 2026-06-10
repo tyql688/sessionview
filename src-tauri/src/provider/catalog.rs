@@ -41,6 +41,10 @@ fn build_cc_mirror_runtime() -> Option<Box<dyn SessionProvider>> {
         .map(|p| Box::new(p) as Box<dyn SessionProvider>)
 }
 
+fn build_pi_runtime() -> Option<Box<dyn SessionProvider>> {
+    crate::providers::pi::PiProvider::new().map(|p| Box::new(p) as Box<dyn SessionProvider>)
+}
+
 fn provider_catalog() -> &'static [ProviderCatalogEntry] {
     &PROVIDER_CATALOG
 }
@@ -58,6 +62,7 @@ fn provider_entry(provider: &Provider) -> &'static ProviderCatalogEntry {
         Provider::Kimi => &PROVIDER_CATALOG[4],
         Provider::Cursor => &PROVIDER_CATALOG[5],
         Provider::CcMirror => &PROVIDER_CATALOG[6],
+        Provider::Pi => &PROVIDER_CATALOG[7],
     }
 }
 
@@ -65,7 +70,7 @@ fn provider_entry_for_key(key: &str) -> Option<&'static ProviderCatalogEntry> {
     provider_catalog().iter().find(|entry| entry.key == key)
 }
 
-static PROVIDER_KINDS: [Provider; 7] = [
+static PROVIDER_KINDS: [Provider; 8] = [
     Provider::Claude,
     Provider::Codex,
     Provider::Antigravity,
@@ -73,9 +78,10 @@ static PROVIDER_KINDS: [Provider; 7] = [
     Provider::Kimi,
     Provider::Cursor,
     Provider::CcMirror,
+    Provider::Pi,
 ];
 
-static PROVIDER_CATALOG: [ProviderCatalogEntry; 7] = [
+static PROVIDER_CATALOG: [ProviderCatalogEntry; 8] = [
     ProviderCatalogEntry {
         kind: Provider::Claude,
         key: "claude",
@@ -124,6 +130,13 @@ static PROVIDER_CATALOG: [ProviderCatalogEntry; 7] = [
         label: "CC-Mirror",
         descriptor: &crate::providers::cc_mirror::Descriptor,
         build_runtime: build_cc_mirror_runtime,
+    },
+    ProviderCatalogEntry {
+        kind: Provider::Pi,
+        key: "pi",
+        label: "Pi",
+        descriptor: &crate::providers::pi::Descriptor,
+        build_runtime: build_pi_runtime,
     },
 ];
 

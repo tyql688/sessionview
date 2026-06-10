@@ -15,6 +15,14 @@ fn string_field<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
         .find_map(|key| value.get(*key).and_then(|v| v.as_str()))
 }
 
+fn join_non_empty(parts: impl IntoIterator<Item = String>) -> String {
+    parts
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
 pub(super) fn input_summary(
     canonical_name: &str,
     raw_name: &str,
@@ -118,9 +126,53 @@ pub(super) fn input_summary(
                 .collect::<Vec<_>>()
                 .join(" → ")
         }
-        "TaskStop" => string_field(input, &["task_id", "taskId"])
-            .unwrap_or_default()
-            .to_string(),
+        "TaskList" => {
+            let active = input
+                .get("active_only")
+                .and_then(|v| v.as_bool())
+                .map(|value| if value { "active" } else { "all" }.to_string())
+                .unwrap_or_default();
+            let limit = input
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .map(|value| format!("limit {value}"))
+                .unwrap_or_default();
+            join_non_empty([active, limit])
+        }
+        "TaskOutput" => {
+            let task = string_field(input, &["task_id", "taskId"])
+                .map(|s| compact_string(s, 40))
+                .unwrap_or_default();
+            let mode = input
+                .get("block")
+                .and_then(|v| v.as_bool())
+                .filter(|value| *value)
+                .map(|_| "wait".to_string())
+                .unwrap_or_default();
+            join_non_empty([task, mode])
+        }
+        "TaskStop" => {
+            let task = string_field(input, &["task_id", "taskId"])
+                .map(|s| compact_string(s, 40))
+                .unwrap_or_default();
+            let reason = string_field(input, &["reason"])
+                .map(|s| compact_string(s, 80))
+                .unwrap_or_default();
+            join_non_empty([task, reason])
+        }
+        "CronCreate" => {
+            let cron = string_field(input, &["cron"])
+                .unwrap_or_default()
+                .to_string();
+            let prompt = string_field(input, &["prompt"])
+                .map(|s| compact_string(s, 80))
+                .unwrap_or_default();
+            join_non_empty([cron, prompt])
+        }
+        "CronList" => String::new(),
+        "CronDelete" => string_field(input, &["id"])
+            .map(|s| compact_string(s, 40))
+            .unwrap_or_default(),
         "Skill" => string_field(input, &["skill"])
             .unwrap_or_default()
             .to_string(),
@@ -133,6 +185,9 @@ pub(super) fn input_summary(
         "WebFetch" => string_field(input, &["url", "Url"])
             .unwrap_or_default()
             .to_string(),
+        "ReadMediaFile" => string_field(input, &["path"])
+            .map(shorten_home_path)
+            .unwrap_or_default(),
         "ImageGeneration" => string_field(input, &["revised_prompt", "prompt"])
             .map(|s| compact_string(s, 80))
             .unwrap_or_default(),
@@ -149,11 +204,38 @@ pub(super) fn input_summary(
                 .collect::<Vec<_>>()
                 .join(" ")
         }
-        "AskUserQuestion" => input
-            .get("questions")
-            .and_then(|v| v.as_array())
-            .map(|questions| format!("{} question(s)", questions.len()))
+        "AskUserQuestion" => {
+            let questions = input
+                .get("questions")
+                .and_then(|v| v.as_array())
+                .map(|questions| format!("{} question(s)", questions.len()))
+                .unwrap_or_default();
+            let background = input
+                .get("background")
+                .and_then(|v| v.as_bool())
+                .filter(|value| *value)
+                .map(|_| "background".to_string())
+                .unwrap_or_default();
+            join_non_empty([questions, background])
+        }
+        "CreateGoal" => string_field(input, &["objective"])
+            .map(|s| compact_string(s, 80))
             .unwrap_or_default(),
+        "GetGoal" => String::new(),
+        "SetGoalBudget" => {
+            let value = input
+                .get("value")
+                .and_then(|v| v.as_u64())
+                .map(|value| value.to_string())
+                .unwrap_or_default();
+            let unit = string_field(input, &["unit"])
+                .unwrap_or_default()
+                .to_string();
+            join_non_empty([value, unit])
+        }
+        "UpdateGoal" => string_field(input, &["status"])
+            .unwrap_or_default()
+            .to_string(),
         "Plan" => {
             if let Some(explanation) = string_field(input, &["explanation"]) {
                 compact_string(explanation, 80)

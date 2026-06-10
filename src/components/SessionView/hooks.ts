@@ -29,6 +29,10 @@ function messageHaystack(msg: Message): string {
   return (msg.content ?? "").toLocaleLowerCase();
 }
 
+function isMergeableToolMessage(msg: Message): boolean {
+  return msg.role === "tool" && msg.tool_name !== "Agent";
+}
+
 export function isRenderableMessage(msg: Message): boolean {
   if (msg.role === "tool") {
     // Hide orphaned Anthropic tool result ids when no metadata could recover
@@ -51,10 +55,13 @@ export function processMessages(msgs: Message[]): ProcessedEntry[] {
     const msg = renderableMsgs[i];
 
     // Try to merge consecutive tool messages
-    if (msg.role === "tool") {
+    if (isMergeableToolMessage(msg)) {
       const toolGroup: Message[] = [msg];
       let j = i + 1;
-      while (j < renderableMsgs.length && renderableMsgs[j].role === "tool") {
+      while (
+        j < renderableMsgs.length &&
+        isMergeableToolMessage(renderableMsgs[j])
+      ) {
         toolGroup.push(renderableMsgs[j]);
         j++;
       }

@@ -87,6 +87,7 @@ function SystemMessage(props: { content: string }) {
 export function MessageBubble(props: {
   message: Message;
   provider?: Provider;
+  parentSessionId?: string;
   highlightTerm?: string;
 }) {
   const footnotePrefix = createUniqueId();
@@ -159,7 +160,11 @@ export function MessageBubble(props: {
       <Show
         when={props.message.role !== "tool"}
         fallback={
-          <ToolMessage message={props.message} provider={props.provider} />
+          <ToolMessage
+            message={props.message}
+            provider={props.provider}
+            parentSessionId={props.parentSessionId}
+          />
         }
       >
         <Show

@@ -134,6 +134,30 @@ struct InvokeSubagentBlock {
     workspace_uris: Vec<String>,
 }
 
+#[derive(Debug, Default, Clone)]
+struct ManageSubagentsInfo {
+    conversation_ids: Vec<String>,
+    prompts: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ManageSubagentBlock {
+    spec: Option<ManageSubagentSpec>,
+    result: Option<ManageSubagentResult>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ManageSubagentSpec {
+    #[serde(rename = "initialPrompt")]
+    initial_prompt: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ManageSubagentResult {
+    #[serde(rename = "conversationId")]
+    conversation_id: Option<String>,
+}
+
 fn parse_invoke_subagent_content(content: &str) -> InvokeSubagentInfo {
     let mut info = InvokeSubagentInfo::default();
     for block in extract_top_level_json_objects(content) {
@@ -165,6 +189,42 @@ fn parse_invoke_subagent_content(content: &str) -> InvokeSubagentInfo {
                 }
             }
         }
+    }
+    info
+}
+
+fn parse_manage_subagents_content(content: &str) -> ManageSubagentsInfo {
+    let mut info = ManageSubagentsInfo::default();
+    for block in extract_top_level_json_objects(content) {
+        let parsed: ManageSubagentBlock = match serde_json::from_str(&block) {
+            Ok(b) => b,
+            Err(error) => {
+                log::warn!("skipping manage_subagents block (parse error: {error})");
+                continue;
+            }
+        };
+        let Some(id) = parsed
+            .result
+            .as_ref()
+            .and_then(|result| result.conversation_id.as_deref())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        else {
+            continue;
+        };
+        if info.conversation_ids.iter().any(|existing| existing == id) {
+            continue;
+        }
+        let prompt = parsed
+            .spec
+            .as_ref()
+            .and_then(|spec| spec.initial_prompt.as_deref())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("")
+            .to_string();
+        info.conversation_ids.push(id.to_string());
+        info.prompts.push(prompt);
     }
     info
 }
@@ -504,6 +564,7 @@ impl AntigravityScanAccum {
     ) {
         if step.source == "MODEL" || step.source == "SYSTEM" {
             if let Some(idx) = self.pending_tool_indices.pop_front() {
+                let content = step.content.clone().unwrap_or_default();
                 let invoke_children: Vec<String> = invoke_info
                     .as_ref()
                     .map(|info| {
@@ -514,9 +575,34 @@ impl AntigravityScanAccum {
                             .collect()
                     })
                     .unwrap_or_default();
+                let mut manage_info = self
+                    .messages
+                    .get(idx)
+                    .and_then(|message| message.tool_metadata.as_ref())
+                    .filter(|metadata| metadata.raw_name == "manage_subagents")
+                    .map(|_| parse_manage_subagents_content(&content))
+                    .unwrap_or_default();
+
+                if !manage_info.conversation_ids.is_empty() {
+                    let mut new_ids = Vec::new();
+                    let mut new_prompts = Vec::new();
+                    for (id, prompt) in manage_info
+                        .conversation_ids
+                        .iter()
+                        .zip(manage_info.prompts.iter())
+                    {
+                        if id == conversation_id || self.child_session_ids.contains(id) {
+                            continue;
+                        }
+                        self.child_session_ids.push(id.clone());
+                        new_ids.push(id.clone());
+                        new_prompts.push(prompt.clone());
+                    }
+                    manage_info.conversation_ids = new_ids;
+                    manage_info.prompts = new_prompts;
+                }
 
                 if let Some(msg) = self.messages.get_mut(idx) {
-                    let content = step.content.clone().unwrap_or_default();
                     self.context_chars += content.len();
                     msg.content = content;
 
@@ -531,15 +617,23 @@ impl AntigravityScanAccum {
                             },
                         );
 
-                        if !invoke_children.is_empty() {
-                            let prompts = metadata
-                                .structured
-                                .as_ref()
-                                .and_then(|v| v.get("childPrompts"))
-                                .cloned()
-                                .unwrap_or_else(|| serde_json::json!([]));
+                        if !invoke_children.is_empty() || !manage_info.conversation_ids.is_empty() {
+                            let (child_ids, prompts) = if !invoke_children.is_empty() {
+                                let prompts = metadata
+                                    .structured
+                                    .as_ref()
+                                    .and_then(|v| v.get("childPrompts"))
+                                    .cloned()
+                                    .unwrap_or_else(|| serde_json::json!([]));
+                                (invoke_children, prompts)
+                            } else {
+                                (
+                                    manage_info.conversation_ids.clone(),
+                                    serde_json::json!(manage_info.prompts),
+                                )
+                            };
                             metadata.structured = Some(serde_json::json!({
-                                "childConversationIds": invoke_children,
+                                "childConversationIds": child_ids,
                                 "childPrompts": prompts,
                             }));
                             metadata.result_kind = Some("agent_summary".to_string());
@@ -888,6 +982,84 @@ But this real block IS valid:
         let content = r#"{ "conversationId": "abc", "next": "still going..."#;
         let info = parse_invoke_subagent_content(content);
         assert!(info.conversation_ids.is_empty());
+    }
+
+    #[test]
+    fn parse_manage_subagents_extracts_active_child_id_and_prompt() {
+        let content = format!(
+            r#"Created At: 2026-06-10T08:42:58Z
+Completed At: 2026-06-10T08:42:58Z
+You have 1 active subagent(s):
+{{
+  "spec": {{
+    "typeName": "agy_tool_analyzer",
+    "role": "Agy Tool Analyzer",
+    "initialPrompt": "Inspect the provider using only view_file and list_dir",
+    "inherit": true
+  }},
+  "result": {{
+    "conversationId": "{CHILD_A}",
+    "logAbsoluteUri": "file:///root/.gemini/antigravity-cli/brain/{CHILD_A}/.system_generated/logs/transcript.jsonl"
+  }}
+}}"#
+        );
+
+        let info = parse_manage_subagents_content(&content);
+
+        assert_eq!(info.conversation_ids, vec![CHILD_A.to_string()]);
+        assert_eq!(
+            info.prompts,
+            vec!["Inspect the provider using only view_file and list_dir".to_string()]
+        );
+    }
+
+    #[test]
+    fn manage_subagents_result_does_not_duplicate_known_invoke_child() {
+        let mut accum = AntigravityScanAccum::new();
+        accum.child_session_ids.push(CHILD_A.to_string());
+        accum.messages.push(Message {
+            tool_name: Some("Agent".to_string()),
+            tool_metadata: Some(build_tool_metadata(ToolCallFacts {
+                provider: Provider::Antigravity,
+                raw_name: "manage_subagents",
+                input: Some(&json!({ "Action": "list" })),
+                call_id: None,
+                assistant_id: None,
+            })),
+            tool_input: Some(json!({ "Action": "list" }).to_string()),
+            ..Message::new(MessageRole::Tool, String::new())
+        });
+        accum.pending_tool_indices.push_back(0);
+        let step = Step {
+            step_index: 10,
+            source: "MODEL".to_string(),
+            step_type: "GENERIC".to_string(),
+            status: "DONE".to_string(),
+            created_at: "2026-06-10T08:42:58Z".to_string(),
+            content: Some(format!(
+                r#"{{
+  "spec": {{
+    "initialPrompt": "Known child"
+  }},
+  "result": {{
+    "conversationId": "{CHILD_A}"
+  }}
+}}"#
+            )),
+            thinking: None,
+            tool_calls: None,
+        };
+
+        accum.enrich_pending_tool(&step, PARENT_A, None);
+
+        let structured = accum.messages[0]
+            .tool_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.structured.as_ref());
+        assert!(
+            structured.is_none(),
+            "known manage_subagents child should not create duplicate Open metadata"
+        );
     }
 
     #[test]

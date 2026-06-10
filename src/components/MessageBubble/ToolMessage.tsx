@@ -46,10 +46,11 @@ function openSubagent(
   description: string,
   nickname?: string,
   agentId?: string,
+  parentSessionId?: string,
 ) {
   window.dispatchEvent(
     new CustomEvent("open-subagent", {
-      detail: { description, nickname, agentId },
+      detail: { description, nickname, agentId, parentSessionId },
     }),
   );
 }
@@ -87,7 +88,11 @@ function LineDiff(props: { oldText: string; newText: string }) {
   return <DiffRows lines={buildToolLineDiff(props.oldText, props.newText)} />;
 }
 
-export function ToolMessage(props: { message: Message; provider?: string }) {
+export function ToolMessage(props: {
+  message: Message;
+  provider?: string;
+  parentSessionId?: string;
+}) {
   const [expanded, setExpanded] = createSignal(false);
   const [previewImage, setPreviewImage] = createSignal<{
     src: string;
@@ -206,6 +211,24 @@ export function ToolMessage(props: { message: Message; provider?: string }) {
   const agentChildPrompts = createMemo<string[]>(() =>
     isAgent() ? extractAgentChildPrompts(props.message.tool_metadata) : [],
   );
+  const agentPromptTargets = createMemo<string[]>(() => {
+    if (
+      !isAgent() ||
+      props.provider !== "antigravity" ||
+      metadata()?.raw_name !== "invoke_subagent" ||
+      agentChildIds()
+    ) {
+      return [];
+    }
+    return agentChildPrompts().filter((prompt) => prompt.trim().length > 0);
+  });
+  const canOpenSingleAgent = createMemo(() => {
+    if (!isAgent()) return false;
+    if (props.provider === "antigravity") {
+      return metadata()?.raw_name === "invoke_subagent";
+    }
+    return true;
+  });
 
   async function loadFullResult() {
     const path = persistedOutputPath();
@@ -247,39 +270,73 @@ export function ToolMessage(props: { message: Message; provider?: string }) {
             SUBAGENT_FILE_PROVIDERS.has(props.provider ?? "") &&
             (
               agentChildIds() ??
-              (agentNickname() || agentId() || agentDescription() ? [null] : [])
+              (agentPromptTargets().length > 0
+                ? agentPromptTargets()
+                : undefined) ??
+              (canOpenSingleAgent() &&
+              (agentNickname() || agentId() || agentDescription())
+                ? [null]
+                : [])
             ).length > 0
           }
         >
           <Show
             when={agentChildIds()}
             fallback={
-              <button
-                class="msg-tool-subagent-link"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  openSubagent(
-                    agentDescription() ?? summary(),
-                    agentNickname(),
-                    agentId(),
-                  );
-                }}
-                title="Open subagent session"
+              <Show
+                when={agentPromptTargets().length > 0}
+                fallback={
+                  <button
+                    class="msg-tool-subagent-link"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openSubagent(
+                        agentDescription() ?? summary(),
+                        agentNickname(),
+                        agentId(),
+                        props.parentSessionId,
+                      );
+                    }}
+                    title="Open subagent session"
+                  >
+                    ↗ Open
+                  </button>
+                }
               >
-                ↗ Open
-              </button>
+                <For each={agentPromptTargets()}>
+                  {(prompt, i) => {
+                    const label = () =>
+                      agentPromptTargets().length > 1
+                        ? `↗ Open #${i() + 1}`
+                        : "↗ Open";
+                    return (
+                      <button
+                        class="msg-tool-subagent-link"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openSubagent(
+                            prompt,
+                            undefined,
+                            undefined,
+                            props.parentSessionId,
+                          );
+                        }}
+                        title={prompt}
+                      >
+                        {label()}
+                      </button>
+                    );
+                  }}
+                </For>
+              </Show>
             }
           >
             <For each={agentChildIds()!}>
               {(childId, i) => {
                 const prompt = () => agentChildPrompts()[i()] ?? "";
-                const firstLine = () => prompt().split("\n")[0]?.trim() ?? "";
                 const label = () => {
-                  const text = firstLine();
-                  if (!text) return `↗ Open #${i() + 1}`;
-                  const truncated =
-                    text.length > 60 ? `${text.slice(0, 60).trim()}…` : text;
-                  return `↗ ${truncated}`;
+                  const ids = agentChildIds() ?? [];
+                  return ids.length > 1 ? `↗ Open #${i() + 1}` : "↗ Open";
                 };
                 return (
                   <button
@@ -290,6 +347,7 @@ export function ToolMessage(props: { message: Message; provider?: string }) {
                         prompt() || agentDescription() || summary(),
                         undefined,
                         childId,
+                        props.parentSessionId,
                       );
                     }}
                     title={prompt() ? prompt() : `Open subagent ${childId}`}

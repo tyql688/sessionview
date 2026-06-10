@@ -7,6 +7,7 @@ export function MergedToolRow(props: {
   tools: string[];
   messages: Message[];
   provider?: Provider;
+  parentSessionId?: string;
   highlightTerm?: string;
 }) {
   const [manualExpanded, setManualExpanded] = createSignal(false);
@@ -52,6 +53,7 @@ export function MergedToolRow(props: {
               <MessageBubble
                 message={msg}
                 provider={props.provider}
+                parentSessionId={props.parentSessionId}
                 highlightTerm={props.highlightTerm}
               />
             )}

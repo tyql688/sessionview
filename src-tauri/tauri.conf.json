@@ -33,7 +33,8 @@
           "$HOME/.local/share/opencode/**",
           "$HOME/.kimi-code/**",
           "$HOME/.cursor/**",
-          "$HOME/.cc-mirror/**"
+          "$HOME/.cc-mirror/**",
+          "$HOME/.pi/**"
         ]
       }
     }

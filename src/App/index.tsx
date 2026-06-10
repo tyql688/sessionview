@@ -55,6 +55,7 @@ import type { TreeNode, Provider, MaintenanceEvent } from "../lib/types";
 import { useI18n } from "../i18n";
 import { createKeyboardHandler } from "./KeyboardShortcuts";
 import { createSyncManager } from "./SyncManager";
+import { matchesSubagentSession } from "../lib/subagent";
 import "../styles/index.css";
 
 // Linux derived locally (platform.ts is intentionally minimal). On Linux the
@@ -177,35 +178,32 @@ export default function App() {
 
     // Listen for subagent open requests from ToolMessage
     const handleOpenSubagent = async (e: Event) => {
-      const { description, nickname, agentId } = (
+      const { description, nickname, agentId, parentSessionId } = (
         e as CustomEvent<{
           description?: string;
           nickname?: string;
           agentId?: string;
+          parentSessionId?: string;
         }>
       ).detail;
       // Search all groups' active tabs (not just activeGroup) so clicks in
       // non-focused panes resolve correctly.
-      const parentIds = groups()
-        .map((g) => g.activeTabId)
-        .filter((id): id is string => id != null);
+      const parentIds = parentSessionId
+        ? [parentSessionId]
+        : groups()
+            .map((g) => g.activeTabId)
+            .filter((id): id is string => id != null);
       let anyParentResolved = false;
       for (const parentId of parentIds) {
         try {
           const children = await getChildSessions(parentId);
           anyParentResolved = true;
-          const match = children.find(
-            (c) =>
-              (agentId &&
-                (c.id === agentId ||
-                  c.id === `agent-${agentId}` ||
-                  // Kimi-code subagent id is `<parent>:<agent-name>`.
-                  // Anchor the parent prefix so an `agentId="0"` can't
-                  // accidentally hit an unrelated `:0` suffix elsewhere.
-                  c.id === `${parentId}:${agentId}`)) ||
-              (nickname && c.title === nickname) ||
-              (description &&
-                (c.title === description || c.title.startsWith(description))),
+          const match = children.find((c) =>
+            matchesSubagentSession(c, parentId, {
+              agentId,
+              nickname,
+              description,
+            }),
           );
           if (match) {
             openSession(match);

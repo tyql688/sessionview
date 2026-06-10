@@ -433,6 +433,7 @@ export function SessionView(props: {
                         tools={entry.tools}
                         messages={entry.messages}
                         provider={meta().provider}
+                        parentSessionId={props.session.id}
                         highlightTerm=""
                       />
                     </div>
@@ -443,6 +444,7 @@ export function SessionView(props: {
                     <MessageBubble
                       message={entry.msg}
                       provider={meta().provider}
+                      parentSessionId={props.session.id}
                       highlightTerm={
                         isSearchableRole(entry.msg.role)
                           ? activeSessionSearch()

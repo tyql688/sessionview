@@ -61,7 +61,7 @@ pub fn render_format_a_tool_output(parts: &[Value]) -> (String, Option<bool>) {
 /// first (the common case in kimi-code 0.1.1), then falls back to
 /// `message`, then serialises the whole result if nothing readable was
 /// found. Returns `(rendered, is_error)` where `is_error` mirrors the
-/// `is_error`/`success` flags when the tool surfaces them.
+/// `is_error`/`isError`/`success` flags when the tool surfaces them.
 pub fn render_format_b_tool_output(result: Option<&Value>) -> (String, Option<bool>) {
     let Some(result) = result else {
         return (String::new(), None);
@@ -69,6 +69,7 @@ pub fn render_format_b_tool_output(result: Option<&Value>) -> (String, Option<bo
     let is_error = result
         .get("is_error")
         .and_then(|v| v.as_bool())
+        .or_else(|| result.get("isError").and_then(|v| v.as_bool()))
         .or_else(|| {
             result
                 .get("success")
@@ -136,6 +137,13 @@ mod tests {
     #[test]
     fn format_b_surfaces_error_flag() {
         let result = json!({"is_error": true, "output": "boom"});
+        let (_, err) = render_format_b_tool_output(Some(&result));
+        assert_eq!(err, Some(true));
+    }
+
+    #[test]
+    fn format_b_surfaces_camelcase_error_flag() {
+        let result = json!({"isError": true, "output": "boom"});
         let (_, err) = render_format_b_tool_output(Some(&result));
         assert_eq!(err, Some(true));
     }

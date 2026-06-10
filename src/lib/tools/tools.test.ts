@@ -66,6 +66,27 @@ describe("tools/names", () => {
     expect(toolIcon("ImageGeneration")).toBe("🖼️");
     expect(toolIcon("DynamicTool")).toBe("🧩");
   });
+
+  it("summarizes Kimi-specific tool fallbacks", () => {
+    expect(toolIcon("ReadMediaFile")).toBe("🖼️");
+    expect(toolIcon("TaskOutput")).toBe("📋");
+    expect(toolIcon("CronList")).toBe("⏰");
+    expect(toolIcon("SetGoalBudget")).toBe("🎯");
+    expect(
+      toolSummary({
+        ...baseMessage,
+        tool_name: "TaskOutput",
+        tool_input: JSON.stringify({ task_id: "task-123", block: true }),
+      }),
+    ).toBe("task-123 · wait");
+    expect(
+      toolSummary({
+        ...baseMessage,
+        tool_name: "SetGoalBudget",
+        tool_input: JSON.stringify({ value: 3, unit: "turns" }),
+      }),
+    ).toBe("3 · turns");
+  });
 });
 
 describe("tools/input", () => {
@@ -185,6 +206,28 @@ describe("tools/input", () => {
 });
 
 describe("tools/result", () => {
+  it("formats bash output as stdout", () => {
+    const detail = formatToolResultMetadata({
+      raw_name: "bash",
+      canonical_name: "Bash",
+      display_name: "Bash",
+      category: "shell",
+      status: "success",
+      structured: {
+        output: "hello from pi",
+      },
+    });
+
+    expect(detail?.lines).toContainEqual({
+      label: "status",
+      value: "success",
+    });
+    expect(detail?.lines).toContainEqual({
+      label: "stdout",
+      value: "hello from pi",
+    });
+  });
+
   it("formats structured edit results as a diff", () => {
     const detail = formatToolResultMetadata({
       raw_name: "Edit",
@@ -298,6 +341,38 @@ describe("tools/result", () => {
     expect(dynamicDetail?.lines).toContainEqual({
       label: "result",
       value: "Workspace dependencies are available",
+    });
+  });
+
+  it("keeps Kimi tool call display metadata in result details", () => {
+    const detail = formatToolResultMetadata({
+      raw_name: "Bash",
+      canonical_name: "Bash",
+      display_name: "Bash",
+      category: "shell",
+      status: "success",
+      structured: {
+        callDescription: "Run pwd",
+        callDisplay: {
+          kind: "bash",
+          cwd: "/Users/alice/project",
+          command: "pwd",
+        },
+        output: "hello world",
+      },
+    });
+
+    expect(detail?.lines).toContainEqual({
+      label: "description",
+      value: "Run pwd",
+    });
+    expect(detail?.lines).toContainEqual({
+      label: "cwd",
+      value: "/Users/alice/project",
+    });
+    expect(detail?.lines).toContainEqual({
+      label: "stdout",
+      value: "hello world",
     });
   });
 });

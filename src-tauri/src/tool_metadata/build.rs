@@ -48,18 +48,56 @@ pub fn build_tool_metadata(call: ToolCallFacts<'_>) -> ToolMetadata {
     }
 }
 
+pub fn attach_call_metadata<I>(
+    metadata: &mut ToolMetadata,
+    description: Option<&str>,
+    display: Option<&Value>,
+    ids: I,
+) where
+    I: IntoIterator<Item = (&'static str, String)>,
+{
+    for (key, value) in ids {
+        if !value.is_empty() {
+            metadata.ids.entry(key.to_string()).or_insert(value);
+        }
+    }
+
+    let description = description.filter(|value| !value.is_empty());
+    if description.is_none() && display.is_none() {
+        return;
+    }
+
+    let mut structured = metadata
+        .structured
+        .take()
+        .unwrap_or_else(|| Value::Object(Map::new()));
+    if !structured.is_object() {
+        structured = Value::Object(Map::new());
+    }
+    if let Value::Object(obj) = &mut structured {
+        if let Some(description) = description {
+            obj.entry("callDescription".to_string())
+                .or_insert_with(|| Value::String(description.to_string()));
+        }
+        if let Some(display) = display {
+            obj.entry("callDisplay".to_string())
+                .or_insert_with(|| compact_json_value(display, 0));
+        }
+    }
+    metadata.structured = Some(structured);
+}
+
 pub fn enrich_tool_metadata(metadata: &mut ToolMetadata, result: ToolResultFacts<'_>) {
     metadata.status = normalized_status(ToolResultFacts { ..result });
     metadata.result_kind = result_kind_for_tool(&metadata.raw_name, result.raw_result)
         .or_else(|| metadata.result_kind.clone());
-    metadata.structured = result
-        .raw_result
-        .map(|value| {
-            let mut compact = compact_json_value(value, 0);
-            normalize_structured_result(&mut compact);
-            compact
-        })
-        .or_else(|| metadata.structured.clone());
+    let existing_structured = metadata.structured.take();
+    let result_structured = result.raw_result.map(|value| {
+        let mut compact = compact_json_value(value, 0);
+        normalize_structured_result(&mut compact);
+        compact
+    });
+    metadata.structured = merge_structured(existing_structured, result_structured);
     if let Some(path) = result.artifact_path {
         let mut structured = metadata
             .structured
@@ -75,6 +113,19 @@ pub fn enrich_tool_metadata(metadata: &mut ToolMetadata, result: ToolResultFacts
             );
         }
         metadata.structured = Some(structured);
+    }
+}
+
+fn merge_structured(existing: Option<Value>, result: Option<Value>) -> Option<Value> {
+    match (existing, result) {
+        (Some(Value::Object(existing_obj)), Some(Value::Object(mut result_obj))) => {
+            for (key, value) in existing_obj {
+                result_obj.entry(key).or_insert(value);
+            }
+            Some(Value::Object(result_obj))
+        }
+        (_, Some(result)) => Some(result),
+        (existing, None) => existing,
     }
 }
 
@@ -120,7 +171,10 @@ fn promote_string_alias(obj: &mut Map<String, Value>, from: &str, to: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_tool_metadata, enrich_tool_metadata, ToolCallFacts, ToolResultFacts};
+    use super::{
+        attach_call_metadata, build_tool_metadata, enrich_tool_metadata, ToolCallFacts,
+        ToolResultFacts,
+    };
     use crate::models::Provider;
     use serde_json::json;
 
@@ -149,12 +203,27 @@ mod tests {
             ("list_mcp_resources", "ListMcpResourcesTool"),
             ("list_mcp_resource_templates", "ListMcpResourcesTool"),
             ("Subagent", "Agent"),
+            ("subagent", "Agent"),
+            ("AgentSwarm", "Agent"),
             ("spawn_agent", "Agent"),
             ("send_message", "SendMessage"),
             ("followup_task", "FollowupTask"),
             ("list_agents", "ListAgents"),
             ("request_permissions", "RequestPermissions"),
             ("todowrite", "Plan"),
+            ("TodoList", "Plan"),
+            ("FetchURL", "WebFetch"),
+            ("ReadMediaFile", "ReadMediaFile"),
+            ("TaskList", "TaskList"),
+            ("TaskOutput", "TaskOutput"),
+            ("TaskStop", "TaskStop"),
+            ("CronCreate", "CronCreate"),
+            ("CronList", "CronList"),
+            ("CronDelete", "CronDelete"),
+            ("CreateGoal", "CreateGoal"),
+            ("GetGoal", "GetGoal"),
+            ("SetGoalBudget", "SetGoalBudget"),
+            ("UpdateGoal", "UpdateGoal"),
             ("webfetch", "WebFetch"),
             ("websearch", "WebSearch"),
             ("codesearch", "ToolSearch"),
@@ -267,6 +336,71 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some("019dae0e-8a30-76f2-92cc-e81cfcf0d125"),
             "new_thread_id must populate agentId when agent_id is absent (codex >=0.123)"
+        );
+    }
+
+    #[test]
+    fn preserves_call_metadata_when_result_enriches_structured() {
+        let mut metadata = build_tool_metadata(ToolCallFacts {
+            provider: Provider::Kimi,
+            raw_name: "Bash",
+            input: Some(&json!({ "command": "pwd" })),
+            call_id: Some("tc_1"),
+            assistant_id: None,
+        });
+        attach_call_metadata(
+            &mut metadata,
+            Some("Run pwd"),
+            Some(&json!({
+                "kind": "bash",
+                "cwd": "/Users/alice/project",
+                "command": "pwd"
+            })),
+            [
+                ("kimi_uuid", "uuid-1".to_string()),
+                ("turn_id", "turn-1".to_string()),
+                ("step_uuid", "step-1".to_string()),
+            ],
+        );
+        enrich_tool_metadata(
+            &mut metadata,
+            ToolResultFacts {
+                raw_result: Some(&json!({ "output": "hello" })),
+                is_error: Some(false),
+                status: None,
+                artifact_path: None,
+            },
+        );
+
+        let structured = metadata.structured.as_ref().expect("structured");
+        assert_eq!(
+            structured.get("output").and_then(|value| value.as_str()),
+            Some("hello")
+        );
+        assert_eq!(
+            structured
+                .get("callDescription")
+                .and_then(|value| value.as_str()),
+            Some("Run pwd")
+        );
+        assert_eq!(
+            structured
+                .get("callDisplay")
+                .and_then(|value| value.get("cwd"))
+                .and_then(|value| value.as_str()),
+            Some("/Users/alice/project")
+        );
+        assert_eq!(
+            metadata.ids.get("kimi_uuid").map(String::as_str),
+            Some("uuid-1")
+        );
+        assert_eq!(
+            metadata.ids.get("turn_id").map(String::as_str),
+            Some("turn-1")
+        );
+        assert_eq!(
+            metadata.ids.get("step_uuid").map(String::as_str),
+            Some("step-1")
         );
     }
 
@@ -404,6 +538,62 @@ mod tests {
                 .and_then(|value| value.get("image"))
                 .and_then(|value| value.as_str()),
             Some("<omitted>")
+        );
+    }
+
+    #[test]
+    fn summarizes_kimi_declared_tools() {
+        fn metadata(raw: &str, input: serde_json::Value) -> crate::models::ToolMetadata {
+            build_tool_metadata(ToolCallFacts {
+                provider: Provider::Kimi,
+                raw_name: raw,
+                input: Some(&input),
+                call_id: None,
+                assistant_id: None,
+            })
+        }
+
+        let read_media = metadata("ReadMediaFile", json!({ "path": "/Users/alice/video.mp4" }));
+        assert_eq!(read_media.category, "media");
+        assert_eq!(read_media.summary.as_deref(), Some("~/video.mp4"));
+
+        let task_output = metadata(
+            "TaskOutput",
+            json!({ "task_id": "task-1234567890", "block": true }),
+        );
+        assert_eq!(task_output.category, "task");
+        assert_eq!(
+            task_output.summary.as_deref(),
+            Some("task-1234567890 · wait")
+        );
+
+        let cron_create = metadata(
+            "CronCreate",
+            json!({ "cron": "*/5 * * * *", "prompt": "check build" }),
+        );
+        assert_eq!(cron_create.category, "cron");
+        assert_eq!(
+            cron_create.summary.as_deref(),
+            Some("*/5 * * * * · check build")
+        );
+
+        let goal = metadata("SetGoalBudget", json!({ "value": 3, "unit": "turns" }));
+        assert_eq!(goal.category, "goal");
+        assert_eq!(goal.summary.as_deref(), Some("3 · turns"));
+
+        let ask_user = metadata(
+            "AskUserQuestion",
+            json!({
+                "questions": [
+                    { "id": "choice", "question": "Pick one", "header": "Choice", "options": [] }
+                ],
+                "background": true
+            }),
+        );
+        assert_eq!(ask_user.category, "interaction");
+        assert_eq!(
+            ask_user.summary.as_deref(),
+            Some("1 question(s) · background")
         );
     }
 

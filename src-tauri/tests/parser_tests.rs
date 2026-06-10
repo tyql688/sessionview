@@ -1305,64 +1305,68 @@ fn antigravity_real_local_sessions_smoke() {
         if parent.child_session_ids.is_empty() {
             continue;
         }
-        let agent_tool = parent
-            .messages
-            .iter()
-            .find(|m| {
-                m.tool_metadata
-                    .as_ref()
-                    .is_some_and(|md| md.canonical_name == "Agent")
-            })
-            .unwrap_or_else(|| panic!("parent {} has no Agent tool message", parent.meta.id));
-        let structured = agent_tool
-            .tool_metadata
-            .as_ref()
-            .and_then(|md| md.structured.as_ref())
-            .unwrap_or_else(|| {
-                panic!(
-                    "parent {} Agent tool has no structured metadata",
-                    parent.meta.id
-                )
-            });
-        let ids = structured
-            .get("childConversationIds")
-            .and_then(|v| v.as_array())
-            .unwrap_or_else(|| {
-                panic!(
-                    "parent {} Agent tool structured.childConversationIds missing",
-                    parent.meta.id
-                )
-            });
-        eprintln!(
-            "  agent-tool childConversationIds for {} = {:?}",
-            parent.meta.id, ids
+        let mut all_agent_child_ids = Vec::new();
+        for agent_tool in parent.messages.iter().filter(|m| {
+            m.tool_metadata
+                .as_ref()
+                .is_some_and(|md| md.raw_name == "invoke_subagent")
+        }) {
+            let structured = agent_tool
+                .tool_metadata
+                .as_ref()
+                .and_then(|md| md.structured.as_ref())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "parent {} invoke_subagent tool has no structured metadata",
+                        parent.meta.id
+                    )
+                });
+            let ids = structured
+                .get("childConversationIds")
+                .and_then(|v| v.as_array())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "parent {} invoke_subagent structured.childConversationIds missing",
+                        parent.meta.id
+                    )
+                });
+            eprintln!(
+                "  invoke_subagent childConversationIds for {} = {:?}",
+                parent.meta.id, ids
+            );
+            all_agent_child_ids.extend(ids.iter().filter_map(|v| v.as_str()).map(str::to_string));
+
+            // childPrompts must be a same-length parallel array so the UI can
+            // label each Open button. Empty strings are allowed (no Prompt
+            // declared) but the array length must match.
+            let prompts = structured
+                .get("childPrompts")
+                .and_then(|v| v.as_array())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "parent {} invoke_subagent structured.childPrompts missing",
+                        parent.meta.id
+                    )
+                });
+            assert_eq!(
+                prompts.len(),
+                ids.len(),
+                "parent {} childPrompts length must match childConversationIds",
+                parent.meta.id
+            );
+        }
+        assert!(
+            !all_agent_child_ids.is_empty(),
+            "parent {} has no invoke_subagent tool metadata",
+            parent.meta.id
         );
         for child_id in &parent.child_session_ids {
             assert!(
-                ids.iter().any(|v| v.as_str() == Some(child_id.as_str())),
+                all_agent_child_ids.iter().any(|id| id == child_id),
                 "Agent tool metadata for {} missing child {child_id}",
                 parent.meta.id
             );
         }
-
-        // childPrompts must be a same-length parallel array so the UI can
-        // label each Open button. Empty strings are allowed (no Prompt
-        // declared) but the array length must match.
-        let prompts = structured
-            .get("childPrompts")
-            .and_then(|v| v.as_array())
-            .unwrap_or_else(|| {
-                panic!(
-                    "parent {} Agent tool structured.childPrompts missing",
-                    parent.meta.id
-                )
-            });
-        assert_eq!(
-            prompts.len(),
-            ids.len(),
-            "parent {} childPrompts length must match childConversationIds",
-            parent.meta.id
-        );
     }
 
     // Every declared child id must point at a session we actually parsed,

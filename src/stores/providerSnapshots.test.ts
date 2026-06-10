@@ -80,6 +80,7 @@ describe("providerSnapshots store", () => {
       "opencode",
       "kimi",
       "cursor",
+      "pi",
     ]);
   });
 

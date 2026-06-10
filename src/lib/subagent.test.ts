@@ -8,6 +8,7 @@ import {
   extractAgentId,
   extractAgentNickname,
   extractSubagentInfo,
+  matchesSubagentSession,
   parseToolJsonObject,
 } from "./subagent";
 import type { Message, ToolMetadata } from "./types";
@@ -255,5 +256,34 @@ describe("extractSubagentInfo", () => {
     const info = extractSubagentInfo(agentMessage({ tool_metadata: metadata }));
     expect(info.childIds).toEqual(["conv-1", "conv-2"]);
     expect(info.childPrompts).toEqual(["first task", "second task"]);
+  });
+});
+
+describe("matchesSubagentSession", () => {
+  it("matches antigravity full prompts against truncated child titles", () => {
+    expect(
+      matchesSubagentSession(
+        {
+          id: "child-1",
+          title:
+            "Please perform the analysis using ONLY the `view_file` and `list_dir` tools...",
+        },
+        "parent-1",
+        {
+          description:
+            "Please perform the analysis using ONLY the `view_file` and `list_dir` tools (do NOT use shell commands).",
+        },
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps exact agent id matching for provider-specific child ids", () => {
+    expect(
+      matchesSubagentSession(
+        { id: "parent-1:agent-0", title: "child task" },
+        "parent-1",
+        { agentId: "agent-0" },
+      ),
+    ).toBe(true);
   });
 });

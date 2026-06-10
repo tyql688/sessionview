@@ -1,7 +1,6 @@
 node_modules/
 target/
 dist/
-.superpowers/
 .DS_Store
 *.swp
 *.swo
@@ -12,8 +11,5 @@ coverage/
 .reference/
 docs/
 .claude
-.planning
-.omx
-.omx/
 .macos-signing/
 .antigravitycli/

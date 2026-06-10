@@ -48,19 +48,21 @@ pub fn canonical_tool_name(provider: Provider, name: &str) -> String {
         "Glob" | "glob" | "file_search" | "ReadFolder" | "list_directory" | "list" | "list_dir" => {
             "Glob"
         }
-        "Task" | "task" | "Subagent" | "agent" | "read_agent" | "spawn_agent" | "wait_agent"
-        | "send_input" | "close_agent" | "invoke_subagent" | "define_subagent" => "Agent",
+        "find_by_name" => "Glob",
+        "Task" | "task" | "Subagent" | "subagent" | "Agent" | "AgentSwarm" | "agent"
+        | "read_agent" | "spawn_agent" | "wait_agent" | "send_input" | "close_agent"
+        | "invoke_subagent" | "define_subagent" => "Agent",
         "send_message" => "SendMessage",
         "followup_task" => "FollowupTask",
         "list_agents" => "ListAgents",
-        "update_plan" | "TodoWrite" | "todo" | "todowrite" | "Enter Plan Mode"
+        "update_plan" | "TodoWrite" | "TodoList" | "todo" | "todowrite" | "Enter Plan Mode"
         | "EnterPlanMode" | "ExitPlanMode" | "enter_plan_mode" | "exit_plan_mode"
         | "manage_task" => "Plan",
-        "request_user_input" | "ask_user" | "question" => "AskUserQuestion",
+        "request_user_input" | "ask_user" | "question" | "AskUserQuestion" => "AskUserQuestion",
         "request_permissions" | "ask_permission" | "list_permissions" => "RequestPermissions",
         "ScheduleWakeup" | "schedule" => "ScheduleWakeup",
         "ReadLints" => "Lint",
-        "web_fetch" | "webfetch" | "read_url_content" => "WebFetch",
+        "web_fetch" | "webfetch" | "FetchURL" | "read_url_content" => "WebFetch",
         "web_search" | "web_search_call" | "websearch" | "search_web" => "WebSearch",
         "image_generation_call" | "image_generation_end" => "ImageGeneration",
         "dynamic_tool_call"
@@ -87,13 +89,14 @@ pub(super) fn tool_category(canonical_name: &str, raw_name: &str) -> String {
         "Read" | "Write" | "Edit" | "Delete" => "file",
         "Grep" | "Glob" | "ToolSearch" | "ListMcpResourcesTool" => "search",
         "Agent" | "SendMessage" | "ListAgents" => "agent",
-        "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskStop" => "task",
+        "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskOutput" | "TaskStop" => "task",
         "FollowupTask" => "task",
         "WebSearch" | "WebFetch" => "web",
-        "ImageGeneration" => "media",
+        "ImageGeneration" | "ReadMediaFile" => "media",
         "DynamicTool" => "tool",
         "Skill" => "skill",
-        "CronCreate" | "CronDelete" | "ScheduleWakeup" => "cron",
+        "CronCreate" | "CronList" | "CronDelete" | "ScheduleWakeup" => "cron",
+        "CreateGoal" | "GetGoal" | "SetGoalBudget" | "UpdateGoal" => "goal",
         "Plan" => "plan",
         "AskUserQuestion" | "RequestPermissions" => "interaction",
         "SQL" => "database",
@@ -114,6 +117,7 @@ pub(super) fn display_tool_name(raw_name: &str, canonical_name: &str) -> String 
         "request_user_input" => "request user input".to_string(),
         "request_permissions" => "request permissions".to_string(),
         "apply_patch" => "apply patch".to_string(),
+        "AgentSwarm" => "agent swarm".to_string(),
         "spawn_agent" => "spawn agent".to_string(),
         "wait_agent" => "wait agent".to_string(),
         "send_input" => "send input".to_string(),
@@ -125,7 +129,24 @@ pub(super) fn display_tool_name(raw_name: &str, canonical_name: &str) -> String 
         "list_mcp_resource_templates" => "list mcp resource templates".to_string(),
         "read_mcp_resource" => "read mcp resource".to_string(),
         "todowrite" => "todo write".to_string(),
+        "TodoList" => "todo list".to_string(),
         "question" => "question".to_string(),
+        "TaskList" => "task list".to_string(),
+        "TaskOutput" => "task output".to_string(),
+        "TaskStop" => "task stop".to_string(),
+        "CronCreate" => "cron create".to_string(),
+        "CronList" => "cron list".to_string(),
+        "CronDelete" => "cron delete".to_string(),
+        "ReadMediaFile" => "read media file".to_string(),
+        "FetchURL" => "fetch URL".to_string(),
+        "WebSearch" => "web search".to_string(),
+        "AskUserQuestion" => "ask user".to_string(),
+        "EnterPlanMode" => "enter plan mode".to_string(),
+        "ExitPlanMode" => "exit plan mode".to_string(),
+        "CreateGoal" => "create goal".to_string(),
+        "GetGoal" => "get goal".to_string(),
+        "SetGoalBudget" => "set goal budget".to_string(),
+        "UpdateGoal" => "update goal".to_string(),
         "webfetch" => "web fetch".to_string(),
         "websearch" => "web search".to_string(),
         "image_generation_call" | "image_generation_end" => "image generation".to_string(),
@@ -137,13 +158,15 @@ pub(super) fn display_tool_name(raw_name: &str, canonical_name: &str) -> String 
         "codesearch" => "code search".to_string(),
         "skill" => "skill".to_string(),
         "list" => "list".to_string(),
+        "find_by_name" => "find by name".to_string(),
         _ => canonical_name.to_string(),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_mcp_tool_name;
+    use super::{canonical_tool_name, parse_mcp_tool_name};
+    use crate::models::Provider;
 
     #[test]
     fn parses_mcp_tool_names() {
@@ -151,5 +174,13 @@ mod tests {
         assert_eq!(mcp.server, "plugin_playwright");
         assert_eq!(mcp.tool, "browser_snapshot");
         assert_eq!(mcp.display, "browser snapshot");
+    }
+
+    #[test]
+    fn maps_antigravity_find_by_name_to_file_search() {
+        assert_eq!(
+            canonical_tool_name(Provider::Antigravity, "find_by_name"),
+            "Glob"
+        );
     }
 }

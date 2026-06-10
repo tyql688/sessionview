@@ -418,8 +418,8 @@ mod tests {
             "main",
             &[
                 r#"{"type":"metadata","protocol_version":"1.0","created_at":1779701196480}"#,
-                r#"{"type":"context.append_message","message":{"role":"user","content":[{"type":"text","text":"read file"}],"toolCalls":[]}}"#,
-                r#"{"type":"context.append_loop_event","event":{"type":"tool.call","toolCallId":"tc_1","name":"Read","args":{"path":"a.txt"},"description":"Reading a.txt"},"time":1779701197000}"#,
+                r#"{"type":"context.append_message","message":{"role":"user","content":[{"type":"text","text":"run command"}],"toolCalls":[]}}"#,
+                r#"{"type":"context.append_loop_event","event":{"type":"tool.call","toolCallId":"tc_1","uuid":"uuid_1","turnId":"turn_1","step":2,"stepUuid":"step_1","name":"Shell","args":{"command":"pwd"},"description":"Run pwd","display":{"kind":"bash","cwd":"/Users/alice/project","command":"pwd"}},"time":1779701197000}"#,
                 r#"{"type":"context.append_loop_event","event":{"type":"tool.result","toolCallId":"tc_1","result":{"output":"hello world"}},"time":1779701197500}"#,
             ],
         );
@@ -428,10 +428,160 @@ mod tests {
         assert_eq!(parsed.messages.len(), 2);
         let tool = &parsed.messages[1];
         assert_eq!(tool.role, MessageRole::Tool);
-        assert_eq!(tool.tool_name.as_deref(), Some("Read"));
+        assert_eq!(tool.tool_name.as_deref(), Some("Bash"));
         assert_eq!(tool.content, "hello world");
         let input: Value = serde_json::from_str(tool.tool_input.as_ref().unwrap()).unwrap();
-        assert_eq!(input["path"], "a.txt");
+        assert_eq!(input["command"], "pwd");
+        let metadata = tool.tool_metadata.as_ref().expect("tool metadata");
+        assert_eq!(metadata.result_kind.as_deref(), Some("terminal_output"));
+        assert_eq!(
+            metadata.ids.get("kimi_uuid").map(String::as_str),
+            Some("uuid_1")
+        );
+        assert_eq!(
+            metadata.ids.get("turn_id").map(String::as_str),
+            Some("turn_1")
+        );
+        assert_eq!(metadata.ids.get("step").map(String::as_str), Some("2"));
+        assert_eq!(
+            metadata.ids.get("step_uuid").map(String::as_str),
+            Some("step_1")
+        );
+        assert_eq!(
+            metadata
+                .structured
+                .as_ref()
+                .and_then(|value| value.get("output"))
+                .and_then(Value::as_str),
+            Some("hello world")
+        );
+        assert_eq!(
+            metadata
+                .structured
+                .as_ref()
+                .and_then(|value| value.get("callDescription"))
+                .and_then(Value::as_str),
+            Some("Run pwd")
+        );
+        assert_eq!(
+            metadata
+                .structured
+                .as_ref()
+                .and_then(|value| value.get("callDisplay"))
+                .and_then(|value| value.get("cwd"))
+                .and_then(Value::as_str),
+            Some("/Users/alice/project")
+        );
+    }
+
+    #[test]
+    fn agent_swarm_exposes_completed_subagents_for_open_links() {
+        let tmp = tempfile::tempdir().unwrap();
+        let session_dir = tmp.path().join("wd_x_zz").join("session_swarm");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        write_state(
+            &session_dir,
+            r#"{
+                "agents": {
+                    "main": {"type":"main","parentAgentId":null},
+                    "agent-2": {"type":"sub","parentAgentId":"main"},
+                    "agent-3": {"type":"sub","parentAgentId":"main"},
+                    "agent-4": {"type":"sub","parentAgentId":"main"},
+                    "agent-5": {"type":"sub","parentAgentId":"main"}
+                }
+            }"#,
+        );
+
+        let output = r#"<agent_swarm_result>
+<summary>completed: 3, failed: 1</summary>
+<subagent agent_id="agent-2" item="src-tauri/src/providers/kimi/tools.rs" outcome="completed">done</subagent>
+<subagent agent_id="agent-3" item="src-tauri/src/providers/kimi/parser/dispatch.rs" outcome="completed">done</subagent>
+<subagent agent_id="agent-4" item="src-tauri/src/tool_metadata/names.rs" outcome="completed">done</subagent>
+<subagent agent_id="agent-5" item="src-tauri/src/providers/kimi/parser/subagents.rs" outcome="failed">failed</subagent>
+</agent_swarm_result>"#;
+        let call_line = serde_json::json!({
+            "type": "context.append_loop_event",
+            "event": {
+                "type": "tool.call",
+                "toolCallId": "swarm_1",
+                "name": "AgentSwarm",
+                "args": {
+                    "description": "深度分析 kimi provider 工具映射",
+                    "items": [
+                        "src-tauri/src/providers/kimi/tools.rs",
+                        "src-tauri/src/providers/kimi/parser/dispatch.rs",
+                        "src-tauri/src/tool_metadata/names.rs",
+                        "src-tauri/src/providers/kimi/parser/subagents.rs"
+                    ],
+                    "prompt_template": "请深度分析这个文件：{{item}}"
+                }
+            },
+            "time": 1779701197000i64
+        })
+        .to_string();
+        let result_line = serde_json::json!({
+            "type": "context.append_loop_event",
+            "event": {
+                "type": "tool.result",
+                "toolCallId": "swarm_1",
+                "result": {"output": output}
+            },
+            "time": 1779701197500i64
+        })
+        .to_string();
+        let parent_path = write_wire(
+            &session_dir,
+            "main",
+            &[
+                r#"{"type":"metadata","protocol_version":"1.0","created_at":1779701196480}"#,
+                r#"{"type":"context.append_message","message":{"role":"user","content":[{"type":"text","text":"inspect"}],"toolCalls":[]}}"#,
+                call_line.as_str(),
+                result_line.as_str(),
+            ],
+        );
+        let parsed = parse_session(&parent_path, &SessionIndex::default()).expect("parses");
+        let tool = &parsed.messages[1];
+        assert_eq!(tool.tool_name.as_deref(), Some("Agent"));
+
+        let structured = tool
+            .tool_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.structured.as_ref())
+            .expect("structured metadata");
+        let ids: Vec<&str> = structured
+            .get("childConversationIds")
+            .and_then(Value::as_array)
+            .expect("child ids")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert_eq!(ids, vec!["agent-2", "agent-3", "agent-4"]);
+        let prompts: Vec<&str> = structured
+            .get("childPrompts")
+            .and_then(Value::as_array)
+            .expect("child prompts")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert_eq!(
+            prompts,
+            vec![
+                "src-tauri/src/providers/kimi/tools.rs",
+                "src-tauri/src/providers/kimi/parser/dispatch.rs",
+                "src-tauri/src/tool_metadata/names.rs",
+            ]
+        );
+
+        let sub_path = write_wire(
+            &session_dir,
+            "agent-2",
+            &[
+                r#"{"type":"metadata","protocol_version":"1.0","created_at":1779701197600}"#,
+                r#"{"type":"context.append_message","message":{"role":"user","content":[{"type":"text","text":"long generated swarm prompt"}],"toolCalls":[]}}"#,
+            ],
+        );
+        let sub = parse_session(&sub_path, &SessionIndex::default()).expect("sub parses");
+        assert_eq!(sub.meta.title, "src-tauri/src/providers/kimi/tools.rs");
     }
 
     #[test]

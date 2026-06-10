@@ -137,6 +137,7 @@ export function formatToolInput(message: Message): ToolDetail | null {
           ],
         };
       case "Read":
+      case "ReadMediaFile":
         return {
           lines: [
             toolLine(

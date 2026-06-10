@@ -19,14 +19,21 @@ const TOOL_ICONS: Record<string, string> = {
   TaskCreate: "📋",
   TaskUpdate: "📋",
   TaskList: "📋",
+  TaskOutput: "📋",
   TaskStop: "🛑",
   ToolSearch: "🧰",
   Skill: "⚡",
   AskUserQuestion: "❓",
   CronCreate: "⏰",
+  CronList: "⏰",
   CronDelete: "⏰",
+  ReadMediaFile: "🖼️",
   EnterPlanMode: "🧭",
   ExitPlanMode: "🧭",
+  CreateGoal: "🎯",
+  GetGoal: "🎯",
+  SetGoalBudget: "🎯",
+  UpdateGoal: "🎯",
   SendMessage: "✉️",
   FollowupTask: "📋",
   ListAgents: "🤖",
@@ -63,6 +70,15 @@ export function toolIcon(name: string, metadata?: ToolMetadata): string {
   return (
     TOOL_ICONS[metadata?.canonical_name ?? name] || TOOL_ICONS[name] || "⚙"
   );
+}
+
+function joinParts(parts: string[]): string {
+  return parts.filter((part) => part.length > 0).join(" · ");
+}
+
+function optionalNumber(obj: Record<string, unknown>, key: string): string {
+  const value = obj[key];
+  return typeof value === "number" ? value.toLocaleString() : "";
 }
 
 /** Extract a human-readable summary from tool input JSON. */
@@ -104,6 +120,34 @@ export function toolSummary(message: Message): string {
       }
       case "Agent":
         return firstString(obj, ["description", "prompt"]);
+      case "TaskList":
+        return joinParts([
+          typeof obj.active_only === "boolean"
+            ? obj.active_only
+              ? "active"
+              : "all"
+            : "",
+          optionalNumber(obj, "limit")
+            ? `limit ${optionalNumber(obj, "limit")}`
+            : "",
+        ]);
+      case "TaskOutput":
+        return joinParts([
+          firstString(obj, ["task_id", "taskId"]),
+          obj.block === true ? "wait" : "",
+        ]);
+      case "TaskStop":
+        return joinParts([
+          firstString(obj, ["task_id", "taskId"]),
+          firstString(obj, ["reason"]),
+        ]);
+      case "CronCreate":
+        return joinParts([
+          firstString(obj, ["cron"]),
+          firstString(obj, ["prompt"]).slice(0, 80),
+        ]);
+      case "CronDelete":
+        return firstString(obj, ["id"]);
       case "Skill":
         return firstString(obj, ["skill"]);
       case "ToolSearch":
@@ -111,6 +155,26 @@ export function toolSummary(message: Message): string {
         return firstString(obj, ["query", "Query"]);
       case "WebFetch":
         return firstString(obj, ["url", "Url"]);
+      case "ReadMediaFile":
+        return shortenHomePath(firstString(obj, ["path"]));
+      case "AskUserQuestion": {
+        const questions = Array.isArray(obj.questions)
+          ? `${obj.questions.length} question(s)`
+          : "";
+        return joinParts([
+          questions,
+          obj.background === true ? "background" : "",
+        ]);
+      }
+      case "CreateGoal":
+        return firstString(obj, ["objective"]).slice(0, 80);
+      case "SetGoalBudget":
+        return joinParts([
+          optionalNumber(obj, "value"),
+          firstString(obj, ["unit"]),
+        ]);
+      case "UpdateGoal":
+        return firstString(obj, ["status"]);
       default: {
         const first = Object.values(obj).find(
           (v) => typeof v === "string" && (v as string).length > 0,

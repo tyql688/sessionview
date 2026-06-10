@@ -14,6 +14,7 @@ pub enum Provider {
     Cursor,
     #[serde(rename = "cc-mirror")]
     CcMirror,
+    Pi,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]

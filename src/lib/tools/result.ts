@@ -104,9 +104,8 @@ function formatBashResult({ structured }: FormatterContext): Line[] {
   );
   if (duration) lines.push({ label: "duration", value: `${duration}s` });
 
-  if (typeof structured.stdout === "string" && structured.stdout.length > 0) {
-    lines.push({ label: "stdout", value: structured.stdout });
-  }
+  const stdout = firstString(structured, ["stdout", "output"]);
+  if (stdout) lines.push({ label: "stdout", value: stdout });
   if (typeof structured.stderr === "string" && structured.stderr.length > 0) {
     lines.push({ label: "stderr", value: structured.stderr });
   }
@@ -299,6 +298,31 @@ function formatDynamicToolResult({ structured }: FormatterContext): Line[] {
   return lines;
 }
 
+function appendCallMetadataLines(
+  lines: Line[],
+  structured: Record<string, unknown>,
+) {
+  const description = firstString(structured, ["callDescription"]);
+  if (description) lines.push({ label: "description", value: description });
+
+  const display = nestedRecord(structured.callDisplay);
+  if (!display) return;
+  for (const key of [
+    "kind",
+    "operation",
+    "path",
+    "cwd",
+    "language",
+    "command",
+    "agent_name",
+  ]) {
+    const value = display[key];
+    if (typeof value === "string" && value.length > 0) {
+      lines.push(toolLine(key, value));
+    }
+  }
+}
+
 /** Per-canonical-name result formatters. Names not present here fall through
  *  to the category-based default below. */
 const RESULT_FORMATTERS: Record<string, ResultFormatter> = {
@@ -375,6 +399,7 @@ export function formatToolResultMetadata(
   if (metadata.status) {
     baseLines.push({ label: "status", value: metadata.status });
   }
+  appendCallMetadataLines(baseLines, structured);
 
   const ctx: FormatterContext = {
     structured,

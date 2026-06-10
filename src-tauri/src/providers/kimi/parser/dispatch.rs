@@ -3,19 +3,28 @@
 
 use std::collections::HashMap;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
-use crate::models::{Message, MessageRole, Provider, TokenUsage};
+use crate::models::{Message, MessageRole, Provider, TokenUsage, ToolMetadata};
 use crate::tool_metadata::{
-    build_tool_metadata, enrich_tool_metadata, ToolCallFacts, ToolResultFacts,
+    attach_call_metadata, build_tool_metadata, enrich_tool_metadata, ToolCallFacts, ToolResultFacts,
 };
 
 use super::super::tools::{render_format_a_tool_output, render_format_b_tool_output};
+use super::subagents::parse_agent_swarm_children;
 use super::time_ms_to_parts;
 
 // ---------------------------------------------------------------------------
 // Accumulator: shared per-line state for full-file and tail parse.
 // ---------------------------------------------------------------------------
+
+/// Snapshot of accumulator state at turn boundaries, used to roll back
+/// when a turn is cancelled.
+struct TurnSnapshot {
+    messages_len: usize,
+    content_parts_len: usize,
+    first_user_message: Option<String>,
+}
 
 pub(super) struct ScanAccum {
     pub(super) messages: Vec<Message>,
@@ -40,6 +49,11 @@ pub(super) struct ScanAccum {
     /// after each `usage.record` / `step.end` is consumed.
     current_turn_assistant_idx: Option<usize>,
     pub(super) parse_warning_count: u32,
+    /// Snapshot of state at the last turn.prompt, used to roll back on
+    /// turn.cancel. protocol_version 1.4+ emits turn.cancel when the
+    /// user interrupts mid-turn; everything accumulated since the turn
+    /// started (tool calls, partial content, etc.) should be discarded.
+    turn_snapshot: Option<TurnSnapshot>,
 }
 
 impl ScanAccum {
@@ -56,7 +70,31 @@ impl ScanAccum {
             current_model: None,
             current_turn_assistant_idx: None,
             parse_warning_count: 0,
+            turn_snapshot: None,
         }
+    }
+
+    /// Capture a snapshot of current state at turn boundary (turn.prompt).
+    fn snapshot_turn(&mut self) {
+        self.turn_snapshot = Some(TurnSnapshot {
+            messages_len: self.messages.len(),
+            content_parts_len: self.content_parts.len(),
+            first_user_message: self.first_user_message.clone(),
+        });
+    }
+
+    /// Roll back to the last turn snapshot, discarding everything
+    /// accumulated since the turn started. Called on turn.cancel.
+    fn rollback_turn(&mut self) {
+        let Some(snap) = self.turn_snapshot.take() else {
+            return;
+        };
+        self.messages.truncate(snap.messages_len);
+        self.content_parts.truncate(snap.content_parts_len);
+        // Rebuild call_id_map by keeping only entries whose message still exists.
+        self.call_id_map.retain(|_k, v| *v < snap.messages_len);
+        self.first_user_message = snap.first_user_message;
+        self.current_turn_assistant_idx = None;
     }
 
     fn note_time(&mut self, ms: Option<i64>) -> Option<String> {
@@ -142,14 +180,18 @@ impl ScanAccum {
         call_id: Option<&str>,
         args: Option<&Value>,
         ts: Option<String>,
+        event: Option<&Value>,
     ) {
-        let metadata = build_tool_metadata(ToolCallFacts {
+        let mut metadata = build_tool_metadata(ToolCallFacts {
             provider: Provider::Kimi,
             raw_name,
             input: args,
             call_id,
             assistant_id: None,
         });
+        if let Some(event) = event {
+            attach_kimi_call_metadata(&mut metadata, event);
+        }
         let display_name = metadata.canonical_name.clone();
         let tool_input = args.map(|v| v.to_string());
         let idx = self.messages.len();
@@ -183,7 +225,6 @@ impl ScanAccum {
         let target_idx = call_id.and_then(|cid| self.call_id_map.get(cid)).copied();
         if let Some(idx) = target_idx {
             if idx < self.messages.len() {
-                self.messages[idx].content = rendered_output;
                 if let Some(meta) = self.messages[idx].tool_metadata.as_mut() {
                     enrich_tool_metadata(
                         meta,
@@ -194,7 +235,9 @@ impl ScanAccum {
                             artifact_path: None,
                         },
                     );
+                    attach_agent_swarm_children(meta, &rendered_output);
                 }
+                self.messages[idx].content = rendered_output;
                 return;
             }
         }
@@ -244,6 +287,202 @@ impl ScanAccum {
 
     pub(super) fn note_warning(&mut self) {
         self.parse_warning_count = self.parse_warning_count.saturating_add(1);
+    }
+}
+
+fn attach_agent_swarm_children(metadata: &mut ToolMetadata, rendered_output: &str) {
+    if metadata.raw_name != "AgentSwarm" {
+        return;
+    }
+    let children = parse_agent_swarm_children(rendered_output);
+    if children.is_empty() {
+        return;
+    }
+
+    let mut structured = metadata
+        .structured
+        .take()
+        .unwrap_or_else(|| Value::Object(Default::default()));
+    if !structured.is_object() {
+        log::warn!("Kimi AgentSwarm structured metadata was not an object; skipping child links");
+        metadata.structured = Some(structured);
+        return;
+    }
+    if let Some(obj) = structured.as_object_mut() {
+        obj.insert(
+            "childConversationIds".to_string(),
+            Value::Array(
+                children
+                    .iter()
+                    .map(|child| json!(child.agent_id.clone()))
+                    .collect(),
+            ),
+        );
+        obj.insert(
+            "childPrompts".to_string(),
+            Value::Array(
+                children
+                    .iter()
+                    .map(|child| json!(child.prompt.clone()))
+                    .collect(),
+            ),
+        );
+    }
+    metadata.structured = Some(structured);
+}
+
+#[cfg(test)]
+// These rollback tests stay next to ScanAccum's private state instead of the
+// file bottom; moving them would make the fixture setup harder to read.
+#[allow(clippy::items_after_test_module)]
+mod turn_cancel_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn turn_cancel_discards_accumulated_content() {
+        let mut accum = ScanAccum::new();
+        // Simulate a turn that gets cancelled
+        dispatch_line(&mut accum, &json!({"type": "turn.prompt", "time": 1000}));
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_loop_event",
+                "event": {"type": "content.part", "part": {"type": "text", "text": "partial response..."}},
+                "time": 1001
+            }),
+        );
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_loop_event",
+                "event": {"type": "tool.call", "toolCallId": "tc_1", "name": "Read", "args": {"path": "a.txt"}},
+                "time": 1002
+            }),
+        );
+        // User cancels
+        dispatch_line(&mut accum, &json!({"type": "turn.cancel", "time": 1003}));
+
+        assert_eq!(accum.messages.len(), 0);
+        assert_eq!(accum.content_parts.len(), 0);
+        assert_eq!(accum.call_id_map.len(), 0);
+    }
+
+    #[test]
+    fn turn_cancel_preserves_previous_turn() {
+        let mut accum = ScanAccum::new();
+        // First turn completes normally
+        dispatch_line(&mut accum, &json!({"type": "turn.prompt", "time": 1000}));
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_message",
+                "message": {"role": "user", "content": [{"type": "text", "text": "hello"}], "toolCalls": [], "origin": {"kind": "user"}},
+                "time": 1001
+            }),
+        );
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_loop_event",
+                "event": {"type": "content.part", "part": {"type": "text", "text": "Hi!"}},
+                "time": 1002
+            }),
+        );
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "usage.record",
+                "model": "kimi-test",
+                "usage": {"inputOther": 10, "output": 5, "inputCacheRead": 0, "inputCacheCreation": 0},
+                "time": 1003
+            }),
+        );
+
+        // Second turn starts then gets cancelled
+        dispatch_line(&mut accum, &json!({"type": "turn.prompt", "time": 2000}));
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_loop_event",
+                "event": {"type": "content.part", "part": {"type": "text", "text": "partial..."}},
+                "time": 2001
+            }),
+        );
+        dispatch_line(&mut accum, &json!({"type": "turn.cancel", "time": 2002}));
+
+        // Should still have the first turn's messages
+        assert_eq!(accum.messages.len(), 2); // user + assistant
+        assert_eq!(accum.messages[0].role, MessageRole::User);
+        assert_eq!(accum.messages[0].content, "hello");
+        assert_eq!(accum.messages[1].role, MessageRole::Assistant);
+        assert_eq!(accum.messages[1].content, "Hi!");
+    }
+
+    #[test]
+    fn turn_prompt_without_cancel_keeps_content() {
+        let mut accum = ScanAccum::new();
+        dispatch_line(&mut accum, &json!({"type": "turn.prompt", "time": 1000}));
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_message",
+                "message": {"role": "user", "content": [{"type": "text", "text": "query"}], "toolCalls": [], "origin": {"kind": "user"}},
+                "time": 1001
+            }),
+        );
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_loop_event",
+                "event": {"type": "content.part", "part": {"type": "text", "text": "answer"}},
+                "time": 1002
+            }),
+        );
+        // No cancel — content should be kept
+        assert_eq!(accum.messages.len(), 2);
+        assert_eq!(accum.messages[1].content, "answer");
+    }
+
+    #[test]
+    fn step_end_usage_fallback_when_no_usage_record() {
+        let mut accum = ScanAccum::new();
+        dispatch_line(&mut accum, &json!({"type": "turn.prompt", "time": 1000}));
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_message",
+                "message": {"role": "user", "content": [{"type": "text", "text": "hi"}], "toolCalls": [], "origin": {"kind": "user"}},
+                "time": 1001
+            }),
+        );
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_loop_event",
+                "event": {"type": "content.part", "part": {"type": "text", "text": "Hello!"}},
+                "time": 1002
+            }),
+        );
+        // step.end with usage but no usage.record
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_loop_event",
+                "event": {
+                    "type": "step.end",
+                    "usage": {"inputOther": 100, "output": 50, "inputCacheRead": 200, "inputCacheCreation": 0}
+                },
+                "time": 1003
+            }),
+        );
+
+        let usage = accum.messages[1]
+            .token_usage
+            .as_ref()
+            .expect("usage attached");
+        assert_eq!(usage.input_tokens, 300); // 100 + 200
+        assert_eq!(usage.output_tokens, 50);
     }
 }
 
@@ -351,6 +590,34 @@ pub(super) fn dispatch_line(accum: &mut ScanAccum, entry: &Value) {
             }
         }
 
+        // ---- Turn boundaries (protocol_version 1.4+) ----
+        "turn.prompt" => {
+            // A new turn is starting — snapshot state so we can roll back
+            // if the turn is cancelled.
+            let _ = accum.note_time(line_time_ms);
+            accum.snapshot_turn();
+        }
+
+        "turn.cancel" => {
+            // User cancelled the current turn (e.g. Ctrl+C, interrupt).
+            // Discard everything accumulated since the turn started.
+            let _ = accum.note_time(line_time_ms);
+            accum.rollback_turn();
+        }
+
+        // ---- Events that produce no visible transcript content ----
+        "tools.set_active_tools"
+        | "tools.update_store"
+        | "plan_mode.enter"
+        | "plan_mode.cancel"
+        | "permission.set_mode"
+        | "permission.record_approval_result" => {
+            // These are UI/state bookkeeping events; they don't carry
+            // messages we want in the transcript. Soak up the time so
+            // first/last timestamps still span the whole file.
+            let _ = accum.note_time(line_time_ms);
+        }
+
         _ => {}
     }
 }
@@ -431,7 +698,7 @@ fn handle_migrated_line(accum: &mut ScanAccum, entry: &Value, line_time_ms: Opti
                         .and_then(|v| v.as_str());
                     let arg_value: Option<Value> =
                         arg_string.and_then(|s| serde_json::from_str::<Value>(s).ok());
-                    accum.push_tool_call(name, id, arg_value.as_ref(), ts.clone());
+                    accum.push_tool_call(name, id, arg_value.as_ref(), ts.clone(), None);
                 }
             }
         }
@@ -479,7 +746,7 @@ fn handle_native_event(accum: &mut ScanAccum, entry: &Value, line_time_ms: Optio
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
             let args = event.get("args");
-            accum.push_tool_call(name, id, args, ts);
+            accum.push_tool_call(name, id, args, ts, Some(event));
         }
         "tool.result" => {
             let id = event
@@ -493,12 +760,50 @@ fn handle_native_event(accum: &mut ScanAccum, entry: &Value, line_time_ms: Optio
         "step.end" => {
             // `usage.record` carries the same totals plus the
             // canonical model alias and fires right after
-            // step.end. Attaching here too would consume the
-            // per-turn assistant index, leaving the follow-up
-            // record to land on the trailing tool message
-            // instead. Skip — let `usage.record` do the work.
+            // step.end. Prefer `usage.record` when present, but
+            // fall back to `step.end.usage` when the record is
+            // missing (older protocol versions or edge cases).
+            let model = event
+                .get("usage")
+                .and_then(|u| u.get("model"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| accum.current_model.clone());
+            let model_ref = model.as_deref();
+            if let Some(u) = event.get("usage") {
+                if let Some(usage) = parse_usage(u) {
+                    accum.attach_usage(usage, model_ref);
+                }
+            }
         }
         _ => {}
+    }
+}
+
+fn attach_kimi_call_metadata(metadata: &mut ToolMetadata, event: &Value) {
+    let description = event.get("description").and_then(|v| v.as_str());
+    let display = event.get("display");
+    let mut ids = Vec::new();
+    for (field, key) in [
+        ("uuid", "kimi_uuid"),
+        ("turnId", "turn_id"),
+        ("stepUuid", "step_uuid"),
+    ] {
+        if let Some(value) = event.get(field).and_then(value_to_id_string) {
+            ids.push((key, value));
+        }
+    }
+    if let Some(value) = event.get("step").and_then(value_to_id_string) {
+        ids.push(("step", value));
+    }
+    attach_call_metadata(metadata, description, display, ids);
+}
+
+fn value_to_id_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) if !value.is_empty() => Some(value.clone()),
+        Value::Number(value) => Some(value.to_string()),
+        _ => None,
     }
 }
 

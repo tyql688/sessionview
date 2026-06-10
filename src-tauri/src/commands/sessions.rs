@@ -435,7 +435,7 @@ fn tail_parser_for(provider: &Provider) -> Option<TailParseFn> {
         Provider::Codex => Some(codex_tail),
         Provider::Antigravity => Some(antigravity_tail),
         Provider::Kimi => Some(kimi_tail),
-        Provider::OpenCode | Provider::Cursor => None,
+        Provider::OpenCode | Provider::Cursor | Provider::Pi => None,
     }
 }
 
