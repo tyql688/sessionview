@@ -196,9 +196,8 @@ impl Indexer {
 
         let elapsed = start.elapsed();
         log::info!(
-            "Reindex complete: {} sessions indexed in {:.2}s",
-            total,
-            elapsed.as_secs_f64(),
+            "Reindex complete: {total} sessions indexed in {:.2}s",
+            elapsed.as_secs_f64()
         );
 
         Ok(total)

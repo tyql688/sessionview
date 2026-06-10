@@ -7,11 +7,11 @@ import {
   For,
   Show,
 } from "solid-js";
-import type { SessionRef, Provider } from "../lib/types";
-import { useI18n } from "../i18n/index";
-import { ContextMenu, type MenuItemDef } from "./ContextMenu";
-import { isMac } from "../lib/platform";
-import { moveTabToGroup } from "../stores/editorGroups";
+import type { SessionRef, Provider } from "../../lib/types";
+import { useI18n } from "../../i18n/index";
+import { ContextMenu, type MenuItemDef } from "../ContextMenu";
+import { isMac } from "../../lib/platform";
+import { moveTabToGroup } from "../../stores/editorGroups";
 
 function providerColor(provider: Provider): string {
   return `var(--${provider})`;

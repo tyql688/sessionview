@@ -9,7 +9,6 @@ pub mod provider;
 pub mod provider_utils;
 pub mod providers;
 pub mod services;
-mod terminal;
 pub mod tool_metadata;
 pub mod trash_state;
 mod watcher;
@@ -157,20 +156,12 @@ fn raise_file_descriptor_limit_for_macos_watchers() {
             limit.rlim_cur = fallback;
             if setrlimit(MACOS_RLIMIT_NOFILE, &limit) == 0 {
                 log::warn!(
-                    "raised macOS file descriptor limit to fallback {} after {} failed: {}",
-                    fallback,
-                    next,
-                    first_error
-                );
+                    "raised macOS file descriptor limit to fallback {fallback} after {next} failed: {first_error}");
                 return;
             }
         }
 
-        log::warn!(
-            "failed to raise macOS file descriptor limit to {}: {}",
-            next,
-            first_error
-        );
+        log::warn!("failed to raise macOS file descriptor limit to {next}: {first_error}");
     }
 }
 

@@ -21,14 +21,17 @@ npm run format:check          # Prettier check
 src/                       # Solid.js frontend (components, stores, i18n, lib, styles)
 src-tauri/src/
   providers/               # claude/, codex/, antigravity/, kimi/, opencode/, cursor/, cc_mirror.rs
-  commands/                # sessions.rs, settings.rs, trash.rs, terminal.rs
-  services/                # provider_snapshots.rs, session_lifecycle.rs, session_resolution.rs, source_sync.rs, image_cache.rs
+  commands/                # sessions.rs, settings.rs, trash.rs, terminal.rs, usage.rs, search.rs, file_access.rs
+  services/                # provider_snapshots, session_lifecycle, session_resolution, source_sync, image_cache, terminal (platform launchers), caches
   exporter/                # json.rs, markdown.rs, html.rs, templates.rs
-  db/                      # mod.rs, queries.rs, sync.rs, row_mapper.rs
-  indexer.rs  watcher.rs  models.rs  provider.rs  provider_utils.rs  trash_state.rs
-src/stores/               # editorGroups, settings, search, selection, providerSnapshots, updater, favorites, toast, theme
-src/lib/                  # tauri.ts, provider-watch.ts, formatters, tree-builders, icons, image-cache.ts
-src/styles/               # variables.css (theme tokens), layout.css, components.css, messages.css, usage.css
+  db/                      # mod.rs, sync.rs, row_mapper.rs, queries.rs + queries/{sessions,tree,favorites,search,usage}.rs
+  provider.rs + provider/  # SessionProvider machinery: traits.rs, plan.rs, state.rs, tokens.rs, catalog.rs, trash.rs
+  tool_metadata.rs + tool_metadata/  # names.rs, summary.rs, result.rs, build.rs
+  indexer.rs  watcher.rs  models.rs  provider_utils.rs  trash_state.rs  pricing.rs
+src/components/           # feature dirs (Editor/, SessionView/, Explorer/, UsagePanel/, MessageBubble/, TrashView/, Settings/) + small flat components, icons.tsx
+src/stores/               # editorGroups, settings, search, selection, providerSnapshots, updater, favorites, toast, theme, usageView
+src/lib/                  # tauri.ts (IPC), tools/, formatters, tree-builders, heatmap, diff, subagent, image-cache, provider-watch
+src/styles/               # variables.css (theme tokens) + per-feature files (layout, editor, explorer, session, tools, code, messages, modals, search, trash, settings, feedback, images, utilities, usage); cascade order lives in index.css
 ```
 
 ## Editor UI Architecture

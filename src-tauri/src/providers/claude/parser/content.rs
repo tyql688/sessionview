@@ -223,9 +223,7 @@ pub fn resolve_persisted_outputs(content: &str) -> String {
                         Ok(canonical) => canonical,
                         Err(error) => {
                             log::warn!(
-                                "failed to canonicalize Claude full-output path '{}': {}",
-                                path,
-                                error
+                                "failed to canonicalize Claude full-output path '{path}': {error}"
                             );
                             return None;
                         }
@@ -243,9 +241,8 @@ pub fn resolve_persisted_outputs(content: &str) -> String {
                         Ok(content) => Some(content),
                         Err(error) => {
                             log::warn!(
-                                "failed to read Claude full-output file '{}': {}",
-                                canonical.display(),
-                                error
+                                "failed to read Claude full-output file '{}': {error}",
+                                canonical.display()
                             );
                             None
                         }

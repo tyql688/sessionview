@@ -357,3 +357,165 @@ pub fn infer_restore_action(entry: &TrashMeta) -> RestoreAction {
         RestoreAction::Noop
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::Provider;
+    use crate::provider::{LoadedSession, ParsedSession};
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    struct DummyProvider;
+
+    impl SessionProvider for DummyProvider {
+        fn provider(&self) -> Provider {
+            Provider::Claude
+        }
+        fn watch_paths(&self) -> Vec<PathBuf> {
+            Vec::new()
+        }
+        fn scan_all(&self) -> Result<Vec<ParsedSession>, ProviderError> {
+            Ok(Vec::new())
+        }
+        fn load_messages(
+            &self,
+            _session_id: &str,
+            _source_path: &str,
+        ) -> Result<LoadedSession, ProviderError> {
+            Ok(LoadedSession::new(Vec::new()))
+        }
+        fn deletion_plan(&self, _meta: &SessionMeta, _children: &[SessionMeta]) -> DeletionPlan {
+            DeletionPlan {
+                file_action: FileAction::Skip,
+                child_plans: Vec::new(),
+                cleanup_dirs: Vec::new(),
+            }
+        }
+        fn purge_from_source(
+            &self,
+            _source_path: &str,
+            _session_id: &str,
+        ) -> Result<(), ProviderError> {
+            Err(ProviderError::Parse("boom".to_string()))
+        }
+    }
+
+    #[test]
+    fn jsonl_subagent_related_paths_returns_parent_and_children() {
+        let dir = TempDir::new().unwrap();
+        let project = dir.path().join("project");
+        let session_dir = project.join("parent");
+        let subagents_dir = session_dir.join("subagents");
+        std::fs::create_dir_all(&subagents_dir).unwrap();
+        let parent = project.join("parent.jsonl");
+        let child_a = subagents_dir.join("agent-a.jsonl");
+        let child_b = subagents_dir.join("agent-b.jsonl");
+        std::fs::write(&parent, "").unwrap();
+        std::fs::write(&child_b, "").unwrap();
+        std::fs::write(&child_a, "").unwrap();
+
+        assert_eq!(
+            jsonl_subagent_related_paths(&child_a),
+            vec![parent.clone(), child_a.clone(), child_b.clone()]
+        );
+        assert_eq!(
+            jsonl_subagent_related_paths(&parent),
+            vec![parent.clone(), child_a.clone(), child_b.clone()]
+        );
+
+        std::fs::remove_file(&child_a).unwrap();
+        assert_eq!(
+            jsonl_subagent_related_paths(&child_a),
+            vec![parent, child_b]
+        );
+    }
+
+    #[test]
+    fn test_default_restore_action_noop_for_empty_trash_file_on_dedicated_source() {
+        let provider = DummyProvider;
+        let entry = TrashMeta {
+            id: "s1".to_string(),
+            provider: "claude".to_string(),
+            title: "t".to_string(),
+            original_path: "/tmp/session.jsonl".to_string(),
+            trashed_at: 0,
+            trash_file: String::new(),
+            project_name: String::new(),
+            variant_name: None,
+            parent_id: None,
+        };
+        assert_eq!(provider.restore_action(&entry), RestoreAction::Noop);
+    }
+
+    #[test]
+    fn test_default_restore_action_shared_for_db_source() {
+        let provider = DummyProvider;
+        let entry = TrashMeta {
+            id: "s1".to_string(),
+            provider: "opencode".to_string(),
+            title: "t".to_string(),
+            original_path: "/tmp/store.db".to_string(),
+            trashed_at: 0,
+            trash_file: String::new(),
+            project_name: String::new(),
+            variant_name: None,
+            parent_id: None,
+        };
+        assert_eq!(
+            provider.restore_action(&entry),
+            RestoreAction::UndoSharedDeletion
+        );
+    }
+
+    #[test]
+    fn test_execute_purge_propagates_shared_purge_errors() {
+        let provider = DummyProvider;
+        let plan = DeletionPlan {
+            file_action: FileAction::Shared,
+            child_plans: Vec::new(),
+            cleanup_dirs: Vec::new(),
+        };
+        let meta = SessionMeta {
+            id: "s1".to_string(),
+            provider: Provider::Claude,
+            title: "t".to_string(),
+            project_path: String::new(),
+            project_name: String::new(),
+            created_at: 0,
+            updated_at: 0,
+            message_count: 0,
+            file_size_bytes: 0,
+            source_path: "/tmp/store.db".to_string(),
+            is_sidechain: false,
+            variant_name: None,
+            model: None,
+            cc_version: None,
+            git_branch: None,
+            parent_id: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+        };
+
+        let err = execute_purge(&plan, &provider, &meta).expect_err("should propagate purge error");
+        assert!(err.contains("boom"));
+    }
+
+    #[test]
+    fn test_infer_restore_action_moveback_when_trash_file_exists() {
+        let entry = TrashMeta {
+            id: "s1".to_string(),
+            provider: "legacy-provider".to_string(),
+            title: "t".to_string(),
+            original_path: "/tmp/agent-transcripts/s1/s1.jsonl".to_string(),
+            trashed_at: 0,
+            trash_file: "1710000000__s1.jsonl".to_string(),
+            project_name: String::new(),
+            variant_name: None,
+            parent_id: None,
+        };
+        assert_eq!(infer_restore_action(&entry), RestoreAction::MoveBack);
+    }
+}

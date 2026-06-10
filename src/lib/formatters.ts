@@ -51,18 +51,23 @@ export function formatAbsoluteTime(epoch: number): string {
   return new Date(epoch * 1000).toLocaleString();
 }
 
+/** Local-calendar date as `YYYY-MM-DD`. */
+export function toLocalISODate(date: Date = new Date()): string {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 export function formatLocalDateTime(value: string | null): string {
   if (!value) return "\u2014";
   const parsed = Date.parse(value);
   if (Number.isNaN(parsed)) return value;
   const date = new Date(parsed);
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
   const hh = String(date.getHours()).padStart(2, "0");
   const mi = String(date.getMinutes()).padStart(2, "0");
   const ss = String(date.getSeconds()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+  return `${toLocalISODate(date)} ${hh}:${mi}:${ss}`;
 }
 
 /** Compact token/number formatter: `1.2T` / `3.4B` / `1.5M` / `2.5K` / `42`. */

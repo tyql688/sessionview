@@ -3,6 +3,7 @@ import type { Accessor } from "solid-js";
 import { useI18n } from "../../i18n/index";
 import type { MaintenanceJob, ProviderSnapshot } from "../../lib/types";
 import type { CustomDateRange } from "../../stores/usageView";
+import { toLocalISODate } from "../../lib/formatters";
 
 export interface ProviderChipInfo {
   color: string;
@@ -52,13 +53,6 @@ export function Toolbar(props: ToolbarProps) {
     { days: null, label: () => t("usage.rangeAll") },
   ];
 
-  const toIsoDate = (d: Date): string => {
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-  };
-
   // Native date inputs commit half-typed years like 0001-05-31; anything
   // before this floor is treated as a typo and the field is restored.
   const MIN_USAGE_DATE = "2000-01-01";
@@ -69,7 +63,10 @@ export function Toolbar(props: ToolbarProps) {
     const end = new Date();
     const start = new Date(end);
     start.setDate(start.getDate() - 6);
-    props.onCustomRangeChange({ start: toIsoDate(start), end: toIsoDate(end) });
+    props.onCustomRangeChange({
+      start: toLocalISODate(start),
+      end: toLocalISODate(end),
+    });
   };
 
   const updateCustomRange = (

@@ -4,7 +4,6 @@ import {
   addDays,
   buildHeatmapGrid,
   dateRangeForYear,
-  todayISO,
   weekday,
   type HeatmapCell,
   type HeatmapGrid,
@@ -30,10 +29,6 @@ function cellsByDate(grid: HeatmapGrid): Map<string, HeatmapCell> {
 }
 
 describe("date helpers", () => {
-  it("formats local today as YYYY-MM-DD", () => {
-    expect(todayISO(new Date(2026, 3, 9))).toBe("2026-04-09");
-  });
-
   it("adds and subtracts days across month/year boundaries", () => {
     expect(addDays("2026-01-01", -1)).toBe("2025-12-31");
     expect(addDays("2026-12-31", 1)).toBe("2027-01-01");

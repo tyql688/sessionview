@@ -115,7 +115,7 @@ pub fn start_watcher(
         match watcher.watch(path, RecursiveMode::Recursive) {
             Ok(()) => watched_count += 1,
             Err(e) => {
-                log::warn!("failed to watch {}: {}", path.display(), e);
+                log::warn!("failed to watch {}: {e}", path.display());
             }
         }
     }
@@ -128,7 +128,7 @@ pub fn start_watcher(
         match watcher.watch(path, RecursiveMode::NonRecursive) {
             Ok(()) => shallow_watched_count += 1,
             Err(e) => {
-                log::warn!("failed to watch (shallow) {}: {}", path.display(), e);
+                log::warn!("failed to watch (shallow) {}: {e}", path.display());
             }
         }
     }
@@ -138,11 +138,9 @@ pub fn start_watcher(
     }
 
     log::info!(
-        "Watching {}/{} directories recursively, {}/{} shallow",
-        watched_count,
+        "Watching {watched_count}/{} directories recursively, {shallow_watched_count}/{} shallow",
         watch_paths.len(),
-        shallow_watched_count,
-        shallow_watch_paths.len(),
+        shallow_watch_paths.len()
     );
     Ok(watcher)
 }

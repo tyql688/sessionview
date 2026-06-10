@@ -4,7 +4,7 @@ use tauri::State;
 use crate::db::Database;
 use crate::error::{CommandError, CommandResult};
 use crate::services::load_session_meta;
-use crate::terminal;
+use crate::services::terminal;
 
 use super::AppState;
 

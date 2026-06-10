@@ -1,6 +1,6 @@
 import { createSignal, createMemo, Show, createUniqueId } from "solid-js";
 import type { Message, Provider } from "../../lib/types";
-import { ProviderIcon, UserIcon } from "../../lib/icons";
+import { ProviderIcon, UserIcon } from "../icons";
 import { useI18n } from "../../i18n/index";
 import { parseTimestamp } from "../../lib/formatters";
 import {
@@ -14,7 +14,7 @@ import { CopyMessageButton, TokenUsageDisplay } from "./TokenUsage";
 import { ToolMessage } from "./ToolMessage";
 
 // Re-export for backward compatibility
-export { ProviderIcon } from "../../lib/icons";
+export { ProviderIcon } from "../icons";
 export { formatMcpLabel } from "./ToolMessage";
 
 const SYSTEM_SUBTYPE_CONFIG: Record<

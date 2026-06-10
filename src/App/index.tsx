@@ -10,7 +10,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ActivityBar } from "../components/ActivityBar";
 import { Explorer } from "../components/Explorer";
-import { EditorGroupsContainer } from "../components/EditorGroupsContainer";
+import { EditorGroupsContainer } from "../components/Editor/EditorGroupsContainer";
 import { StatusBar } from "../components/StatusBar";
 import { SearchOverlay } from "../components/SearchOverlay";
 import { SettingsPanel } from "../components/SettingsPanel";

@@ -1,5 +1,5 @@
 import type { JSX } from "solid-js";
-import type { Provider } from "./types";
+import type { Provider } from "../lib/types";
 import { getProviderColor } from "../stores/providerSnapshots";
 
 const PROVIDER_ICONS: Record<Provider, () => JSX.Element> = {

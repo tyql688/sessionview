@@ -7,6 +7,7 @@ import {
   formatFileSize,
   formatTimestamp,
   shortenHomePath,
+  toLocalISODate,
 } from "./formatters";
 import { locale, setLocale } from "../i18n/index";
 
@@ -26,6 +27,15 @@ describe("parseTimestamp", () => {
   });
   it("returns null for invalid string", () => {
     expect(parseTimestamp("not-a-date")).toBeNull();
+  });
+});
+
+describe("toLocalISODate", () => {
+  it("formats a local-calendar date as YYYY-MM-DD", () => {
+    expect(toLocalISODate(new Date(2026, 3, 9))).toBe("2026-04-09");
+  });
+  it("zero-pads single-digit month and day", () => {
+    expect(toLocalISODate(new Date(2026, 0, 1))).toBe("2026-01-01");
   });
 });
 

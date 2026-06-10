@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Context;
+use serde::Serialize;
 use tauri::State;
 
 use super::AppState;
@@ -111,7 +112,7 @@ pub async fn get_today_cost(state: State<'_, AppState>) -> CommandResult<f64> {
     Ok(cost)
 }
 
-#[derive(serde::Serialize)]
+#[derive(Serialize)]
 pub struct TodayTokens {
     pub input: u64,
     pub output: u64,
@@ -385,7 +386,10 @@ fn build_project_costs(project_model_rows: Vec<UsageProjectModelDetailRow>) -> V
                 .remove(&key)
                 .map(|sessions| sessions.len() as u64)
                 .unwrap_or(0);
-            let breakdown = by_project.remove(&key).unwrap_or_default();
+            let breakdown = by_project.remove(&key).unwrap_or_else(|| {
+                log::warn!("missing per-provider breakdown for project_path={key}");
+                Vec::new()
+            });
             let mut providers: Vec<String> = breakdown.iter().map(|p| p.provider.clone()).collect();
             providers.sort();
             cost_row.providers = providers;

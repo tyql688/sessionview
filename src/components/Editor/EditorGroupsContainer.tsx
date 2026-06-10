@@ -10,21 +10,21 @@ import {
   onMount,
 } from "solid-js";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { SessionRef, TreeNode } from "../lib/types";
+import type { SessionRef, TreeNode } from "../../lib/types";
 import {
   getChildSessionCounts,
   invokeWithFallback,
   listRecentSessions,
-} from "../lib/tauri";
-import { isPathBlocked } from "../stores/settings";
-import { errorMessage } from "../lib/errors";
+} from "../../lib/tauri";
+import { isPathBlocked } from "../../stores/settings";
+import { errorMessage } from "../../lib/errors";
 import {
   groups,
   activeGroupId,
   focusGroup,
   setGroupFlexBasis,
   createGroupFromDrop,
-} from "../stores/editorGroups";
+} from "../../stores/editorGroups";
 import { EditorArea } from "./EditorArea";
 import { SplitHandle } from "./SplitHandle";
 

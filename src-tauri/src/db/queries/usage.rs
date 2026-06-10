@@ -476,3 +476,247 @@ fn build_usage_where(
     let clause = format!(" WHERE {}", conditions.join(" AND "));
     (clause, params)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::sync::TokenStatRow;
+    use crate::models::{Provider, SessionMeta};
+    use crate::provider::ParsedSession;
+    use tempfile::TempDir;
+
+    fn sample_meta(session_id: &str) -> SessionMeta {
+        SessionMeta {
+            id: session_id.to_string(),
+            provider: Provider::Claude,
+            title: "Test".into(),
+            project_path: "/tmp/project".into(),
+            project_name: "project".into(),
+            created_at: 1_775_635_200,
+            updated_at: 1_775_635_200,
+            message_count: 1,
+            file_size_bytes: 0,
+            source_path: format!("/tmp/{session_id}.jsonl"),
+            is_sidechain: false,
+            variant_name: None,
+            model: Some("claude-opus-4-6".into()),
+            cc_version: None,
+            git_branch: None,
+            parent_id: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+        }
+    }
+
+    fn parsed_session(meta: SessionMeta, content_text: String) -> ParsedSession {
+        ParsedSession {
+            meta,
+            messages: Vec::new(),
+            content_text,
+            parse_warning_count: 0,
+            child_session_ids: Vec::new(),
+            usage_events: Vec::new(),
+            source_mtime: 0,
+        }
+    }
+
+    #[test]
+    fn activity_daily_groups_by_date_with_distinct_sessions() {
+        let dir = TempDir::new().unwrap();
+        let db = Database::open(dir.path()).unwrap();
+        let meta_a = sample_meta("session-a");
+        let meta_b = sample_meta("session-b");
+        db.sync_provider_snapshot(
+            &Provider::Claude,
+            &[
+                parsed_session(meta_a.clone(), String::new()),
+                parsed_session(meta_b.clone(), String::new()),
+            ],
+            true,
+            &[],
+        )
+        .unwrap();
+
+        // Two sessions both active on 2026-04-09 (session-a across two models),
+        // one trailing day on 2026-04-10, and a 2025 day to exercise the year list.
+        db.replace_token_stats(
+            &meta_a.id,
+            &[
+                TokenStatRow {
+                    date: "2026-04-09".into(),
+                    model: "claude-opus-4-6".into(),
+                    turn_count: 3,
+                    input_tokens: 100,
+                    output_tokens: 50,
+                    cache_read_tokens: 20,
+                    cache_write_tokens: 10,
+                    cost_usd: 0.10,
+                },
+                TokenStatRow {
+                    date: "2026-04-09".into(),
+                    model: "claude-sonnet-4-6".into(),
+                    turn_count: 2,
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                    cost_usd: 0.02,
+                },
+                TokenStatRow {
+                    date: "2025-12-31".into(),
+                    model: "claude-opus-4-6".into(),
+                    turn_count: 1,
+                    input_tokens: 1,
+                    output_tokens: 1,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                    cost_usd: 0.001,
+                },
+            ],
+        )
+        .unwrap();
+        db.replace_token_stats(
+            &meta_b.id,
+            &[TokenStatRow {
+                date: "2026-04-09".into(),
+                model: "claude-opus-4-6".into(),
+                turn_count: 4,
+                input_tokens: 200,
+                output_tokens: 100,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                cost_usd: 0.30,
+            }],
+        )
+        .unwrap();
+
+        let providers = vec!["claude".to_string()];
+        let bounds = UsageDateBounds {
+            start: Some("2026-01-01"),
+            end: Some("2026-12-31"),
+        };
+        let days = db.activity_daily(&providers, bounds).unwrap();
+        assert_eq!(days.len(), 1, "only 2026-04-09 falls inside the bounds");
+        let (date, sessions, turns, tokens, cost) = &days[0];
+        assert_eq!(date, "2026-04-09");
+        assert_eq!(*sessions, 2, "session-a and session-b are distinct");
+        assert_eq!(*turns, 3 + 2 + 4);
+        assert_eq!(*tokens, 100 + 50 + 20 + 10 + 10 + 5 + 200 + 100);
+        assert!((*cost - 0.42).abs() < 1e-9);
+
+        // available_years ignores the date window and is descending.
+        let years = db.activity_years(&providers).unwrap();
+        assert_eq!(years, vec![2026, 2025]);
+
+        // An unselected provider yields no data and no years.
+        assert!(db
+            .activity_daily(&["codex".to_string()], bounds)
+            .unwrap()
+            .is_empty());
+        assert!(db
+            .activity_years(&["codex".to_string()])
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn usage_session_detail_excludes_out_of_range_dates() {
+        let dir = TempDir::new().unwrap();
+        let db = Database::open(dir.path()).unwrap();
+        let meta = sample_meta("session-range");
+        db.sync_provider_snapshot(
+            &Provider::Claude,
+            &[parsed_session(meta.clone(), String::new())],
+            true,
+            &[],
+        )
+        .unwrap();
+        db.replace_token_stats(
+            &meta.id,
+            &[
+                // Out of range (before the 2026-05-10 cutoff): must NOT be summed.
+                TokenStatRow {
+                    date: "2026-05-01".into(),
+                    model: "m".into(),
+                    turn_count: 1,
+                    input_tokens: 1000,
+                    output_tokens: 0,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                    cost_usd: 1.0,
+                },
+                // In range: the only row that should count.
+                TokenStatRow {
+                    date: "2026-05-20".into(),
+                    model: "m".into(),
+                    turn_count: 1,
+                    input_tokens: 10,
+                    output_tokens: 0,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                    cost_usd: 0.01,
+                },
+            ],
+        )
+        .unwrap();
+
+        let rows = db
+            .usage_session_model_detail(
+                &[Provider::Claude.key().to_string()],
+                UsageDateBounds {
+                    start: Some("2026-05-10"),
+                    end: None,
+                },
+                50,
+            )
+            .unwrap();
+
+        let total_input: u64 = rows
+            .iter()
+            .filter(|r| r.session_id == "session-range")
+            .map(|r| r.input_tokens)
+            .sum();
+        assert_eq!(
+            total_input, 10,
+            "per-session detail must exclude rows dated before the cutoff"
+        );
+
+        // Custom range [2026-04-25, 2026-05-10]: the 05-20 row falls after the
+        // inclusive end bound and must be excluded everywhere the bounds apply.
+        let rows = db
+            .usage_session_model_detail(
+                &[Provider::Claude.key().to_string()],
+                UsageDateBounds {
+                    start: Some("2026-04-25"),
+                    end: Some("2026-05-10"),
+                },
+                50,
+            )
+            .unwrap();
+        let total_input: u64 = rows
+            .iter()
+            .filter(|r| r.session_id == "session-range")
+            .map(|r| r.input_tokens)
+            .sum();
+        assert_eq!(
+            total_input, 1000,
+            "per-session detail must exclude rows dated after the end bound"
+        );
+
+        let (_, total_in, _, _, _) = db
+            .usage_totals(
+                &[Provider::Claude.key().to_string()],
+                UsageDateBounds {
+                    start: Some("2026-05-01"),
+                    end: Some("2026-05-01"),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            total_in, 1000,
+            "single-day bounds must include only that day's rows (inclusive end)"
+        );
+    }
+}

@@ -1,0 +1,391 @@
+/* Editor Area */
+.editor-area {
+  flex: 0 0 auto; /* width controlled by inline flex-basis from editorGroups store */
+  min-width: 0; /* allow shrinking below content size */
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-editor);
+  overflow: hidden;
+}
+
+.editor-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  min-height: 0;
+}
+
+/* Editor Empty State */
+.editor-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-tertiary);
+}
+
+.editor-empty-icon {
+  opacity: 0.5;
+  color: var(--text-secondary);
+}
+
+.editor-empty-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.editor-empty-recent {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 520px;
+  max-width: 90%;
+  margin-top: 8px;
+}
+
+.editor-empty-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 6px 4px;
+}
+
+.editor-empty-session {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: 6px;
+  text-align: left;
+  width: 100%;
+}
+
+.editor-empty-session:hover {
+  background: var(--bg-tab-hover);
+  color: var(--text-primary);
+}
+.editor-empty-session-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+}
+.editor-empty-session-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+.editor-empty-session-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+.editor-empty-session-path {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.editor-empty-session-model {
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+.editor-empty-session-agents {
+  opacity: 0.8;
+  flex-shrink: 0;
+}
+.editor-empty-session-time {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.editor-empty-shortcuts {
+  display: flex;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.editor-shortcut-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.editor-shortcut-hint kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--bg-tab-hover);
+  border: 0.5px solid var(--border-subtle);
+  border-radius: 3px;
+  color: var(--text-secondary);
+}
+
+/* Split Handle */
+.split-handle {
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 5;
+  transition: background 0.15s;
+}
+
+.split-handle:hover,
+.split-handle.active {
+  background: var(--accent);
+  opacity: 0.5;
+}
+
+/* Editor Groups Container */
+.editor-groups-container {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Drop zone for creating new group on right edge */
+.editor-groups-drop-right {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 40px;
+  height: 100%;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.editor-groups-drop-right.active {
+  pointer-events: auto;
+  background: rgba(var(--accent-rgb, 0, 122, 255), 0.12);
+  border-left: 2px solid var(--accent);
+}
+
+/* Focus indicator on active group tab bar */
+.editor-area.focused .tab-bar {
+  border-bottom: 1.5px solid var(--accent);
+}
+
+.editor-area:not(.focused) {
+  opacity: 0.85;
+}
+
+/* Tab Bar */
+.tab-bar {
+  display: flex;
+  align-items: flex-end;
+  height: 36px;
+  background: var(--bg-sidebar);
+  border-bottom: 0.5px solid var(--border);
+  flex-shrink: 0;
+  padding: 0;
+  position: relative;
+}
+
+.tab-bar-scroll {
+  display: flex;
+  align-items: flex-end;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 8px;
+  scrollbar-width: none;
+}
+
+.tab-bar-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px;
+  height: 35px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border: 0.5px solid transparent;
+  border-bottom: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.1s;
+  background: transparent;
+  border-radius: 8px 8px 0 0;
+  flex-shrink: 0;
+  min-width: 120px;
+  max-width: 200px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tab:hover {
+  background: var(--bg-tab-hover);
+}
+
+.tab.active {
+  background: var(--bg-tab-active);
+  color: var(--text-primary);
+  font-weight: 500;
+  border-color: var(--border);
+  border-bottom: 0.5px solid var(--bg-editor);
+  z-index: 1;
+}
+
+.tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.tab-close:hover {
+  background: var(--bg-tab-hover);
+  color: var(--text-primary);
+}
+
+/* Tab Bar extras */
+.tab-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tab-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-close {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.tab .tab-close {
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.tab:hover .tab-close,
+.tab.active .tab-close,
+.tab .tab-close.visible {
+  opacity: 1;
+}
+
+/* Preview tab — italic title */
+.tab.preview .tab-title {
+  font-style: italic;
+}
+
+/* Tab overflow chevron */
+.tab-overflow-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 36px;
+  border: none;
+  background: var(--bg-sidebar);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  flex-shrink: 0;
+  border-bottom: 0.5px solid var(--border);
+  border-left: 0.5px solid var(--border);
+}
+
+.tab-overflow-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-tab-hover);
+}
+
+/* Tab overflow dropdown */
+.tab-overflow-menu {
+  position: absolute;
+  top: 36px;
+  right: 0;
+  z-index: 100;
+  min-width: 200px;
+  max-width: 320px;
+  max-height: 400px;
+  overflow-y: auto;
+  background: var(--context-menu-bg);
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 4px;
+}
+
+.tab-overflow-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  text-align: left;
+}
+
+.tab-overflow-item:hover {
+  background: var(--bg-tab-hover);
+  color: var(--text-primary);
+}
+
+.tab-overflow-item.active {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.tab-overflow-item.preview .tab-overflow-title {
+  font-style: italic;
+}
+
+.tab-overflow-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

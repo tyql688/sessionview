@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
+use serde::Serialize;
 use tauri::State;
 
 use crate::db::Database;
@@ -122,7 +123,7 @@ fn canceled_error() -> anyhow::Error {
 /// Window of messages from a cached parsed session. `total` reflects the
 /// full message count so the frontend can compute scroll metrics without
 /// loading every message.
-#[derive(serde::Serialize, Clone)]
+#[derive(Serialize, Clone)]
 pub struct SessionMessagesWindow {
     pub total: usize,
     pub start: usize,

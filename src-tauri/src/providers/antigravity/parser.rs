@@ -686,10 +686,9 @@ fn scan_antigravity_lines<R: BufRead>(
             Ok(step) => accum.process_step(&step, conversation_id),
             Err(e) => {
                 log::warn!(
-                    "Malformed step at line {} in {}: {}",
+                    "Malformed step at line {} in {}: {e}",
                     line_idx + 1,
-                    path.display(),
-                    e
+                    path.display()
                 );
                 accum.parse_warning_count += 1;
             }

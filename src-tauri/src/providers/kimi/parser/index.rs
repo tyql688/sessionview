@@ -34,9 +34,8 @@ impl SessionIndex {
                 // doesn't clutter normal operation.
                 if error.kind() != std::io::ErrorKind::NotFound {
                     log::warn!(
-                        "failed to read Kimi session index '{}': {}",
-                        path.display(),
-                        error
+                        "failed to read Kimi session index '{}': {error}",
+                        path.display()
                     );
                 }
                 return index;
@@ -47,10 +46,9 @@ impl SessionIndex {
                 Ok(l) => l,
                 Err(error) => {
                     log::warn!(
-                        "failed to read Kimi session_index.jsonl line {} from '{}': {}",
+                        "failed to read Kimi session_index.jsonl line {} from '{}': {error}",
                         line_no + 1,
-                        path.display(),
-                        error
+                        path.display()
                     );
                     continue;
                 }
@@ -62,10 +60,9 @@ impl SessionIndex {
                 Ok(v) => v,
                 Err(error) => {
                     log::warn!(
-                        "skipping malformed Kimi session_index.jsonl line {} in '{}': {}",
+                        "skipping malformed Kimi session_index.jsonl line {} in '{}': {error}",
                         line_no + 1,
-                        path.display(),
-                        error
+                        path.display()
                     );
                     continue;
                 }
@@ -162,9 +159,8 @@ impl StateJson {
             Err(error) => {
                 if error.kind() != std::io::ErrorKind::NotFound {
                     log::warn!(
-                        "failed to read Kimi state.json '{}': {}",
-                        path.display(),
-                        error
+                        "failed to read Kimi state.json '{}': {error}",
+                        path.display()
                     );
                 }
                 return Self::default();
@@ -174,9 +170,8 @@ impl StateJson {
             Ok(v) => v,
             Err(error) => {
                 log::warn!(
-                    "failed to parse Kimi state.json '{}': {}",
-                    path.display(),
-                    error
+                    "failed to parse Kimi state.json '{}': {error}",
+                    path.display()
                 );
                 return Self::default();
             }

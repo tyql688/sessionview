@@ -1,0 +1,191 @@
+/* Settings Panel */
+.settings-panel {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  background: var(--bg-editor);
+}
+
+.settings-sidebar {
+  width: 180px;
+  background: var(--bg-explorer);
+  border-right: 0.5px solid var(--border);
+  padding: 16px 0;
+}
+
+.settings-nav-item {
+  display: block;
+  width: 100%;
+  padding: 8px 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.settings-nav-item:hover {
+  background: var(--bg-tab-hover);
+}
+.settings-nav-item.active {
+  color: var(--text-primary);
+  background: var(--accent-light);
+  font-weight: 500;
+}
+
+.settings-content {
+  flex: 1;
+  padding: 24px 32px;
+  overflow-y: auto;
+}
+
+.settings-section {
+  margin-bottom: 32px;
+}
+.settings-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 0.5px solid var(--border-subtle);
+}
+
+.settings-label {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.settings-desc {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.settings-open-folder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: 3px;
+  opacity: 0.6;
+  transition:
+    opacity 0.1s,
+    color 0.1s;
+  flex-shrink: 0;
+}
+
+.settings-open-folder:hover {
+  opacity: 1;
+  color: var(--accent);
+}
+
+.settings-select {
+  background: var(--bg-sidebar);
+  border: 0.5px solid var(--border);
+  border-radius: 5px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-primary);
+  font-family: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
+  min-width: 120px;
+}
+
+.settings-select option {
+  background: var(--bg-editor);
+  color: var(--text-primary);
+}
+
+.settings-btn {
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  border: 0.5px solid var(--border);
+  background: var(--bg-sidebar);
+  color: var(--text-primary);
+  transition: all 0.15s;
+}
+
+.settings-btn:hover {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.settings-btn-danger {
+  color: var(--danger-strong);
+  border-color: var(--danger-strong-border);
+}
+.settings-btn-danger:hover {
+  background: rgba(229, 62, 62, 0.08);
+}
+
+.settings-stat {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-help-text {
+  margin-top: 10px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Settings: Keyboard Shortcuts */
+.settings-shortcuts-group {
+  margin-bottom: 20px;
+}
+.settings-shortcuts-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+.settings-shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 13px;
+  color: var(--text-primary);
+  border-bottom: 0.5px solid var(--border-subtle);
+}
+.settings-shortcut-row:last-child {
+  border-bottom: none;
+}
+.settings-shortcut-row kbd {
+  font-family: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  background: var(--bg-tab-hover);
+  border: 0.5px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  min-width: 28px;
+  text-align: center;
+}

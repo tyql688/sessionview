@@ -2,10 +2,10 @@ import { For, Show } from "solid-js";
 import type { TreeNode } from "../lib/types";
 import { useI18n } from "../i18n/index";
 import { isSelected, toggleSelected } from "../stores/selection";
-import { ProviderDot } from "../lib/icons";
+import { ProviderDot } from "./icons";
 
 // Re-exports for backward compatibility
-export { ProviderDot } from "../lib/icons";
+export { ProviderDot } from "./icons";
 export { collectSessionIds, collectSessionNodes } from "../lib/tree-utils";
 
 export function ChevronIcon(props: { expanded: boolean }) {

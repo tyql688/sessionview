@@ -10,7 +10,7 @@ import {
   setPendingSessionSearch,
 } from "../stores/search";
 import { useI18n } from "../i18n/index";
-import { ProviderIcon } from "../lib/icons";
+import { ProviderIcon } from "./icons";
 import { createSignal } from "solid-js";
 
 function sanitizeSnippet(html: string): string {

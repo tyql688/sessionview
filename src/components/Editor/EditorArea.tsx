@@ -7,14 +7,14 @@ import {
   createEffect,
   on,
 } from "solid-js";
-import type { SessionMeta, SessionRef } from "../lib/types";
-import { useI18n } from "../i18n/index";
-import { groups } from "../stores/editorGroups";
-import { formatTimestamp } from "../lib/formatters";
+import type { SessionMeta, SessionRef } from "../../lib/types";
+import { useI18n } from "../../i18n/index";
+import { groups } from "../../stores/editorGroups";
+import { formatTimestamp } from "../../lib/formatters";
 import { TabBar } from "./TabBar";
-import { SessionView } from "./SessionView";
-import { ProviderIcon } from "../lib/icons";
-import { isMac } from "../lib/platform";
+import { SessionView } from "../SessionView";
+import { ProviderIcon } from "../icons";
+import { isMac } from "../../lib/platform";
 
 export function EditorArea(props: {
   groupId: string;

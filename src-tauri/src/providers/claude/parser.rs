@@ -136,8 +136,7 @@ fn scan_jsonl_lines<R: BufRead>(reader: R, path: &Path, accum: &mut ScanAccum) -
         line_index = line_index.wrapping_add(1);
         if line_index.is_multiple_of(1024) && crate::services::load_cancel::is_canceled() {
             log::debug!(
-                "Claude parse canceled at line {} of '{}'",
-                line_index,
+                "Claude parse canceled at line {line_index} of '{}'",
                 path.display()
             );
             return ScanOutcome::Canceled;
@@ -147,9 +146,8 @@ fn scan_jsonl_lines<R: BufRead>(reader: R, path: &Path, accum: &mut ScanAccum) -
             Ok(l) => l,
             Err(error) => {
                 log::warn!(
-                    "failed to read Claude session line from '{}': {}",
-                    path.display(),
-                    error
+                    "failed to read Claude session line from '{}': {error}",
+                    path.display()
                 );
                 continue;
             }
@@ -161,7 +159,7 @@ fn scan_jsonl_lines<R: BufRead>(reader: R, path: &Path, accum: &mut ScanAccum) -
         let entry: Value = match serde_json::from_str(&line) {
             Ok(e) => e,
             Err(e) => {
-                log::warn!("skipping malformed JSONL in '{}': {}", path.display(), e);
+                log::warn!("skipping malformed JSONL in '{}': {e}", path.display());
                 accum.state.parse_warning_count = accum.state.parse_warning_count.saturating_add(1);
                 continue;
             }
@@ -316,9 +314,8 @@ pub fn parse_session_file(path: &PathBuf) -> Option<ParsedSession> {
         Ok(file) => file,
         Err(error) => {
             log::warn!(
-                "failed to open Claude session '{}': {}",
-                path.display(),
-                error
+                "failed to open Claude session '{}': {error}",
+                path.display()
             );
             return None;
         }
@@ -327,9 +324,8 @@ pub fn parse_session_file(path: &PathBuf) -> Option<ParsedSession> {
         Ok(metadata) => metadata,
         Err(error) => {
             log::warn!(
-                "failed to read Claude session metadata '{}': {}",
-                path.display(),
-                error
+                "failed to read Claude session metadata '{}': {error}",
+                path.display()
             );
             return None;
         }
@@ -348,9 +344,8 @@ pub fn parse_session_file(path: &PathBuf) -> Option<ParsedSession> {
             Ok(content) => content,
             Err(error) => {
                 log::warn!(
-                    "failed to read Claude subagent meta '{}': {}",
-                    meta_path.display(),
-                    error
+                    "failed to read Claude subagent meta '{}': {error}",
+                    meta_path.display()
                 );
                 return None;
             }
@@ -359,9 +354,8 @@ pub fn parse_session_file(path: &PathBuf) -> Option<ParsedSession> {
             Ok(json) => json,
             Err(error) => {
                 log::warn!(
-                    "failed to parse Claude subagent meta '{}': {}",
-                    meta_path.display(),
-                    error
+                    "failed to parse Claude subagent meta '{}': {error}",
+                    meta_path.display()
                 );
                 return None;
             }
@@ -421,9 +415,8 @@ pub fn parse_session_file(path: &PathBuf) -> Option<ParsedSession> {
                     Ok(file) => file,
                     Err(error) => {
                         log::warn!(
-                            "failed to open Claude parent transcript '{}': {}",
-                            parent_jsonl.display(),
-                            error
+                            "failed to open Claude parent transcript '{}': {error}",
+                            parent_jsonl.display()
                         );
                         return None;
                     }
@@ -435,9 +428,8 @@ pub fn parse_session_file(path: &PathBuf) -> Option<ParsedSession> {
                         Ok(line) => line,
                         Err(error) => {
                             log::warn!(
-                                "failed to read Claude parent transcript line from '{}': {}",
-                                parent_jsonl.display(),
-                                error
+                                "failed to read Claude parent transcript line from '{}': {error}",
+                                parent_jsonl.display()
                             );
                             continue;
                         }
@@ -452,9 +444,8 @@ pub fn parse_session_file(path: &PathBuf) -> Option<ParsedSession> {
                         }
                         Err(error) => {
                             log::warn!(
-                                "failed to parse Claude parent transcript line in '{}': {}",
-                                parent_jsonl.display(),
-                                error
+                                "failed to parse Claude parent transcript line in '{}': {error}",
+                                parent_jsonl.display()
                             );
                         }
                     }

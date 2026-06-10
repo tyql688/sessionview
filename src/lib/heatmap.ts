@@ -42,14 +42,6 @@ export interface HeatmapGrid {
 
 // --- ISO date helpers (UTC-based to avoid DST / timezone drift) -------------
 
-/** Local-calendar today as `YYYY-MM-DD`. */
-export function todayISO(now: Date = new Date()): string {
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-
 function isoToUTC(iso: string): Date {
   const [y, m, d] = iso.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d));

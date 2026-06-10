@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context};
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_opener::OpenerExt;
 
@@ -14,7 +15,7 @@ use crate::services::ProviderSnapshotService;
 use super::sessions::load_detail;
 use super::AppState;
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, Serialize)]
 struct MaintenanceEventPayload {
     job: &'static str,
     phase: &'static str,
