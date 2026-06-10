@@ -484,11 +484,11 @@
 }
 
 .usage-trend-up {
-  color: var(--color-success, #22c55e);
+  color: var(--success);
 }
 
 .usage-trend-down {
-  color: var(--color-danger, #ef4444);
+  color: var(--danger);
 }
 
 .usage-overview-grid {
@@ -703,7 +703,7 @@
   background: linear-gradient(
     90deg,
     var(--accent),
-    color-mix(in srgb, var(--accent) 45%, #8b5cf6)
+    color-mix(in srgb, var(--accent) 45%, var(--accent-secondary))
   );
 }
 

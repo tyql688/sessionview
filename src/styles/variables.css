@@ -121,8 +121,10 @@
   --scrollbar-thumb: rgba(0, 0, 0, 0.1);
   --scrollbar-thumb-hover: rgba(0, 0, 0, 0.2);
   --status-dot: #34c759;
+  --success: #22c55e;
   --danger: #e53e3e;
   --danger-hover: #c53030;
+  --accent-secondary: #8b5cf6;
   --diff-old-bg: #fef2f2;
   --diff-old-border: #ef4444;
   --diff-old-text: #991b1b;
@@ -230,8 +232,10 @@
   --scrollbar-thumb: rgba(255, 255, 255, 0.12);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.2);
   --status-dot: #30d158;
+  --success: #22c55e;
   --danger: #f56565;
   --danger-hover: #e53e3e;
+  --accent-secondary: #8b5cf6;
   --diff-old-bg: rgba(239, 68, 68, 0.12);
   --diff-old-border: #f87171;
   --diff-old-text: #fca5a5;
