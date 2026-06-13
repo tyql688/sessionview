@@ -1,5 +1,6 @@
 mod file_access;
 mod search;
+mod session_tail;
 mod sessions;
 mod settings;
 mod terminal;
