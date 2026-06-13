@@ -49,7 +49,32 @@ const promptOnlyInvokeMessage: Message = {
   },
 };
 
+const bashOutputMessage: Message = {
+  role: "tool",
+  content: "line one\nline two",
+  timestamp: null,
+  tool_name: "Bash",
+  tool_input: JSON.stringify({ command: "printf 'line one\\nline two'" }),
+  token_usage: null,
+};
+
 describe("ToolMessage", () => {
+  it("renders raw output after expansion", () => {
+    const { container } = render(() => (
+      <ToolMessage message={bashOutputMessage} />
+    ));
+
+    expect(container.querySelector(".msg-tool-output")).toBeNull();
+    const header = container.querySelector(".msg-tool-header");
+    if (!header) throw new Error("expected tool header");
+
+    fireEvent.click(header);
+
+    expect(container.querySelector(".msg-tool-output pre")?.textContent).toBe(
+      "line one\nline two",
+    );
+  });
+
   it("includes the source parent session id when opening an antigravity child", () => {
     let detail:
       | {

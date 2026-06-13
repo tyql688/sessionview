@@ -85,7 +85,10 @@ function DiffRows(props: { lines: ToolDiffLine[] }) {
 }
 
 function LineDiff(props: { oldText: string; newText: string }) {
-  return <DiffRows lines={buildToolLineDiff(props.oldText, props.newText)} />;
+  const lines = createMemo(() =>
+    buildToolLineDiff(props.oldText, props.newText),
+  );
+  return <DiffRows lines={lines()} />;
 }
 
 export function ToolMessage(props: {
@@ -252,6 +255,10 @@ export function ToolMessage(props: {
       (kind === "terminal_output" || (kind === "file_patch" && resultHasDiff()))
     );
   };
+  const showRawOutput = () => expanded() && hasOutput() && !suppressRawOutput();
+  const outputSegments = createMemo(() =>
+    showRawOutput() ? parseContent(resolvedContent()) : [],
+  );
 
   return (
     <div class={`msg-tool${expanded() ? " expanded" : ""}`}>
@@ -428,9 +435,9 @@ export function ToolMessage(props: {
         <Show when={!showInputDetail() && !resultHasDiff() && hasInput()}>
           <pre class="msg-tool-input">{props.message.tool_input!}</pre>
         </Show>
-        <Show when={hasOutput() && !suppressRawOutput()}>
+        <Show when={showRawOutput()}>
           <div class="msg-tool-output">
-            <For each={parseContent(resolvedContent())}>
+            <For each={outputSegments()}>
               {(seg) => {
                 if (seg.type === "image") {
                   if (isLocalPath(seg.content)) {
