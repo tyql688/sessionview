@@ -31,6 +31,77 @@ fn indexable_content_text(messages: &[Message], fallback: &str) -> String {
 
 pub use crate::provider::TokenStatRow;
 
+struct ProviderSnapshotSources {
+    ids_by_source: HashMap<String, HashSet<String>>,
+    source_paths: Vec<String>,
+    seen_sources: HashSet<String>,
+}
+
+impl ProviderSnapshotSources {
+    fn from_sessions(sessions: &[ParsedSession]) -> Self {
+        let mut sources = Self {
+            ids_by_source: HashMap::new(),
+            source_paths: Vec::new(),
+            seen_sources: HashSet::new(),
+        };
+
+        for parsed in sessions {
+            let source_path = parsed.meta.source_path.clone();
+            sources
+                .ids_by_source
+                .entry(source_path.clone())
+                .or_default()
+                .insert(parsed.meta.id.clone());
+            sources.push_source_path(source_path);
+        }
+
+        sources
+    }
+
+    fn preserve_paths(&mut self, paths: &[String]) {
+        for path in paths {
+            self.push_source_path(path.clone());
+        }
+    }
+
+    fn push_source_path(&mut self, source_path: String) {
+        if self.seen_sources.insert(source_path.clone()) {
+            self.source_paths.push(source_path);
+        }
+    }
+}
+
+fn should_delete_provider_snapshot(
+    provider: &Provider,
+    aggressive: bool,
+    current_count: u64,
+    scan_count: u64,
+    preserved_source_count: u64,
+) -> bool {
+    let alive_count = scan_count + preserved_source_count;
+    if aggressive {
+        if alive_count == 0 {
+            log::info!(
+                "provider {provider:?} aggressive reindex: scan returned 0 sessions, clearing stale entries"
+            );
+        }
+        return true;
+    }
+
+    if alive_count == 0 {
+        log::warn!(
+            "provider {provider:?} scan returned 0 sessions, skipping deletion to protect index"
+        );
+        return false;
+    }
+
+    current_count <= 10 || (alive_count as f64 / current_count as f64) > 0.5
+}
+
+fn should_delete_source_snapshot(current_count: u64, scan_count: u64) -> bool {
+    scan_count == 0 || current_count <= 10 || (scan_count as f64 / current_count as f64) > 0.5
+}
+
 impl Database {
     pub fn sync_provider_snapshot(
         &self,
@@ -40,48 +111,23 @@ impl Database {
         preserve_source_paths: &[String],
     ) -> Result<(), rusqlite::Error> {
         let provider_key = provider.key().to_string();
-        let mut ids_by_source: HashMap<String, HashSet<String>> = HashMap::new();
-        let mut source_paths = Vec::new();
-        let mut seen_sources = HashSet::new();
-
-        for parsed in sessions {
-            let source_path = parsed.meta.source_path.clone();
-            ids_by_source
-                .entry(source_path.clone())
-                .or_default()
-                .insert(parsed.meta.id.clone());
-
-            if seen_sources.insert(source_path.clone()) {
-                source_paths.push(source_path);
-            }
-        }
+        let mut snapshot_sources = ProviderSnapshotSources::from_sessions(sessions);
 
         // Treat unchanged source files as still-alive when computing the
         // delete heuristic — otherwise an incremental scan that returned 0
         // changed sessions but covers 800 unchanged paths would look like
         // a near-empty result and trip the destructive-sync guard.
-        for path in preserve_source_paths {
-            if seen_sources.insert(path.clone()) {
-                source_paths.push(path.clone());
-            }
-        }
+        snapshot_sources.preserve_paths(preserve_source_paths);
 
         let current_count = self.count_sessions_for_provider(&provider_key)?;
         let scan_count = sessions.len() as u64;
-        let alive_count = scan_count + preserve_source_paths.len() as u64;
-        let should_delete = if aggressive {
-            if alive_count == 0 {
-                log::info!(
-                    "provider {provider:?} aggressive reindex: scan returned 0 sessions, clearing stale entries");
-            }
-            true
-        } else if alive_count == 0 {
-            log::warn!(
-                "provider {provider:?} scan returned 0 sessions, skipping deletion to protect index");
-            false
-        } else {
-            current_count <= 10 || (alive_count as f64 / current_count as f64) > 0.5
-        };
+        let should_delete = should_delete_provider_snapshot(
+            provider,
+            aggressive,
+            current_count,
+            scan_count,
+            preserve_source_paths.len() as u64,
+        );
 
         if !should_delete {
             log::warn!(
@@ -89,23 +135,18 @@ impl Database {
         }
 
         self.with_transaction(|conn| {
-            for parsed in sessions {
-                let content = indexable_content_text(&parsed.messages, &parsed.content_text);
-                upsert_session_on(
-                    conn,
-                    &parsed.meta,
-                    &content,
-                    &parsed.child_session_ids,
-                    parsed.source_mtime,
-                )?;
-            }
+            upsert_parsed_sessions_on(conn, sessions)?;
 
             if should_delete {
-                for (source_path, ids) in &ids_by_source {
+                for (source_path, ids) in &snapshot_sources.ids_by_source {
                     delete_missing_sessions_for_source(conn, &provider_key, source_path, ids)?;
                 }
 
-                delete_missing_sources_for_provider(conn, &provider_key, &source_paths)?;
+                delete_missing_sources_for_provider(
+                    conn,
+                    &provider_key,
+                    &snapshot_sources.source_paths,
+                )?;
                 conn.execute(
                     "DELETE FROM favorites WHERE session_id NOT IN (SELECT id FROM sessions)",
                     [],
@@ -131,9 +172,7 @@ impl Database {
         let scan_count = sessions.len() as u64;
         // For single-source sync, scan_count==0 is a valid signal (file deleted).
         // Only apply ratio guard when both sides are non-zero.
-        let should_delete = scan_count == 0
-            || current_count <= 10
-            || (scan_count as f64 / current_count as f64) > 0.5;
+        let should_delete = should_delete_source_snapshot(current_count, scan_count);
 
         if !should_delete {
             log::warn!(
@@ -141,16 +180,7 @@ impl Database {
         }
 
         self.with_transaction(|conn| {
-            for parsed in sessions {
-                let content = indexable_content_text(&parsed.messages, &parsed.content_text);
-                upsert_session_on(
-                    conn,
-                    &parsed.meta,
-                    &content,
-                    &parsed.child_session_ids,
-                    parsed.source_mtime,
-                )?;
-            }
+            upsert_parsed_sessions_on(conn, sessions)?;
 
             if should_delete {
                 delete_missing_sessions_for_source(conn, &provider_key, source_path, &ids)?;
@@ -352,6 +382,23 @@ fn update_session_totals(
     Ok(())
 }
 
+fn upsert_parsed_sessions_on(
+    conn: &Connection,
+    sessions: &[ParsedSession],
+) -> Result<(), rusqlite::Error> {
+    for parsed in sessions {
+        let content = indexable_content_text(&parsed.messages, &parsed.content_text);
+        upsert_session_on(
+            conn,
+            &parsed.meta,
+            &content,
+            &parsed.child_session_ids,
+            parsed.source_mtime,
+        )?;
+    }
+    Ok(())
+}
+
 fn upsert_session_on(
     conn: &Connection,
     meta: &SessionMeta,
@@ -520,6 +567,57 @@ mod tests {
             cache_read_tokens: 0,
             cache_write_tokens: 0,
         }
+    }
+
+    #[test]
+    fn provider_snapshot_delete_guard_protects_empty_non_aggressive_scan() {
+        assert!(!super::should_delete_provider_snapshot(
+            &Provider::Claude,
+            false,
+            100,
+            0,
+            0,
+        ));
+    }
+
+    #[test]
+    fn provider_snapshot_delete_guard_allows_empty_aggressive_scan() {
+        assert!(super::should_delete_provider_snapshot(
+            &Provider::Claude,
+            true,
+            100,
+            0,
+            0,
+        ));
+    }
+
+    #[test]
+    fn provider_snapshot_delete_guard_counts_preserved_sources_as_alive() {
+        assert!(super::should_delete_provider_snapshot(
+            &Provider::Claude,
+            false,
+            100,
+            0,
+            75,
+        ));
+        assert!(!super::should_delete_provider_snapshot(
+            &Provider::Claude,
+            false,
+            100,
+            0,
+            50,
+        ));
+    }
+
+    #[test]
+    fn source_snapshot_delete_guard_treats_empty_scan_as_deleted_file() {
+        assert!(super::should_delete_source_snapshot(100, 0));
+    }
+
+    #[test]
+    fn source_snapshot_delete_guard_uses_ratio_for_non_empty_scans() {
+        assert!(super::should_delete_source_snapshot(100, 51));
+        assert!(!super::should_delete_source_snapshot(100, 50));
     }
 
     #[test]
