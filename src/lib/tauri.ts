@@ -39,6 +39,11 @@ export interface SessionMessagesWindow {
   token_totals: TokenTotals;
 }
 
+export interface SessionOpenWindow {
+  meta: SessionMeta;
+  window: SessionMessagesWindow;
+}
+
 /**
  * Wrap a Tauri invocation so failures surface to the user as a toast
  * (plus `console.error`) and then rethrow. Use for user-triggered
@@ -124,6 +129,19 @@ export async function getSessionDetail(
 
 export async function getSessionMeta(sessionId: string): Promise<SessionMeta> {
   return invoke<SessionMeta>("get_session_meta", { sessionId });
+}
+
+/// Fetch session metadata plus the initial message window in one IPC.
+export async function getSessionOpenWindow(
+  sessionId: string,
+  offset: number,
+  limit: number,
+): Promise<SessionOpenWindow> {
+  return invoke<SessionOpenWindow>("get_session_open_window", {
+    sessionId,
+    offset,
+    limit,
+  });
 }
 
 /// Fetch a window of messages from the cached parsed session.

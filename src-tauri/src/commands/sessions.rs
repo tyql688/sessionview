@@ -133,6 +133,15 @@ pub struct SessionMessagesWindow {
     pub token_totals: TokenTotals,
 }
 
+/// Initial session-open payload: metadata plus the newest message window.
+/// This lets the frontend open a session with one IPC / one meta lookup while
+/// keeping the paged window endpoint available for older-message loads.
+#[derive(Serialize, Clone)]
+pub struct SessionOpenWindow {
+    pub meta: SessionMeta,
+    pub window: SessionMessagesWindow,
+}
+
 #[tauri::command]
 pub async fn reindex(state: State<'_, AppState>) -> CommandResult<usize> {
     let state = state.inner().clone();
@@ -270,6 +279,49 @@ pub async fn get_session_meta(
 }
 
 #[tauri::command]
+pub async fn get_session_open_window(
+    session_id: String,
+    offset: i64,
+    limit: usize,
+    state: State<'_, AppState>,
+) -> CommandResult<SessionOpenWindow> {
+    let state = state.inner().clone();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<SessionOpenWindow> {
+        let mut meta = load_session_meta(&state.db, &session_id).map_err(anyhow::Error::msg)?;
+        let source_path = meta.source_path.clone();
+        with_load_guard(&state, &session_id, &source_path, |_flag| {
+            // Same tail fast path as `get_session_messages_window`, but the
+            // token totals are also reflected into the returned metadata so
+            // the frontend doesn't need a separate meta request.
+            if let Some(window) = try_tail_fast_path(&state, &meta, offset, limit, &session_id)? {
+                apply_token_totals(&mut meta, window.token_totals);
+                return Ok(SessionOpenWindow { meta, window });
+            }
+
+            let (messages, parse_warning_count, token_totals) =
+                load_messages_cached(&state, &meta)?;
+            if load_cancel::is_canceled() {
+                return Err(canceled_error());
+            }
+            let token_totals =
+                indexed_or_loaded_token_totals(&state.db, &session_id, token_totals)?;
+            apply_token_totals(&mut meta, token_totals);
+            let window = build_session_messages_window(
+                messages.as_ref(),
+                parse_warning_count,
+                token_totals,
+                offset,
+                limit,
+            );
+            Ok(SessionOpenWindow { meta, window })
+        })
+    })
+    .await
+    .context("task join error")?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub async fn get_session_messages_window(
     session_id: String,
     offset: i64,
@@ -297,25 +349,13 @@ pub async fn get_session_messages_window(
             }
             let token_totals =
                 indexed_or_loaded_token_totals(&state.db, &session_id, token_totals)?;
-            let total = messages.len();
-            // Negative offset = window from the end. -N selects the newest N
-            // messages; -1 + limit=200 means "last 200". Positive offset is a
-            // direct index from the start. Both forms clamp to [0, total].
-            let start = if offset < 0 {
-                let from_end = offset.unsigned_abs() as usize;
-                total.saturating_sub(from_end.max(limit))
-            } else {
-                (offset as usize).min(total)
-            };
-            let end = start.saturating_add(limit).min(total);
-            let slice = messages[start..end].to_vec();
-            Ok(SessionMessagesWindow {
-                total,
-                start,
-                messages: slice,
+            Ok(build_session_messages_window(
+                messages.as_ref(),
                 parse_warning_count,
                 token_totals,
-            })
+                offset,
+                limit,
+            ))
         })
     })
     .await
@@ -574,6 +614,38 @@ fn apply_token_totals(meta: &mut SessionMeta, totals: TokenTotals) {
     meta.cache_write_tokens = totals.cache_write_tokens;
 }
 
+fn build_session_messages_window(
+    messages: &[Message],
+    parse_warning_count: u32,
+    token_totals: TokenTotals,
+    offset: i64,
+    limit: usize,
+) -> SessionMessagesWindow {
+    let total = messages.len();
+    let (start, end) = session_window_bounds(total, offset, limit);
+    SessionMessagesWindow {
+        total,
+        start,
+        messages: messages[start..end].to_vec(),
+        parse_warning_count,
+        token_totals,
+    }
+}
+
+fn session_window_bounds(total: usize, offset: i64, limit: usize) -> (usize, usize) {
+    // Negative offset = window from the end. -N selects the newest N
+    // messages; -1 + limit=200 means "last 200". Positive offset is a
+    // direct index from the start. Both forms clamp to [0, total].
+    let start = if offset < 0 {
+        let from_end = offset.unsigned_abs() as usize;
+        total.saturating_sub(from_end.max(limit))
+    } else {
+        (offset as usize).min(total)
+    };
+    let end = start.saturating_add(limit).min(total);
+    (start, end)
+}
+
 pub(super) fn indexed_or_loaded_token_totals(
     db: &Database,
     session_id: &str,
@@ -634,8 +706,11 @@ fn load_messages_from_provider_or_canceled(
 
 #[cfg(test)]
 mod tests {
-    use super::{canceled_error, CANCEL_ERROR};
+    use super::{
+        build_session_messages_window, canceled_error, session_window_bounds, CANCEL_ERROR,
+    };
     use crate::error::CommandError;
+    use crate::models::{Message, TokenTotals};
 
     /// The cancel sentinel must reach the command boundary unchanged so
     /// the frontend's `isLoadCanceledError` (`msg.includes(...)`) keeps
@@ -647,5 +722,33 @@ mod tests {
         let serialized = format!("{:#}", command.0);
         assert_eq!(serialized, CANCEL_ERROR);
         assert!(serialized.contains("__cc_session_load_canceled__"));
+    }
+
+    #[test]
+    fn session_window_bounds_negative_offset_uses_tail_window() {
+        assert_eq!(session_window_bounds(1_000, -300, 300), (700, 1_000));
+        assert_eq!(session_window_bounds(1_000, -1, 200), (800, 1_000));
+    }
+
+    #[test]
+    fn session_window_bounds_clamps_to_total() {
+        assert_eq!(session_window_bounds(20, 10, 100), (10, 20));
+        assert_eq!(session_window_bounds(20, 30, 100), (20, 20));
+        assert_eq!(session_window_bounds(0, -300, 300), (0, 0));
+    }
+
+    #[test]
+    fn build_session_messages_window_preserves_full_total() {
+        let messages: Vec<Message> = (0..5)
+            .map(|idx| Message::assistant(format!("message {idx}")))
+            .collect();
+
+        let window = build_session_messages_window(&messages, 2, TokenTotals::default(), -2, 2);
+
+        assert_eq!(window.total, 5);
+        assert_eq!(window.start, 3);
+        assert_eq!(window.messages.len(), 2);
+        assert_eq!(window.messages[0].content, "message 3");
+        assert_eq!(window.parse_warning_count, 2);
     }
 }

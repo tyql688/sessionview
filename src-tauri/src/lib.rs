@@ -285,6 +285,7 @@ pub fn run() {
             commands::get_tree,
             commands::get_session_detail,
             commands::get_session_meta,
+            commands::get_session_open_window,
             commands::get_session_messages_window,
             commands::cancel_session_load,
             commands::get_child_sessions,

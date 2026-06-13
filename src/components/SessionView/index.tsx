@@ -16,6 +16,7 @@ import type {
 } from "../../lib/types";
 import {
   getSessionMeta,
+  getSessionOpenWindow,
   getSessionMessagesWindow,
   cancelSessionLoad,
   trashSession,
@@ -168,19 +169,16 @@ export function SessionView(props: {
         setWindowStart(0);
 
         try {
-          // Meta first — fast.
-          const metaData = await getSessionMeta(sessionId);
-          if (version !== loadVersion) return;
-          setMeta(metaData);
-          // Newest tail next — backend caches the parsed messages so
-          // subsequent older-page reads are O(1) slicing.
-          const tail = await getSessionMessagesWindow(
+          // Initial open fetches meta + newest tail together so one backend
+          // load guard owns the parse and one IPC hydrates the view.
+          const open = await getSessionOpenWindow(
             sessionId,
             -INITIAL_TAIL,
             INITIAL_TAIL,
           );
           if (version !== loadVersion) return;
-          setMeta(withTokenTotals(metaData, tail.token_totals));
+          const tail = open.window;
+          setMeta(open.meta);
           setMessages(tail.messages);
           setParseWarningCount(tail.parse_warning_count ?? 0);
           setTotalMessages(tail.total);

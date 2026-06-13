@@ -46,6 +46,22 @@ const MESSAGES: Message[] = [
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (command: string) => {
     switch (command) {
+      case "get_session_open_window":
+        return {
+          meta: META,
+          window: {
+            total: MESSAGES.length,
+            start: 0,
+            messages: MESSAGES,
+            parse_warning_count: 0,
+            token_totals: {
+              input_tokens: 0,
+              output_tokens: 0,
+              cache_read_tokens: 0,
+              cache_write_tokens: 0,
+            },
+          },
+        };
       case "get_session_meta":
         return META;
       case "get_session_messages_window":

@@ -28,6 +28,18 @@ describe("tauri api wrappers", () => {
     });
   });
 
+  it("getSessionOpenWindow sends sessionId and window bounds", async () => {
+    const { getSessionOpenWindow } = await import("./tauri");
+
+    await getSessionOpenWindow("sess-1", -300, 300);
+
+    expect(invoke).toHaveBeenCalledWith("get_session_open_window", {
+      sessionId: "sess-1",
+      offset: -300,
+      limit: 300,
+    });
+  });
+
   it("exportSession uses the simplified session-based payload", async () => {
     const { exportSession } = await import("./tauri");
 
