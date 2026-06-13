@@ -55,7 +55,7 @@ import type { TreeNode, Provider, MaintenanceEvent } from "../lib/types";
 import { useI18n } from "../i18n";
 import { createKeyboardHandler } from "./KeyboardShortcuts";
 import { createSyncManager } from "./SyncManager";
-import { matchesSubagentSession } from "../lib/subagent";
+import { createOpenSubagentHandler } from "./SubagentOpen";
 import "../styles/index.css";
 
 // Linux derived locally (platform.ts is intentionally minimal). On Linux the
@@ -176,56 +176,22 @@ export default function App() {
 
     document.addEventListener("keydown", handleGlobalKeyDown);
 
-    // Listen for subagent open requests from ToolMessage
-    const handleOpenSubagent = async (e: Event) => {
-      const { description, nickname, agentId, parentSessionId } = (
-        e as CustomEvent<{
-          description?: string;
-          nickname?: string;
-          agentId?: string;
-          parentSessionId?: string;
-        }>
-      ).detail;
-      // Search all groups' active tabs (not just activeGroup) so clicks in
-      // non-focused panes resolve correctly.
-      const parentIds = parentSessionId
-        ? [parentSessionId]
-        : groups()
-            .map((g) => g.activeTabId)
-            .filter((id): id is string => id != null);
-      let anyParentResolved = false;
-      for (const parentId of parentIds) {
-        try {
-          const children = await getChildSessions(parentId);
-          anyParentResolved = true;
-          const match = children.find((c) =>
-            matchesSubagentSession(c, parentId, {
-              agentId,
-              nickname,
-              description,
-            }),
-          );
-          if (match) {
-            openSession(match);
-            return;
-          }
-        } catch (error) {
-          console.error(
-            `Failed to load child sessions for parent ${parentId}:`,
-            error,
-          );
-        }
-      }
-      // Distinguish "no match in any parent's children" from "every
-      // parent lookup errored". Both end up here but the right message
-      // differs — the latter is a transient IPC failure, not a missing
-      // subagent.
-      if (!anyParentResolved && parentIds.length > 0) {
-        toastError(t("toast.subagentLoadFailed"));
-      } else {
-        toastError(t("toast.subagentNotFound"));
-      }
-    };
+    const handleOpenSubagent = createOpenSubagentHandler({
+      getActiveParentSessionIds: () =>
+        groups()
+          .map((g) => g.activeTabId)
+          .filter((id): id is string => id != null),
+      getChildSessions,
+      openSession,
+      onLoadFailed: () => toastError(t("toast.subagentLoadFailed")),
+      onNotFound: () => toastError(t("toast.subagentNotFound")),
+      onChildSessionLoadError: (parentId, error) => {
+        console.error(
+          `Failed to load child sessions for parent ${parentId}:`,
+          error,
+        );
+      },
+    });
     window.addEventListener("open-subagent", handleOpenSubagent);
 
     unlistenWatcher = await listen<string[]>("sessions-changed", (event) => {
