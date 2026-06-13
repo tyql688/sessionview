@@ -12,6 +12,12 @@ import { useI18n } from "../../i18n/index";
 import { ContextMenu, type MenuItemDef } from "../ContextMenu";
 import { isMac } from "../../lib/platform";
 import { moveTabToGroup } from "../../stores/editorGroups";
+import {
+  parseTabDragPayload,
+  serializeTabDragPayload,
+  TAB_DRAG_FALLBACK_MIME,
+  TAB_DRAG_MIME,
+} from "./tabDragPayload";
 
 function providerColor(provider: Provider): string {
   return `var(--${provider})`;
@@ -150,18 +156,15 @@ export function TabBar(props: {
         }}
         onDrop={(e) => {
           e.preventDefault();
+          const rawPayload =
+            e.dataTransfer?.getData(TAB_DRAG_MIME) ||
+            e.dataTransfer?.getData(TAB_DRAG_FALLBACK_MIME) ||
+            "";
+          if (rawPayload.length === 0) return;
+
           try {
-            const data: unknown = JSON.parse(
-              e.dataTransfer?.getData("text/plain") ?? "{}",
-            );
-            const payload = data as {
-              sessionId?: unknown;
-              sourceGroupId?: unknown;
-            };
-            if (
-              typeof payload.sessionId === "string" &&
-              payload.sourceGroupId !== props.groupId
-            ) {
+            const payload = parseTabDragPayload(rawPayload);
+            if (payload.sourceGroupId !== props.groupId) {
               moveTabToGroup(payload.sessionId, props.groupId);
             }
           } catch (error) {
@@ -179,14 +182,18 @@ export function TabBar(props: {
                 data-tab-id={tab.id}
                 draggable={true}
                 onDragStart={(e) => {
-                  e.dataTransfer!.setData(
-                    "text/plain",
-                    JSON.stringify({
-                      sessionId: tab.id,
-                      sourceGroupId: props.groupId,
-                    }),
-                  );
-                  e.dataTransfer!.effectAllowed = "move";
+                  const transfer = e.dataTransfer;
+                  if (!transfer) {
+                    console.warn("Tab drag started without dataTransfer");
+                    return;
+                  }
+                  const payload = serializeTabDragPayload({
+                    sessionId: tab.id,
+                    sourceGroupId: props.groupId,
+                  });
+                  transfer.setData(TAB_DRAG_MIME, payload);
+                  transfer.setData(TAB_DRAG_FALLBACK_MIME, payload);
+                  transfer.effectAllowed = "move";
                   (e.currentTarget as HTMLElement).style.opacity = "0.4";
                 }}
                 onDragEnd={(e) => {
