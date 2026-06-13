@@ -15,9 +15,7 @@ import type {
   TokenTotals,
 } from "../../lib/types";
 import {
-  getSessionMeta,
   getSessionOpenWindow,
-  getSessionMessagesWindow,
   cancelSessionLoad,
   trashSession,
   resumeSession,
@@ -236,12 +234,14 @@ export function SessionView(props: {
       // file change forces a re-parse; otherwise this is O(1) slicing.
       const sessionId = props.session.id;
       const oldCount = messages().length;
-      const [metaData, tail] = await Promise.all([
-        getSessionMeta(sessionId),
-        getSessionMessagesWindow(sessionId, -INITIAL_TAIL, INITIAL_TAIL),
-      ]);
+      const open = await getSessionOpenWindow(
+        sessionId,
+        -INITIAL_TAIL,
+        INITIAL_TAIL,
+      );
       if (sessionId !== props.session.id) return;
-      setMeta(withTokenTotals(metaData, tail.token_totals));
+      const tail = open.window;
+      setMeta(open.meta);
       setMessages(tail.messages);
       setParseWarningCount(tail.parse_warning_count ?? 0);
       setTotalMessages(tail.total);
