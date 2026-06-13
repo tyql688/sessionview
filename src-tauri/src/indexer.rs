@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -312,19 +312,29 @@ impl Indexer {
                     })
                     .unwrap_or_else(|| "(No Project)".to_string());
 
-                let (top_sessions, subagents): (Vec<_>, Vec<_>) =
-                    sessions.iter().partition(|s| s.parent_id.is_none());
+                let mut top_sessions = Vec::new();
+                let mut subagents = Vec::new();
+                let mut children_by_parent: HashMap<&str, Vec<&SessionMeta>> = HashMap::new();
 
-                let top_ids: std::collections::HashSet<&str> =
-                    top_sessions.iter().map(|s| s.id.as_str()).collect();
+                for session in sessions.iter() {
+                    if let Some(parent_id) = session.parent_id.as_deref() {
+                        subagents.push(session);
+                        children_by_parent
+                            .entry(parent_id)
+                            .or_default()
+                            .push(session);
+                    } else {
+                        top_sessions.push(session);
+                    }
+                }
+
+                let top_ids: HashSet<&str> = top_sessions.iter().map(|s| s.id.as_str()).collect();
 
                 let mut session_nodes: Vec<TreeNode> = top_sessions
                     .iter()
                     .map(|s| {
-                        let mut children: Vec<_> = sessions
-                            .iter()
-                            .filter(|c| c.parent_id.as_deref() == Some(&s.id))
-                            .collect();
+                        let mut children =
+                            children_by_parent.remove(s.id.as_str()).unwrap_or_default();
                         children.sort_by_key(|c| c.created_at);
                         let child_nodes: Vec<TreeNode> = children
                             .iter()
@@ -425,6 +435,7 @@ impl Indexer {
 
 #[cfg(test)]
 mod tests {
+    use crate::db::Database;
     use crate::models::{Message, MessageRole, Provider, SessionMeta, TokenUsage};
     use crate::pricing::PricingCatalog;
     use crate::provider::{
@@ -433,6 +444,8 @@ mod tests {
     };
     use std::collections::HashSet;
     use std::path::PathBuf;
+    use std::sync::Arc;
+    use tempfile::TempDir;
 
     struct DefaultStatsProvider;
 
@@ -536,6 +549,72 @@ mod tests {
             usage_hash: Some(hash.into()),
             tool_metadata: None,
         }
+    }
+
+    fn tree_session(session_id: &str, updated_at: i64, created_at: i64) -> ParsedSession {
+        let mut parsed = make_session(None, Vec::new());
+        parsed.meta.id = session_id.into();
+        parsed.meta.title = session_id.into();
+        parsed.meta.created_at = created_at;
+        parsed.meta.updated_at = updated_at;
+        parsed.meta.message_count = 0;
+        parsed.meta.source_path = format!("/tmp/{session_id}.jsonl");
+        parsed
+    }
+
+    #[test]
+    fn build_tree_preserves_session_child_and_orphan_order() {
+        let dir = TempDir::new().unwrap();
+        let db = Arc::new(Database::open(dir.path()).unwrap());
+
+        let parent_new = tree_session("parent-new", 300, 100);
+        let parent_old = tree_session("parent-old", 200, 90);
+
+        let mut child_late = tree_session("child-late", 500, 30);
+        child_late.meta.parent_id = Some(parent_new.meta.id.clone());
+        child_late.meta.is_sidechain = true;
+
+        let mut orphan = tree_session("orphan", 250, 20);
+        orphan.meta.parent_id = Some("missing-parent".into());
+        orphan.meta.is_sidechain = true;
+
+        let mut child_early = tree_session("child-early", 100, 10);
+        child_early.meta.parent_id = Some(parent_new.meta.id.clone());
+        child_early.meta.is_sidechain = true;
+
+        db.sync_provider_snapshot(
+            &Provider::Claude,
+            &[child_late, parent_old, orphan, child_early, parent_new],
+            true,
+            &[],
+        )
+        .unwrap();
+
+        let indexer = super::Indexer::new(db, Vec::new(), dir.path().join("data"));
+        let tree = indexer.build_tree().unwrap();
+        let project_node = &tree[0].children[0];
+        let session_ids: Vec<&str> = project_node
+            .children
+            .iter()
+            .map(|node| node.id.as_str())
+            .collect();
+
+        assert_eq!(session_ids, vec!["parent-new", "parent-old", "orphan"]);
+
+        let parent_new_node = &project_node.children[0];
+        let child_ids: Vec<&str> = parent_new_node
+            .children
+            .iter()
+            .map(|node| node.id.as_str())
+            .collect();
+
+        assert_eq!(child_ids, vec!["child-early", "child-late"]);
+        assert!(parent_new_node
+            .children
+            .iter()
+            .all(|child| child.is_sidechain));
+        assert!(project_node.children[2].is_sidechain);
+        assert_eq!(project_node.count, 3);
     }
 
     #[test]
