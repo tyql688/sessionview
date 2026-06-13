@@ -95,31 +95,6 @@ export function MessageBubble(props: {
     src: string;
     source?: string;
   } | null>(null);
-  const copyText = createMemo(() =>
-    sanitizeMessageForClipboard(props.message.content),
-  );
-  // Split the markdown parse (expensive, content-only) from the render
-  // (highlight-dependent). Keying the parse on content alone means committing a
-  // new in-session Cmd+F query re-renders highlights without re-parsing the AST
-  // of every visible bubble — the prior jank source.
-  const parsedMarkdown = createMemo(() =>
-    parseMarkdownDocument(props.message.content),
-  );
-  const markdownContent = createMemo(() =>
-    renderParsedMarkdown(parsedMarkdown(), {
-      footnotePrefix,
-      highlightTerm: props.highlightTerm,
-      onPreview: (src, source) => setPreviewImage({ src, source }),
-    }),
-  );
-  const msgTs = createMemo(() => {
-    const ts = props.message.timestamp;
-    if (!ts) return null;
-    const ms = parseTimestamp(ts);
-    if (!ms) return null;
-    const d = new Date(ms);
-    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  });
 
   const isEmpty = (): boolean => {
     const msg = props.message;
@@ -152,6 +127,41 @@ export function MessageBubble(props: {
     ];
     return systemMarkers.some((marker) => c.includes(marker));
   };
+
+  const rendersMarkdown = () =>
+    props.message.role !== "tool" &&
+    props.message.role !== "system" &&
+    !isEmpty() &&
+    !isSystemContent();
+
+  const copyText = createMemo(() =>
+    rendersMarkdown() ? sanitizeMessageForClipboard(props.message.content) : "",
+  );
+  // Split the markdown parse (expensive, content-only) from the render
+  // (highlight-dependent). Keying the parse on content alone means committing a
+  // new in-session Cmd+F query re-renders highlights without re-parsing the AST
+  // of every visible bubble — the prior jank source.
+  const parsedMarkdown = createMemo(() => {
+    if (!rendersMarkdown()) return null;
+    return parseMarkdownDocument(props.message.content);
+  });
+  const markdownContent = createMemo(() => {
+    const parsed = parsedMarkdown();
+    if (!parsed) return null;
+    return renderParsedMarkdown(parsed, {
+      footnotePrefix,
+      highlightTerm: props.highlightTerm,
+      onPreview: (src, source) => setPreviewImage({ src, source }),
+    });
+  });
+  const msgTs = createMemo(() => {
+    const ts = props.message.timestamp;
+    if (!ts) return null;
+    const ms = parseTimestamp(ts);
+    if (!ms) return null;
+    const d = new Date(ms);
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  });
 
   if (isEmpty() || isSystemContent()) return null;
 
