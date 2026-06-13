@@ -1,13 +1,13 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use rayon::prelude::*;
 
 use crate::db::Database;
 use crate::models::{Provider, SessionMeta, TreeNode, TreeNodeType};
-use crate::pricing::{self, PRICING_CATALOG_JSON_KEY};
+use crate::pricing::{self, PricingCatalog, PRICING_CATALOG_JSON_KEY};
 use crate::provider::{ParsedSession, SessionProvider, TokenStatRow};
 use crate::services::error::{ServiceError, ServiceResult};
 use crate::services::image_cache::ImageCacheService;
@@ -17,6 +17,42 @@ pub struct Indexer {
     db: Arc<Database>,
     providers: Arc<Vec<Box<dyn SessionProvider>>>,
     data_dir: PathBuf,
+}
+
+struct ProviderWork {
+    provider_kind: Provider,
+    sessions: Vec<ParsedSession>,
+    unchanged_source_paths: Vec<String>,
+    stats_batch: Vec<(String, Vec<TokenStatRow>)>,
+}
+
+fn epoch_millis(time: SystemTime) -> ServiceResult<i64> {
+    time.duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .map_err(|error| {
+            ServiceError::Message(format!("system clock is before the UNIX epoch: {error}"))
+        })
+}
+
+fn build_token_stats_batch(
+    provider: &dyn SessionProvider,
+    sessions: &[ParsedSession],
+    pricing_catalog: Option<&PricingCatalog>,
+) -> Vec<(String, Vec<TokenStatRow>)> {
+    // Parent-before-child ordering so cross-file dedup attributes overlapping
+    // usage entries to the parent.
+    let (parents, children): (Vec<&ParsedSession>, Vec<&ParsedSession>) = sessions
+        .iter()
+        .partition(|parsed| parsed.meta.parent_id.is_none());
+
+    let mut seen_hashes: HashSet<String> = HashSet::new();
+    let mut stats_batch: Vec<(String, Vec<TokenStatRow>)> = Vec::with_capacity(sessions.len());
+    for parsed in parents.iter().chain(children.iter()) {
+        let stat_rows =
+            provider.compute_token_stats(parsed, pricing_catalog, Some(&mut seen_hashes));
+        stats_batch.push((parsed.meta.id.clone(), stat_rows));
+    }
+    stats_batch
 }
 
 impl Indexer {
@@ -51,7 +87,35 @@ impl Indexer {
     ) -> ServiceResult<usize> {
         let start = Instant::now();
         let mut total = 0usize;
-        let pricing_catalog = match self.db.get_meta(PRICING_CATALOG_JSON_KEY) {
+        let pricing_catalog = self.cached_pricing_catalog();
+        let now_millis = epoch_millis(SystemTime::now())?;
+
+        let excluded = crate::trash_state::shared_deleted_ids();
+        let provider_refs = self.selected_providers(filter);
+        let works =
+            self.collect_provider_work(&provider_refs, pricing_catalog.as_ref(), &excluded)?;
+
+        // Phase 2 (sequential, DB writer): commit each provider's snapshot.
+        // SQLite has a single writer mutex; serializing here avoids contention
+        // and keeps each provider's transaction atomic.
+        let image_service = ImageCacheService::new(&self.data_dir);
+        for work in &works {
+            total += self.commit_provider_work(work, aggressive, &image_service)?;
+        }
+
+        self.store_refresh_timestamps(filter.is_none(), now_millis)?;
+
+        let elapsed = start.elapsed();
+        log::info!(
+            "Reindex complete: {total} sessions indexed in {:.2}s",
+            elapsed.as_secs_f64()
+        );
+
+        Ok(total)
+    }
+
+    fn cached_pricing_catalog(&self) -> Option<PricingCatalog> {
+        match self.db.get_meta(PRICING_CATALOG_JSON_KEY) {
             Ok(Some(json)) => match pricing::parse_catalog(&json) {
                 Ok(catalog) => Some(catalog),
                 Err(error) => {
@@ -64,128 +128,121 @@ impl Indexer {
                 log::warn!("failed to read cached pricing catalog: {error}");
                 None
             }
-        };
+        }
+    }
 
-        let now_millis = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .expect("system clock is before the UNIX epoch");
+    fn selected_providers<'a>(
+        &'a self,
+        filter: Option<&[Provider]>,
+    ) -> Vec<&'a dyn SessionProvider> {
+        self.providers
+            .iter()
+            .filter(|provider| match filter {
+                Some(allowed) => allowed.contains(&provider.provider()),
+                None => true,
+            })
+            .map(|provider| provider.as_ref())
+            .collect()
+    }
 
-        let excluded = crate::trash_state::shared_deleted_ids();
-
+    fn collect_provider_work(
+        &self,
+        providers: &[&dyn SessionProvider],
+        pricing_catalog: Option<&PricingCatalog>,
+        excluded: &HashSet<String>,
+    ) -> ServiceResult<Vec<ProviderWork>> {
         // Phase 1 (parallel, CPU/IO): scan each provider's files and compute
         // its token-stats batch. seen_hashes dedup is per-provider already
         // (the parent-before-child ordering only matters within one provider's
         // scan), so providers don't share state and can run in parallel.
-        struct ProviderWork {
-            provider_kind: Provider,
-            sessions: Vec<ParsedSession>,
-            unchanged_source_paths: Vec<String>,
-            stats_batch: Vec<(String, Vec<TokenStatRow>)>,
+        providers
+            .par_iter()
+            .map(|provider| self.scan_provider_work(*provider, pricing_catalog, excluded))
+            .collect()
+    }
+
+    fn scan_provider_work(
+        &self,
+        provider: &dyn SessionProvider,
+        pricing_catalog: Option<&PricingCatalog>,
+        excluded: &HashSet<String>,
+    ) -> ServiceResult<ProviderWork> {
+        let provider_kind = provider.provider();
+        // Pre-fetch the per-source `(size, mtime)` snapshot the provider uses
+        // to short-circuit unchanged files. Each provider walks its own data
+        // layout; this DB query is the single source of truth for "what we
+        // already indexed".
+        let known = self
+            .db
+            .source_states_for_provider(provider_kind.key())
+            .map_err(|e| {
+                ServiceError::LoadProviderSourceSnapshot(
+                    provider_kind.key().to_string(),
+                    e.to_string(),
+                )
+            })?;
+        let outcome = provider.scan_incremental(&known).map_err(|e| {
+            ServiceError::ScanProvider(provider_kind.key().to_string(), e.to_string())
+        })?;
+        let mut sessions = outcome.parsed;
+        let unchanged_source_paths = outcome.unchanged_source_paths;
+
+        if !excluded.is_empty() {
+            sessions.retain(|session| !excluded.contains(&session.meta.id));
         }
 
-        let provider_refs: Vec<&dyn SessionProvider> = self
-            .providers
-            .iter()
-            .filter(|p| match filter {
-                Some(allowed) => allowed.contains(&p.provider()),
-                None => true,
-            })
-            .map(|p| p.as_ref())
-            .collect();
+        let stats_batch = build_token_stats_batch(provider, &sessions, pricing_catalog);
 
-        let works: ServiceResult<Vec<ProviderWork>> = provider_refs
-            .par_iter()
-            .map(|provider| -> ServiceResult<ProviderWork> {
-                let provider_kind = provider.provider();
-                // Pre-fetch the per-source `(size, mtime)` snapshot the
-                // provider uses to short-circuit unchanged files. Each
-                // provider walks its own data layout; this DB query is the
-                // single source of truth for "what we already indexed".
-                let known = self
-                    .db
-                    .source_states_for_provider(provider_kind.key())
-                    .map_err(|e| {
-                        ServiceError::LoadProviderSourceSnapshot(
-                            provider_kind.key().to_string(),
-                            e.to_string(),
-                        )
-                    })?;
-                let outcome = provider.scan_incremental(&known).map_err(|e| {
-                    ServiceError::ScanProvider(provider_kind.key().to_string(), e.to_string())
-                })?;
-                let mut sessions = outcome.parsed;
-                let unchanged_source_paths = outcome.unchanged_source_paths;
-
-                if !excluded.is_empty() {
-                    sessions.retain(|s| !excluded.contains(&s.meta.id));
-                }
-
-                // Parent-before-child ordering so cross-file dedup attributes
-                // overlapping usage entries to the parent.
-                let (parents, children): (Vec<&ParsedSession>, Vec<&ParsedSession>) = sessions
-                    .iter()
-                    .partition(|parsed| parsed.meta.parent_id.is_none());
-
-                let mut seen_hashes: HashSet<String> = HashSet::new();
-                let mut stats_batch: Vec<(String, Vec<TokenStatRow>)> =
-                    Vec::with_capacity(sessions.len());
-                for parsed in parents.iter().chain(children.iter()) {
-                    let stat_rows = provider.compute_token_stats(
-                        parsed,
-                        pricing_catalog.as_ref(),
-                        Some(&mut seen_hashes),
-                    );
-                    stats_batch.push((parsed.meta.id.clone(), stat_rows));
-                }
-
-                Ok(ProviderWork {
-                    provider_kind,
-                    sessions,
-                    unchanged_source_paths,
-                    stats_batch,
-                })
-            })
-            .collect();
-        let works = works?;
-
-        // Phase 2 (sequential, DB writer): commit each provider's snapshot.
-        // SQLite has a single writer mutex; serializing here avoids contention
-        // and keeps each provider's transaction atomic.
-        let image_service = ImageCacheService::new(&self.data_dir);
-        for ProviderWork {
+        Ok(ProviderWork {
             provider_kind,
             sessions,
             unchanged_source_paths,
             stats_batch,
-        } in &works
-        {
-            let count = sessions.len();
-            self.db
-                .sync_provider_snapshot(provider_kind, sessions, aggressive, unchanged_source_paths)
-                .map_err(|e| {
-                    ServiceError::SyncProvider(provider_kind.key().to_string(), e.to_string())
-                })?;
+        })
+    }
 
-            let batch_refs: Vec<(&str, &[TokenStatRow])> = stats_batch
-                .iter()
-                .map(|(id, rows)| (id.as_str(), rows.as_slice()))
-                .collect();
-            if let Err(e) = self.db.replace_token_stats_batch(&batch_refs) {
-                log::warn!(
-                    "failed to write token stats batch for {}: {e}",
-                    provider_kind.key()
-                );
-            }
+    fn commit_provider_work(
+        &self,
+        work: &ProviderWork,
+        aggressive: bool,
+        image_service: &ImageCacheService,
+    ) -> ServiceResult<usize> {
+        self.db
+            .sync_provider_snapshot(
+                &work.provider_kind,
+                &work.sessions,
+                aggressive,
+                &work.unchanged_source_paths,
+            )
+            .map_err(|e| {
+                ServiceError::SyncProvider(work.provider_kind.key().to_string(), e.to_string())
+            })?;
 
-            for parsed in sessions {
-                image_service.cache_images(&parsed.messages);
-            }
-
-            total += count;
+        let batch_refs: Vec<(&str, &[TokenStatRow])> = work
+            .stats_batch
+            .iter()
+            .map(|(id, rows)| (id.as_str(), rows.as_slice()))
+            .collect();
+        if let Err(e) = self.db.replace_token_stats_batch(&batch_refs) {
+            log::warn!(
+                "failed to write token stats batch for {}: {e}",
+                work.provider_kind.key()
+            );
         }
 
-        if filter.is_none() {
+        for parsed in &work.sessions {
+            image_service.cache_images(&parsed.messages);
+        }
+
+        Ok(work.sessions.len())
+    }
+
+    fn store_refresh_timestamps(
+        &self,
+        store_last_index_time: bool,
+        now_millis: i64,
+    ) -> ServiceResult<()> {
+        if store_last_index_time {
             self.db
                 .set_meta("last_index_time", &now_millis.to_string())
                 .map_err(|e| ServiceError::StoreLastIndexTime(e.to_string()))?;
@@ -193,14 +250,7 @@ impl Indexer {
         self.db
             .set_meta("usage_last_refreshed_at", &chrono::Utc::now().to_rfc3339())
             .map_err(|e| ServiceError::StoreUsageLastRefreshed(e.to_string()))?;
-
-        let elapsed = start.elapsed();
-        log::info!(
-            "Reindex complete: {total} sessions indexed in {:.2}s",
-            elapsed.as_secs_f64()
-        );
-
-        Ok(total)
+        Ok(())
     }
 
     pub fn build_tree(&self) -> ServiceResult<Vec<TreeNode>> {
@@ -377,8 +427,44 @@ impl Indexer {
 mod tests {
     use crate::models::{Message, MessageRole, Provider, SessionMeta, TokenUsage};
     use crate::pricing::PricingCatalog;
-    use crate::provider::{default_compute_token_stats_from_messages, ParsedSession, TokenStatRow};
+    use crate::provider::{
+        default_compute_token_stats_from_messages, DeletionPlan, FileAction, LoadedSession,
+        ParsedSession, ProviderError, SessionProvider, TokenStatRow,
+    };
     use std::collections::HashSet;
+    use std::path::PathBuf;
+
+    struct DefaultStatsProvider;
+
+    impl SessionProvider for DefaultStatsProvider {
+        fn provider(&self) -> Provider {
+            Provider::Claude
+        }
+
+        fn watch_paths(&self) -> Vec<PathBuf> {
+            Vec::new()
+        }
+
+        fn scan_all(&self) -> Result<Vec<ParsedSession>, ProviderError> {
+            Ok(Vec::new())
+        }
+
+        fn load_messages(
+            &self,
+            _session_id: &str,
+            _source_path: &str,
+        ) -> Result<LoadedSession, ProviderError> {
+            Ok(LoadedSession::new(Vec::new()))
+        }
+
+        fn deletion_plan(&self, _meta: &SessionMeta, _children: &[SessionMeta]) -> DeletionPlan {
+            DeletionPlan {
+                file_action: FileAction::Skip,
+                child_plans: Vec::new(),
+                cleanup_dirs: Vec::new(),
+            }
+        }
+    }
 
     /// Drives the default per-message aggregation path that all
     /// non-Codex providers use through the trait. Tests stay focused on
@@ -436,6 +522,48 @@ mod tests {
             cache_creation_input_tokens: 0,
             cache_read_input_tokens: 0,
         })
+    }
+
+    fn usage_message(hash: &str) -> Message {
+        Message {
+            role: MessageRole::Assistant,
+            content: String::new(),
+            timestamp: Some("2026-04-09T12:00:00Z".into()),
+            tool_name: None,
+            tool_input: None,
+            token_usage: token_usage(100, 50),
+            model: Some("claude-opus-4-6".into()),
+            usage_hash: Some(hash.into()),
+            tool_metadata: None,
+        }
+    }
+
+    #[test]
+    fn epoch_millis_rejects_times_before_unix_epoch() {
+        let error =
+            super::epoch_millis(std::time::UNIX_EPOCH - std::time::Duration::from_millis(1))
+                .expect_err("pre-epoch time must be an explicit error");
+
+        assert!(error.to_string().contains("system clock is before"));
+    }
+
+    #[test]
+    fn build_token_stats_batch_processes_parents_before_children_for_dedup() {
+        let mut parent = make_session(Some("claude-opus-4-6"), vec![usage_message("usage-1")]);
+        parent.meta.id = "parent".into();
+        let mut child = make_session(Some("claude-opus-4-6"), vec![usage_message("usage-1")]);
+        child.meta.id = "child".into();
+        child.meta.parent_id = Some(parent.meta.id.clone());
+        child.meta.is_sidechain = true;
+
+        let provider = DefaultStatsProvider;
+        let batch = super::build_token_stats_batch(&provider, &[child, parent], None);
+
+        assert_eq!(batch.len(), 2);
+        assert_eq!(batch[0].0, "parent");
+        assert_eq!(batch[0].1.len(), 1);
+        assert_eq!(batch[1].0, "child");
+        assert!(batch[1].1.is_empty());
     }
 
     #[test]
