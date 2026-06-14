@@ -65,6 +65,9 @@ describe("tools/names", () => {
   it("returns image and dynamic tool icons", () => {
     expect(toolIcon("ImageGeneration")).toBe("🖼️");
     expect(toolIcon("DynamicTool")).toBe("🧩");
+    expect(toolIcon("JavaScript")).toBe("🟨");
+    expect(toolIcon("ComputerUse")).toBe("🖱️");
+    expect(toolIcon("StructuredOutput")).toBe("📊");
   });
 
   it("summarizes Kimi-specific tool fallbacks", () => {
@@ -86,6 +89,43 @@ describe("tools/names", () => {
         tool_input: JSON.stringify({ value: 3, unit: "turns" }),
       }),
     ).toBe("3 · turns");
+  });
+
+  it("summarizes recently observed Claude and Codex tools", () => {
+    expect(
+      toolSummary({
+        ...baseMessage,
+        tool_name: "StructuredOutput",
+        tool_input: JSON.stringify({
+          finding_id: "P1",
+          analysis: "unclassified tool",
+        }),
+      }),
+    ).toBe("P1");
+    expect(
+      toolSummary({
+        ...baseMessage,
+        tool_name: "Workflow",
+        tool_input: JSON.stringify({ script: "cargo test" }),
+      }),
+    ).toBe("cargo test");
+    expect(
+      toolSummary({
+        ...baseMessage,
+        tool_name: "JavaScript",
+        tool_input: JSON.stringify({
+          title: "Inspect payload",
+          code: "await inspect()",
+        }),
+      }),
+    ).toBe("Inspect payload");
+    expect(
+      toolSummary({
+        ...baseMessage,
+        tool_name: "ComputerUse",
+        tool_input: JSON.stringify({ app: "Codex", key: "Return" }),
+      }),
+    ).toBe("Codex · Return");
   });
 });
 

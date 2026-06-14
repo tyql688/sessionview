@@ -16,11 +16,15 @@ const TOOL_ICONS: Record<string, string> = {
   WebFetch: "🌐",
   ImageGeneration: "🖼️",
   DynamicTool: "🧩",
+  JavaScript: "🟨",
+  ComputerUse: "🖱️",
   TaskCreate: "📋",
   TaskUpdate: "📋",
   TaskList: "📋",
   TaskOutput: "📋",
   TaskStop: "🛑",
+  Workflow: "🔁",
+  StructuredOutput: "📊",
   ToolSearch: "🧰",
   Skill: "⚡",
   AskUserQuestion: "❓",
@@ -141,6 +145,17 @@ export function toolSummary(message: Message): string {
           firstString(obj, ["task_id", "taskId"]),
           firstString(obj, ["reason"]),
         ]);
+      case "Workflow":
+        return firstString(obj, ["name", "description", "script"]).slice(0, 80);
+      case "StructuredOutput":
+        return firstString(obj, [
+          "finding_id",
+          "title",
+          "analysis",
+          "summary",
+          "corrected_root_cause",
+          "minimal_fix",
+        ]).slice(0, 80);
       case "CronCreate":
         return joinParts([
           firstString(obj, ["cron"]),
@@ -157,6 +172,13 @@ export function toolSummary(message: Message): string {
         return firstString(obj, ["url", "Url"]);
       case "ReadMediaFile":
         return shortenHomePath(firstString(obj, ["path"]));
+      case "JavaScript":
+        return firstString(obj, ["title", "code"]).slice(0, 80);
+      case "ComputerUse":
+        return joinParts([
+          firstString(obj, ["app"]),
+          firstString(obj, ["key", "direction", "element_index", "action"]),
+        ]);
       case "AskUserQuestion": {
         const questions = Array.isArray(obj.questions)
           ? `${obj.questions.length} question(s)`

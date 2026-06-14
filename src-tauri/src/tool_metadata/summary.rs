@@ -61,7 +61,7 @@ pub(super) fn input_summary(
                 .or_else(|| input.get("delay_seconds"))
                 .and_then(|v| v.as_u64())
                 .map(|seconds| format!("{seconds}s"));
-            let reason = string_field(input, &["reason"])
+            let reason = string_field(input, &["reason", "prompt"])
                 .map(|s| compact_string(s, 80))
                 .unwrap_or_default();
             [delay.unwrap_or_default(), reason]
@@ -110,7 +110,7 @@ pub(super) fn input_summary(
             }
         }
         "SendMessage" | "FollowupTask" => {
-            string_field(input, &["description", "prompt", "message"])
+            string_field(input, &["description", "prompt", "message", "content"])
                 .map(|s| compact_string(s, 80))
                 .unwrap_or_default()
         }
@@ -160,6 +160,22 @@ pub(super) fn input_summary(
                 .unwrap_or_default();
             join_non_empty([task, reason])
         }
+        "Workflow" => string_field(input, &["name", "description", "script"])
+            .map(|s| compact_string(s, 80))
+            .unwrap_or_default(),
+        "StructuredOutput" => string_field(
+            input,
+            &[
+                "finding_id",
+                "title",
+                "analysis",
+                "summary",
+                "corrected_root_cause",
+                "minimal_fix",
+            ],
+        )
+        .map(|s| compact_string(s, 80))
+        .unwrap_or_default(),
         "CronCreate" => {
             let cron = string_field(input, &["cron"])
                 .unwrap_or_default()
@@ -191,6 +207,50 @@ pub(super) fn input_summary(
         "ImageGeneration" => string_field(input, &["revised_prompt", "prompt"])
             .map(|s| compact_string(s, 80))
             .unwrap_or_default(),
+        "JavaScript" => string_field(input, &["title", "code"])
+            .map(|s| compact_string(s, 80))
+            .unwrap_or_default(),
+        "ComputerUse" => {
+            let app = string_field(input, &["app"])
+                .map(|s| compact_string(s, 40))
+                .unwrap_or_default();
+            let action = match raw_name {
+                "click" => {
+                    let target = string_field(input, &["element_index"])
+                        .map(|s| format!("element {s}"))
+                        .or_else(|| {
+                            let x = input.get("x").and_then(|v| v.as_f64())?;
+                            let y = input.get("y").and_then(|v| v.as_f64())?;
+                            Some(format!("{x},{y}"))
+                        })
+                        .unwrap_or_default();
+                    join_non_empty(["click".to_string(), target])
+                }
+                "press_key" => string_field(input, &["key"])
+                    .map(|s| format!("key {s}"))
+                    .unwrap_or_default(),
+                "scroll" => string_field(input, &["direction"])
+                    .map(|s| format!("scroll {s}"))
+                    .unwrap_or_default(),
+                "drag" => "drag".to_string(),
+                "type_text" => string_field(input, &["text"])
+                    .map(|s| compact_string(s, 40))
+                    .unwrap_or_else(|| "type text".to_string()),
+                "get_app_state" => "state".to_string(),
+                "list_apps" => "apps".to_string(),
+                "set_value" => string_field(input, &["element_index"])
+                    .map(|s| format!("element {s}"))
+                    .unwrap_or_else(|| "set value".to_string()),
+                "select_text" => string_field(input, &["text"])
+                    .map(|s| compact_string(s, 40))
+                    .unwrap_or_else(|| "select text".to_string()),
+                "perform_secondary_action" => string_field(input, &["action"])
+                    .map(|s| compact_string(s, 40))
+                    .unwrap_or_default(),
+                _ => String::new(),
+            };
+            join_non_empty([app, action])
+        }
         "DynamicTool" => string_field(input, &["tool", "name"])
             .or_else(|| Some(raw_name).filter(|name| *name != "dynamic_tool_call"))
             .map(|s| compact_string(s, 80))

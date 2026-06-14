@@ -207,13 +207,21 @@ mod tests {
             ("AgentSwarm", "Agent"),
             ("spawn_agent", "Agent"),
             ("send_message", "SendMessage"),
+            ("SendMessage", "SendMessage"),
             ("followup_task", "FollowupTask"),
             ("list_agents", "ListAgents"),
+            ("TaskCreate", "TaskCreate"),
+            ("TaskUpdate", "TaskUpdate"),
+            ("Workflow", "Workflow"),
+            ("StructuredOutput", "StructuredOutput"),
             ("request_permissions", "RequestPermissions"),
             ("todowrite", "Plan"),
             ("TodoList", "Plan"),
             ("FetchURL", "WebFetch"),
+            ("WebFetch", "WebFetch"),
+            ("WebSearch", "WebSearch"),
             ("ReadMediaFile", "ReadMediaFile"),
+            ("view_image", "ReadMediaFile"),
             ("TaskList", "TaskList"),
             ("TaskOutput", "TaskOutput"),
             ("TaskStop", "TaskStop"),
@@ -224,10 +232,19 @@ mod tests {
             ("GetGoal", "GetGoal"),
             ("SetGoalBudget", "SetGoalBudget"),
             ("UpdateGoal", "UpdateGoal"),
+            ("create_goal", "CreateGoal"),
+            ("get_goal", "GetGoal"),
+            ("set_goal_budget", "SetGoalBudget"),
+            ("update_goal", "UpdateGoal"),
             ("webfetch", "WebFetch"),
             ("websearch", "WebSearch"),
             ("codesearch", "ToolSearch"),
+            ("ToolSearch", "ToolSearch"),
+            ("js", "JavaScript"),
+            ("get_app_state", "ComputerUse"),
+            ("click", "ComputerUse"),
             ("skill", "Skill"),
+            ("Skill", "Skill"),
             ("list", "Glob"),
             ("ls", "Glob"),
             ("find", "Glob"),
@@ -541,6 +558,80 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some("<omitted>")
         );
+    }
+
+    #[test]
+    fn summarizes_recent_claude_and_codex_tool_names() {
+        fn metadata(
+            provider: Provider,
+            raw: &str,
+            input: serde_json::Value,
+        ) -> crate::models::ToolMetadata {
+            build_tool_metadata(ToolCallFacts {
+                provider,
+                raw_name: raw,
+                input: Some(&input),
+                call_id: None,
+                assistant_id: None,
+            })
+        }
+
+        let task = metadata(
+            Provider::Claude,
+            "TaskCreate",
+            json!({ "subject": "index new sessions", "description": "scan provider logs" }),
+        );
+        assert_eq!(task.category, "task");
+        assert_eq!(task.display_name, "task create");
+        assert_eq!(task.summary.as_deref(), Some("index new sessions"));
+
+        let structured = metadata(
+            Provider::Claude,
+            "StructuredOutput",
+            json!({ "finding_id": "P1", "analysis": "new tool was not classified" }),
+        );
+        assert_eq!(structured.category, "tool");
+        assert_eq!(structured.display_name, "structured output");
+        assert_eq!(structured.summary.as_deref(), Some("P1"));
+
+        let workflow = metadata(
+            Provider::Claude,
+            "Workflow",
+            json!({ "script": "cargo test --package ccsession" }),
+        );
+        assert_eq!(workflow.category, "tool");
+        assert_eq!(workflow.display_name, "workflow");
+        assert_eq!(
+            workflow.summary.as_deref(),
+            Some("cargo test --package ccsession")
+        );
+
+        let node = metadata(
+            Provider::Codex,
+            "js",
+            json!({ "title": "Inspect payload shape", "code": "await inspect()" }),
+        );
+        assert_eq!(node.category, "tool");
+        assert_eq!(node.display_name, "node repl");
+        assert_eq!(node.summary.as_deref(), Some("Inspect payload shape"));
+
+        let computer = metadata(
+            Provider::Codex,
+            "press_key",
+            json!({ "app": "Codex", "key": "Return" }),
+        );
+        assert_eq!(computer.category, "tool");
+        assert_eq!(computer.display_name, "press key");
+        assert_eq!(computer.summary.as_deref(), Some("Codex · key Return"));
+
+        let goal = metadata(
+            Provider::Codex,
+            "create_goal",
+            json!({ "objective": "finish refactor" }),
+        );
+        assert_eq!(goal.category, "goal");
+        assert_eq!(goal.display_name, "create goal");
+        assert_eq!(goal.summary.as_deref(), Some("finish refactor"));
     }
 
     #[test]

@@ -50,9 +50,16 @@ pub fn canonical_tool_name(provider: Provider, name: &str) -> String {
         "Task" | "task" | "Subagent" | "subagent" | "Agent" | "AgentSwarm" | "agent"
         | "read_agent" | "spawn_agent" | "wait_agent" | "send_input" | "close_agent"
         | "invoke_subagent" | "define_subagent" => "Agent",
-        "send_message" => "SendMessage",
+        "send_message" | "SendMessage" => "SendMessage",
         "followup_task" => "FollowupTask",
         "list_agents" => "ListAgents",
+        "TaskCreate" => "TaskCreate",
+        "TaskUpdate" => "TaskUpdate",
+        "TaskList" => "TaskList",
+        "TaskOutput" => "TaskOutput",
+        "TaskStop" => "TaskStop",
+        "Workflow" => "Workflow",
+        "StructuredOutput" => "StructuredOutput",
         "update_plan" | "TodoWrite" | "TodoList" | "todo" | "todowrite" | "Enter Plan Mode"
         | "EnterPlanMode" | "ExitPlanMode" | "enter_plan_mode" | "exit_plan_mode"
         | "manage_task" => "Plan",
@@ -60,17 +67,33 @@ pub fn canonical_tool_name(provider: Provider, name: &str) -> String {
         "request_permissions" | "ask_permission" | "list_permissions" => "RequestPermissions",
         "ScheduleWakeup" | "schedule" => "ScheduleWakeup",
         "ReadLints" => "Lint",
-        "web_fetch" | "webfetch" | "FetchURL" | "read_url_content" => "WebFetch",
-        "web_search" | "web_search_call" | "websearch" | "search_web" => "WebSearch",
+        "web_fetch" | "webfetch" | "WebFetch" | "FetchURL" | "read_url_content" => "WebFetch",
+        "web_search" | "web_search_call" | "websearch" | "WebSearch" | "search_web" => "WebSearch",
         "image_generation_call" | "image_generation_end" => "ImageGeneration",
         "dynamic_tool_call"
         | "dynamic_tool_call_request"
         | "dynamic_tool_call_response"
         | "load_workspace_dependencies"
         | "install_workspace_dependencies" => "DynamicTool",
-        "codesearch" => "ToolSearch",
+        "js" | "js_add_node_module_dir" | "js_reset" => "JavaScript",
+        "view_image" => "ReadMediaFile",
+        "get_app_state"
+        | "list_apps"
+        | "click"
+        | "press_key"
+        | "scroll"
+        | "drag"
+        | "type_text"
+        | "set_value"
+        | "select_text"
+        | "perform_secondary_action" => "ComputerUse",
+        "create_goal" => "CreateGoal",
+        "get_goal" => "GetGoal",
+        "set_goal_budget" => "SetGoalBudget",
+        "update_goal" => "UpdateGoal",
+        "codesearch" | "ToolSearch" => "ToolSearch",
         "list_mcp_resources" | "list_mcp_resource_templates" => "ListMcpResourcesTool",
-        "skill" => "Skill",
+        "skill" | "Skill" => "Skill",
         "sql" | "SQL" => "SQL",
         other => other,
     }
@@ -91,7 +114,7 @@ pub(super) fn tool_category(canonical_name: &str, raw_name: &str) -> String {
         "FollowupTask" => "task",
         "WebSearch" | "WebFetch" => "web",
         "ImageGeneration" | "ReadMediaFile" => "media",
-        "DynamicTool" => "tool",
+        "DynamicTool" | "JavaScript" | "ComputerUse" | "Workflow" | "StructuredOutput" => "tool",
         "Skill" => "skill",
         "CronCreate" | "CronList" | "CronDelete" | "ScheduleWakeup" => "cron",
         "CreateGoal" | "GetGoal" | "SetGoalBudget" | "UpdateGoal" => "goal",
@@ -111,6 +134,7 @@ pub(super) fn display_tool_name(raw_name: &str, canonical_name: &str) -> String 
         "write_stdin" => "write stdin".to_string(),
         "Monitor" => "monitor".to_string(),
         "ScheduleWakeup" => "schedule wakeup".to_string(),
+        "SendMessage" => "send message".to_string(),
         "update_plan" => "update plan".to_string(),
         "request_user_input" => "request user input".to_string(),
         "request_permissions" => "request permissions".to_string(),
@@ -129,14 +153,21 @@ pub(super) fn display_tool_name(raw_name: &str, canonical_name: &str) -> String 
         "todowrite" => "todo write".to_string(),
         "TodoList" => "todo list".to_string(),
         "question" => "question".to_string(),
+        "TaskCreate" => "task create".to_string(),
+        "TaskUpdate" => "task update".to_string(),
         "TaskList" => "task list".to_string(),
         "TaskOutput" => "task output".to_string(),
         "TaskStop" => "task stop".to_string(),
+        "Workflow" => "workflow".to_string(),
+        "StructuredOutput" => "structured output".to_string(),
+        "ToolSearch" => "tool search".to_string(),
         "CronCreate" => "cron create".to_string(),
         "CronList" => "cron list".to_string(),
         "CronDelete" => "cron delete".to_string(),
         "ReadMediaFile" => "read media file".to_string(),
+        "view_image" => "view image".to_string(),
         "FetchURL" => "fetch URL".to_string(),
+        "WebFetch" => "web fetch".to_string(),
         "WebSearch" => "web search".to_string(),
         "AskUserQuestion" => "ask user".to_string(),
         "EnterPlanMode" => "enter plan mode".to_string(),
@@ -153,6 +184,23 @@ pub(super) fn display_tool_name(raw_name: &str, canonical_name: &str) -> String 
         }
         "load_workspace_dependencies" => "load workspace dependencies".to_string(),
         "install_workspace_dependencies" => "install workspace dependencies".to_string(),
+        "js" => "node repl".to_string(),
+        "js_add_node_module_dir" => "add node module dir".to_string(),
+        "js_reset" => "reset node repl".to_string(),
+        "get_app_state" => "get app state".to_string(),
+        "list_apps" => "list apps".to_string(),
+        "click" => "click".to_string(),
+        "scroll" => "scroll".to_string(),
+        "drag" => "drag".to_string(),
+        "press_key" => "press key".to_string(),
+        "type_text" => "type text".to_string(),
+        "set_value" => "set value".to_string(),
+        "select_text" => "select text".to_string(),
+        "perform_secondary_action" => "perform secondary action".to_string(),
+        "create_goal" => "create goal".to_string(),
+        "get_goal" => "get goal".to_string(),
+        "set_goal_budget" => "set goal budget".to_string(),
+        "update_goal" => "update goal".to_string(),
         "codesearch" => "code search".to_string(),
         "skill" => "skill".to_string(),
         "find" => "find".to_string(),
