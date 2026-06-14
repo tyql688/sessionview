@@ -145,118 +145,75 @@ describe("tools/names", () => {
 });
 
 describe("tools/input", () => {
-  it("formats canonical input for known tools", () => {
+  it("returns Rust presentation input detail", () => {
     const detail = formatToolInput({
       ...baseMessage,
       tool_name: "Grep",
-      tool_input: JSON.stringify({
-        pattern: "fn main",
-        path: "/Users/alice/repo/src",
-      }),
+      tool_input: JSON.stringify({ pattern: "fn main" }),
+      tool_metadata: {
+        raw_name: "Grep",
+        canonical_name: "Grep",
+        display_name: "Grep",
+        category: "search",
+        presentation: {
+          icon: "🔎",
+          rawOutputPolicy: "keep",
+          inputDetail: {
+            lines: [
+              { label: "pattern", value: "fn main" },
+              { label: "path", value: "~/repo/src" },
+            ],
+          },
+        },
+      },
     });
 
-    expect(detail?.lines).toContainEqual({
-      label: "pattern",
-      value: "fn main",
-    });
-    expect(detail?.lines).toContainEqual({
-      label: "path",
-      value: "~/repo/src",
+    expect(detail).toEqual({
+      lines: [
+        { label: "pattern", value: "fn main" },
+        { label: "path", value: "~/repo/src" },
+      ],
     });
   });
 
-  it("formats antigravity replace_file_content input as single diff", () => {
+  it("keeps full diff input presentation from metadata", () => {
     const detail = formatToolInput({
       ...baseMessage,
       tool_name: "Edit",
-      tool_input: JSON.stringify({
-        TargetFile: "/tmp/project/main.rs",
-        TargetContent: "old line",
-        ReplacementContent: "new line",
-        StartLine: 5,
-        EndLine: 5,
-      }),
-    });
-
-    expect(detail?.lines).toContainEqual({
-      label: "file",
-      value: "/tmp/project/main.rs",
-    });
-    expect(detail?.diff).toEqual({ old: "old line", new: "new line" });
-  });
-
-  it("formats antigravity multi_replace_file_content input as patch diff", () => {
-    const detail = formatToolInput({
-      ...baseMessage,
-      tool_name: "Edit",
-      tool_input: JSON.stringify({
-        TargetFile: "/tmp/project/main.rs",
-        ReplacementChunks: [
-          {
-            StartLine: 1,
-            EndLine: 1,
-            TargetContent: "old A",
-            ReplacementContent: "new A",
+      tool_metadata: {
+        raw_name: "Edit",
+        canonical_name: "Edit",
+        display_name: "Edit",
+        category: "file",
+        presentation: {
+          icon: "✏️",
+          rawOutputPolicy: "keep",
+          inputDetail: {
+            lines: [{ label: "file", value: "/tmp/project/main.rs" }],
+            diff: { old: "old line", new: "new line" },
           },
-          {
-            StartLine: 10,
-            EndLine: 11,
-            TargetContent: "old B1\nold B2",
-            ReplacementContent: "new B1\nnew B2",
-          },
-        ],
-      }),
+        },
+      },
     });
 
     expect(detail?.lines).toEqual([
       { label: "file", value: "/tmp/project/main.rs" },
     ]);
-    const types = detail?.patchDiff?.map((line) => line.type);
-    // One skip for the *** Update File: header, then per-hunk:
-    //  skip (@@), remove(s), add(s). 1+1 then 2+2.
-    expect(types).toEqual([
-      "skip", // *** Update File: ...
-      "skip", // @@ -1,1 +1,1 @@
-      "remove",
-      "add",
-      "skip", // @@ -10,2 +10,2 @@
-      "remove",
-      "remove",
-      "add",
-      "add",
-    ]);
-    expect(detail?.patchDiff?.[0]?.text).toBe(
-      "*** Update File: /tmp/project/main.rs",
-    );
+    expect(detail?.diff).toEqual({ old: "old line", new: "new line" });
   });
 
-  it("formats Codex apply_patch input as patch diff rows", () => {
+  it("does not synthesize legacy input detail without presentation", () => {
     const detail = formatToolInput({
       ...baseMessage,
       tool_name: "Edit",
       tool_input: JSON.stringify({
-        patch: `*** Begin Patch
-*** Update File: /Users/alice/project/src/app.ts
-@@
--old
-+new
-*** End Patch
-`,
+        file_path: "/tmp/project/main.rs",
+        old_string: "old",
+        new_string: "new",
       }),
     });
 
-    expect(detail?.patchDiff?.map((line) => line.type)).toEqual([
-      "skip",
-      "skip",
-      "remove",
-      "add",
-    ]);
-    expect(detail?.lines).toEqual([
-      { label: "files", value: "~/project/src/app.ts" },
-    ]);
-    expect(detail?.patchDiff?.[0]?.text).toBe(
-      "*** Update File: ~/project/src/app.ts",
-    );
+    expect(detail).toBeNull();
   });
 });
 

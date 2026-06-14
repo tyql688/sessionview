@@ -62,34 +62,6 @@ fn render_pre_field(label: &str, value: &str) -> String {
     )
 }
 
-fn render_call_metadata(structured: &serde_json::Map<String, Value>) -> String {
-    let mut html = String::new();
-    if let Some(description) = string_field(structured, &["callDescription"]) {
-        html.push_str(&render_field("description", description));
-    }
-
-    let Some(display) = structured
-        .get("callDisplay")
-        .and_then(|value| value.as_object())
-    else {
-        return html;
-    };
-    for key in [
-        "kind",
-        "operation",
-        "path",
-        "cwd",
-        "language",
-        "command",
-        "agent_name",
-    ] {
-        if let Some(value) = string_field(display, &[key]) {
-            html.push_str(&render_field(key, value));
-        }
-    }
-    html
-}
-
 fn render_diff_line(kind: &str, text: &str) -> String {
     let marker = match kind {
         "add" => "+",
@@ -201,58 +173,6 @@ pub(crate) fn render_patch_diff(patch: &str) -> String {
 
     html.push_str("</div>");
     html
-}
-
-fn render_structured_patch_diff(structured_patch: &Value) -> String {
-    let Some(hunks) = structured_patch.as_array() else {
-        return String::new();
-    };
-    if hunks.is_empty() {
-        return String::new();
-    }
-
-    let mut html = String::from(r#"<div class="tool-line-diff">"#);
-    let mut rendered_lines = 0usize;
-
-    for hunk in hunks {
-        let Some(lines) = hunk.get("lines").and_then(|value| value.as_array()) else {
-            continue;
-        };
-        let old_start = hunk.get("oldStart").and_then(|value| value.as_i64());
-        let old_lines = hunk.get("oldLines").and_then(|value| value.as_i64());
-        let new_start = hunk.get("newStart").and_then(|value| value.as_i64());
-        let new_lines = hunk.get("newLines").and_then(|value| value.as_i64());
-        if let (Some(old_start), Some(old_lines), Some(new_start), Some(new_lines)) =
-            (old_start, old_lines, new_start, new_lines)
-        {
-            html.push_str(&render_diff_line(
-                "skip",
-                &format!("@@ -{old_start},{old_lines} +{new_start},{new_lines} @@"),
-            ));
-        } else {
-            html.push_str(&render_diff_line("skip", "@@"));
-        }
-
-        for raw_line in lines.iter().filter_map(|line| line.as_str()) {
-            if let Some(rest) = raw_line.strip_prefix('+') {
-                html.push_str(&render_diff_line("add", rest));
-            } else if let Some(rest) = raw_line.strip_prefix('-') {
-                html.push_str(&render_diff_line("remove", rest));
-            } else if let Some(rest) = raw_line.strip_prefix(' ') {
-                html.push_str(&render_diff_line("context", rest));
-            } else {
-                html.push_str(&render_diff_line("skip", raw_line));
-            }
-            rendered_lines += 1;
-        }
-    }
-
-    html.push_str("</div>");
-    if rendered_lines == 0 {
-        String::new()
-    } else {
-        html
-    }
 }
 
 pub(crate) fn tool_icon(name: &str, metadata: Option<&ToolMetadata>) -> String {
@@ -644,28 +564,6 @@ pub(crate) fn render_tool_input_detail_for_message(
     render_tool_input_detail(tool_name, tool_input)
 }
 
-fn structured_record(metadata: &ToolMetadata) -> Option<&serde_json::Map<String, Value>> {
-    metadata.structured.as_ref()?.as_object()
-}
-
-fn render_output_result_fields(structured: &serde_json::Map<String, Value>) -> String {
-    let mut html = String::new();
-    for key in ["output", "content", "result", "stdout", "stderr", "error"] {
-        if let Some(value) = string_field(structured, &[key]) {
-            if !value.is_empty() {
-                html.push_str(&render_pre_field(key, value));
-            }
-        }
-    }
-    if let Some(value) = structured.get("success") {
-        html.push_str(&render_field("success", &value_to_short_string(value)));
-    }
-    if let Some(value) = structured.get("durationSeconds") {
-        html.push_str(&render_field("duration", &value_to_short_string(value)));
-    }
-    html
-}
-
 pub(crate) fn render_tool_result_detail(metadata: Option<&ToolMetadata>) -> String {
     let Some(metadata) = metadata else {
         return String::new();
@@ -677,237 +575,7 @@ pub(crate) fn render_tool_result_detail(metadata: Option<&ToolMetadata>) -> Stri
     {
         return render_tool_presentation_detail(detail);
     }
-    let Some(structured) = structured_record(metadata) else {
-        return String::new();
-    };
-
-    let mut html = String::new();
-    if let Some(status) = metadata.status.as_deref() {
-        html.push_str(&render_field("status", status));
-    }
-    html.push_str(&render_call_metadata(structured));
-
-    match metadata.canonical_name.as_str() {
-        "Bash" => {
-            if let Some(stdout) = string_field(structured, &["stdout", "output"]) {
-                if !stdout.is_empty() {
-                    html.push_str(&render_pre_field("stdout", stdout));
-                }
-            }
-            if let Some(stderr) = string_field(structured, &["stderr"]) {
-                if !stderr.is_empty() {
-                    html.push_str(&render_pre_field("stderr", stderr));
-                }
-            }
-        }
-        "Edit" | "Write" => {
-            if let Some(file) = string_field(structured, &["filePath", "file_path"]) {
-                html.push_str(&render_field("file", file));
-            }
-            let structured_patch_html = structured
-                .get("structuredPatch")
-                .map(render_structured_patch_diff)
-                .unwrap_or_default();
-            let has_structured_patch = !structured_patch_html.is_empty();
-            html.push_str(&structured_patch_html);
-            let old = string_field(structured, &["oldString", "old_string"]);
-            let new = string_field(structured, &["newString", "new_string"]);
-            if !has_structured_patch && (old.is_some() || new.is_some()) {
-                html.push_str(&render_line_diff(old.unwrap_or(""), new.unwrap_or("")));
-            } else if !has_structured_patch
-                && structured.get("type").and_then(|value| value.as_str()) == Some("create")
-            {
-                if let Some(content) = string_field(structured, &["content"]) {
-                    if !content.is_empty() {
-                        html.push_str(&render_line_diff("", content));
-                    }
-                }
-            }
-        }
-        "Agent" => {
-            for (label, key) in [
-                ("agent", "agentId"),
-                ("type", "agentType"),
-                ("tokens", "totalTokens"),
-                ("tools", "totalToolUseCount"),
-            ] {
-                if let Some(value) = structured.get(key) {
-                    html.push_str(&render_field(label, &value_to_short_string(value)));
-                }
-            }
-        }
-        "ToolSearch" => {
-            if let Some(query) = string_field(structured, &["query"]) {
-                html.push_str(&render_field("query", query));
-            }
-            if let Some(matches) = structured.get("matches").and_then(|v| v.as_array()) {
-                html.push_str(&render_field("matches", &matches.len().to_string()));
-            } else if let Some(total) = structured.get("total_deferred_tools") {
-                html.push_str(&render_field("matches", &value_to_short_string(total)));
-            }
-        }
-        "WebSearch" => {
-            if let Some(query) = string_field(structured, &["query"]) {
-                html.push_str(&render_field("query", query));
-            }
-            if let Some(count) = structured.get("searchCount") {
-                html.push_str(&render_field("searches", &value_to_short_string(count)));
-            }
-            if let Some(duration) = structured.get("durationSeconds") {
-                html.push_str(&render_field("duration", &value_to_short_string(duration)));
-            }
-            if let Some(results) = structured.get("results").and_then(|v| v.as_array()) {
-                html.push_str(&render_field("results", &results.len().to_string()));
-            }
-        }
-        "WebFetch" => {
-            for key in ["url", "code", "codeText", "bytes", "durationMs"] {
-                if let Some(value) = structured.get(key) {
-                    html.push_str(&render_field(key, &value_to_short_string(value)));
-                }
-            }
-            if let Some(result) = string_field(structured, &["result"]) {
-                html.push_str(&render_pre_field("result", result));
-            }
-        }
-        "ImageGeneration" => {
-            if let Some(path) = string_field(structured, &["savedPath", "saved_path"]) {
-                html.push_str(&render_field("savedPath", path));
-            }
-            if let Some(prompt) = string_field(structured, &["revisedPrompt", "revised_prompt"]) {
-                html.push_str(&render_field("revisedPrompt", prompt));
-            }
-        }
-        "DynamicTool" => {
-            for key in ["tool", "name", "success", "duration", "content"] {
-                if let Some(value) = structured.get(key) {
-                    html.push_str(&render_field(key, &value_to_short_string(value)));
-                }
-            }
-        }
-        "JavaScript" | "ComputerUse" | "StructuredOutput" | "SendMessage" | "ReadMediaFile" => {
-            html.push_str(&render_output_result_fields(structured));
-        }
-        "AskUserQuestion" => {
-            if let Some(questions) = structured.get("questions").and_then(|v| v.as_array()) {
-                html.push_str(&render_field("questions", &questions.len().to_string()));
-            }
-            if let Some(answers) = structured.get("answers") {
-                html.push_str(&render_field("answers", &value_to_short_string(answers)));
-            }
-        }
-        "ScheduleWakeup" => {
-            for key in ["scheduledFor", "clampedDelaySeconds", "wasClamped"] {
-                if let Some(value) = structured.get(key) {
-                    html.push_str(&render_field(key, &value_to_short_string(value)));
-                }
-            }
-        }
-        "Skill" => {
-            if let Some(command) = string_field(structured, &["commandName", "skill"]) {
-                html.push_str(&render_field("command", command));
-            }
-            if let Some(success) = structured.get("success") {
-                html.push_str(&render_field("success", &value_to_short_string(success)));
-            }
-        }
-        "Workflow" => {
-            for key in [
-                "workflowName",
-                "status",
-                "summary",
-                "runId",
-                "taskId",
-                "taskType",
-                "scriptPath",
-                "transcriptDir",
-            ] {
-                if let Some(value) = structured.get(key) {
-                    html.push_str(&render_field(key, &value_to_short_string(value)));
-                }
-            }
-        }
-        "CreateGoal" | "GetGoal" | "SetGoalBudget" | "UpdateGoal" => {
-            for key in [
-                "status",
-                "objective",
-                "remainingTokens",
-                "token_budget",
-                "completionBudgetReport",
-            ] {
-                if let Some(value) = structured.get(key) {
-                    html.push_str(&render_field(key, &value_to_short_string(value)));
-                }
-            }
-        }
-        _ if metadata.category == "task" => {
-            if let Some(task) = structured.get("task").and_then(|value| value.as_object()) {
-                for key in ["id", "subject", "task_id", "status", "task_type", "output"] {
-                    if let Some(value) = task.get(key) {
-                        html.push_str(&render_field(key, &value_to_short_string(value)));
-                    }
-                }
-            }
-            if let Some(tasks) = structured.get("tasks").and_then(|value| value.as_array()) {
-                html.push_str(&render_field("tasks", &tasks.len().to_string()));
-            }
-            for key in [
-                "taskId",
-                "task_id",
-                "task_type",
-                "status",
-                "statusChange",
-                "updatedFields",
-                "command",
-                "message",
-                "success",
-                "retrieval_status",
-            ] {
-                if let Some(value) = structured.get(key) {
-                    html.push_str(&render_field(key, &value_to_short_string(value)));
-                }
-            }
-        }
-        _ if metadata.category == "mcp" => {
-            if let Some(mcp) = &metadata.mcp {
-                html.push_str(&render_field("server", &mcp.server));
-                html.push_str(&render_field("tool", &mcp.tool));
-            }
-        }
-        _ => {}
-    }
-
-    html
-}
-
-fn value_to_short_string(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.clone(),
-        Value::Number(n) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Array(values) => values
-            .iter()
-            .map(value_to_short_string)
-            .filter(|value| !value.is_empty())
-            .collect::<Vec<_>>()
-            .join(", "),
-        Value::Object(obj) => {
-            let from = obj.get("from");
-            let to = obj.get("to");
-            if let (Some(from), Some(to)) = (from, to) {
-                return format!(
-                    "{} → {}",
-                    value_to_short_string(from),
-                    value_to_short_string(to)
-                );
-            }
-            obj.iter()
-                .map(|(key, value)| format!("{key}: {}", value_to_short_string(value)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        }
-        Value::Null => String::new(),
-    }
+    String::new()
 }
 
 pub(crate) fn suppress_raw_output(metadata: Option<&ToolMetadata>, result_has_diff: bool) -> bool {
@@ -922,11 +590,7 @@ pub(crate) fn suppress_raw_output(metadata: Option<&ToolMetadata>, result_has_di
         };
     }
 
-    match metadata.and_then(|m| m.result_kind.as_deref()) {
-        Some("terminal_output") => true,
-        Some("file_patch") => result_has_diff,
-        _ => false,
-    }
+    false
 }
 
 pub(crate) fn should_skip_tool(name: &str, metadata: Option<&ToolMetadata>) -> bool {
@@ -1125,73 +789,6 @@ mod tests {
     }
 
     #[test]
-    fn render_tool_result_detail_renders_bash_stdout_and_status() {
-        let mut md = metadata("Bash", "shell");
-        md.status = Some("completed".into());
-        md.structured = Some(json!({ "output": "hello world", "stderr": "" }));
-        let html = render_tool_result_detail(Some(&md));
-        assert!(html.contains(r#"<span class="tool-field-value">completed</span>"#));
-        assert!(html.contains(r#"<pre class="tool-cmd">hello world</pre>"#));
-        // empty stderr is suppressed.
-        assert!(!html.contains("stderr"));
-    }
-
-    #[test]
-    fn render_tool_result_detail_keeps_kimi_call_display_metadata() {
-        let mut md = metadata("Bash", "shell");
-        md.status = Some("completed".into());
-        md.structured = Some(json!({
-            "callDescription": "Run pwd",
-            "callDisplay": {
-                "kind": "bash",
-                "cwd": "/Users/alice/project",
-                "command": "pwd"
-            },
-            "output": "hello world"
-        }));
-        let html = render_tool_result_detail(Some(&md));
-        assert!(html.contains("Run pwd"));
-        assert!(html.contains("/Users/alice/project"));
-        assert!(html.contains(r#"<pre class="tool-cmd">hello world</pre>"#));
-    }
-
-    #[test]
-    fn render_tool_result_detail_handles_recent_tool_outputs() {
-        let mut task = metadata("TaskOutput", "task");
-        task.status = Some("success".into());
-        task.structured = Some(json!({
-            "retrieval_status": "completed",
-            "task": {
-                "task_id": "task-123",
-                "status": "completed",
-                "output": "new tools found"
-            }
-        }));
-        let task_html = render_tool_result_detail(Some(&task));
-        assert!(task_html.contains("task-123"));
-        assert!(task_html.contains("new tools found"));
-
-        let mut web = metadata("WebSearch", "web");
-        web.status = Some("success".into());
-        web.structured = Some(json!({
-            "query": "ccsession tools",
-            "searchCount": 1,
-            "durationSeconds": 0.25,
-            "results": [{ "title": "result" }]
-        }));
-        let web_html = render_tool_result_detail(Some(&web));
-        assert!(web_html.contains("ccsession tools"));
-        assert!(web_html.contains(r#"<span class="tool-field-label">results</span>"#));
-        assert!(web_html.contains(r#"<span class="tool-field-value">1</span>"#));
-
-        let mut scalar = metadata("SendMessage", "agent");
-        scalar.status = Some("success".into());
-        scalar.structured = Some(json!({ "output": "sent" }));
-        let scalar_html = render_tool_result_detail(Some(&scalar));
-        assert!(scalar_html.contains(r#"<pre class="tool-cmd">sent</pre>"#));
-    }
-
-    #[test]
     fn render_tool_result_detail_empty_without_structured() {
         assert_eq!(render_tool_result_detail(None), "");
         assert_eq!(
@@ -1224,23 +821,32 @@ mod tests {
     }
 
     #[test]
-    fn value_to_short_string_formats_from_to_transition() {
-        let value = json!({ "from": "pending", "to": "done" });
-        assert_eq!(value_to_short_string(&value), "pending → done");
-        assert_eq!(value_to_short_string(&json!(42)), "42");
-        assert_eq!(value_to_short_string(&json!(["a", "", "b"])), "a, b");
-    }
-
-    #[test]
-    fn suppress_raw_output_honours_result_kind() {
+    fn suppress_raw_output_honours_presentation_policy() {
         let mut md = metadata("Bash", "shell");
-        md.result_kind = Some("terminal_output".into());
+        md.presentation = Some(ToolPresentation {
+            icon: "💻".to_string(),
+            input_detail: None,
+            result_detail: None,
+            raw_output_policy: RawOutputPolicy::SuppressTerminal,
+        });
         assert!(suppress_raw_output(Some(&md), false));
 
-        md.result_kind = Some("file_patch".into());
+        md.presentation = Some(ToolPresentation {
+            icon: "✏️".to_string(),
+            input_detail: None,
+            result_detail: None,
+            raw_output_policy: RawOutputPolicy::SuppressPatchWhenDiffPresent,
+        });
         assert!(suppress_raw_output(Some(&md), true));
         assert!(!suppress_raw_output(Some(&md), false));
 
+        md.presentation = Some(ToolPresentation {
+            icon: "⚙".to_string(),
+            input_detail: None,
+            result_detail: None,
+            raw_output_policy: RawOutputPolicy::Keep,
+        });
+        assert!(!suppress_raw_output(Some(&md), true));
         assert!(!suppress_raw_output(None, true));
     }
 

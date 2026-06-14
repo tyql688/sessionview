@@ -2,10 +2,13 @@
 //! Fixtures shared with frontend vitest tests.
 
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use cc_session_lib::models::{
     Message, MessageRole, Provider, SessionDetail, SessionMeta, TokenUsage, ToolMetadata,
+};
+use cc_session_lib::tool_metadata::{
+    build_tool_metadata, enrich_tool_metadata, ToolCallFacts, ToolResultFacts,
 };
 
 #[derive(Deserialize)]
@@ -125,6 +128,26 @@ fn assistant_message(content: &str) -> Message {
     }
 }
 
+fn metadata(raw_name: &str, input: Option<Value>, result: Value) -> ToolMetadata {
+    let mut metadata = build_tool_metadata(ToolCallFacts {
+        provider: Provider::Claude,
+        raw_name,
+        input: input.as_ref(),
+        call_id: None,
+        assistant_id: None,
+    });
+    enrich_tool_metadata(
+        &mut metadata,
+        ToolResultFacts {
+            raw_result: Some(&result),
+            is_error: Some(false),
+            status: None,
+            artifact_path: None,
+        },
+    );
+    metadata
+}
+
 #[test]
 fn test_render_session_html_uses_tool_metadata() {
     let detail = test_session(vec![
@@ -138,59 +161,42 @@ fn test_render_session_html_uses_tool_metadata() {
                 })
                 .to_string(),
             ),
-            Some(ToolMetadata {
-                raw_name: "Edit".to_string(),
-                canonical_name: "Edit".to_string(),
-                display_name: "Edit".to_string(),
-                category: "file".to_string(),
-                summary: Some("src/app.py".to_string()),
-                status: Some("success".to_string()),
-                ids: Default::default(),
-                mcp: None,
-                result_kind: Some("file_patch".to_string()),
-                structured: Some(json!({
+            Some(metadata(
+                "Edit",
+                Some(json!({
+                    "file_path": "/tmp/project/src/app.py",
+                    "old_string": "old",
+                    "new_string": "new"
+                })),
+                json!({
                     "filePath": "/tmp/project/src/app.py",
                     "oldString": "old",
                     "newString": "new"
-                })),
-                presentation: None,
-            }),
+                }),
+            )),
         ),
         tool_message(
             "mcp__server__browser_snapshot",
             Some(json!({}).to_string()),
-            Some(ToolMetadata {
-                raw_name: "mcp__server__browser_snapshot".to_string(),
-                canonical_name: "mcp__server__browser_snapshot".to_string(),
-                display_name: "browser snapshot".to_string(),
-                category: "mcp".to_string(),
-                summary: Some("page snapshot".to_string()),
-                status: Some("success".to_string()),
-                ids: Default::default(),
-                mcp: Some(cc_session_lib::models::McpToolMetadata {
-                    server: "server".to_string(),
-                    tool: "browser_snapshot".to_string(),
-                    display: "browser snapshot".to_string(),
+            Some(metadata(
+                "mcp__server__browser_snapshot",
+                Some(json!({})),
+                json!({
+                    "result": {
+                        "Ok": {
+                            "content": [{ "type": "text", "text": "snapshot" }]
+                        }
+                    }
                 }),
-                result_kind: Some("mcp".to_string()),
-                structured: Some(json!({"list":[{"type":"text","text":"snapshot"}]})),
-                presentation: None,
-            }),
+            )),
         ),
         tool_message(
             "Edit",
             None,
-            Some(ToolMetadata {
-                raw_name: "Edit".to_string(),
-                canonical_name: "Edit".to_string(),
-                display_name: "Edit".to_string(),
-                category: "file".to_string(),
-                summary: Some("src/patch.rs".to_string()),
-                status: Some("success".to_string()),
-                ids: Default::default(),
-                mcp: None,
-                result_kind: Some("file_patch".to_string()),
-                structured: Some(json!({
+            Some(metadata(
+                "Edit",
+                None,
+                json!({
                     "filePath": "/tmp/project/src/patch.rs",
                     "structuredPatch": [{
                         "oldStart": 7,
@@ -199,33 +205,24 @@ fn test_render_session_html_uses_tool_metadata() {
                         "newLines": 2,
                         "lines": [" context", "-old", "+new"]
                     }]
-                })),
-                presentation: None,
-            }),
+                }),
+            )),
         ),
         tool_message_with_content(
             "TaskUpdate",
             "task status raw output",
             None,
-            Some(ToolMetadata {
-                raw_name: "TaskUpdate".to_string(),
-                canonical_name: "TaskUpdate".to_string(),
-                display_name: "TaskUpdate".to_string(),
-                category: "task".to_string(),
-                summary: Some("11 → completed".to_string()),
-                status: Some("success".to_string()),
-                ids: Default::default(),
-                mcp: None,
-                result_kind: Some("task_status".to_string()),
-                structured: Some(json!({
+            Some(metadata(
+                "TaskUpdate",
+                None,
+                json!({
                     "taskId": "11",
                     "statusChange": {
                         "from": "in_progress",
                         "to": "completed"
                     }
-                })),
-                presentation: None,
-            }),
+                }),
+            )),
         ),
     ]);
 
