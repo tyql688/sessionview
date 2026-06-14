@@ -79,10 +79,7 @@ pub(super) fn search_with_like(
                     ELSE ''
                 END AS snip,
                 s.title AS like_title,
-                CASE
-                    WHEN ?1 <> '' THEN s.content_text
-                    ELSE ''
-                END AS like_content_text,
+                s.content_text AS like_content_text,
                 s.project_name AS like_project_name
          FROM sessions s
          WHERE 1=1",
@@ -228,21 +225,6 @@ fn query_like_search_results(
         .iter()
         .map(std::convert::AsRef::as_ref)
         .collect();
-    if tokens.is_empty() {
-        let rows = stmt.query_map(params_refs.as_slice(), |row| {
-            Ok(SearchResult {
-                session: row_to_session_meta(row)?,
-                snippet: row.get(20)?,
-            })
-        })?;
-
-        let mut results = Vec::new();
-        for row in rows {
-            results.push(row?);
-        }
-        return Ok(results);
-    }
-
     let rows = stmt.query_map(params_refs.as_slice(), |row| {
         let fallback_snippet: String = row.get(20)?;
         let title: String = row.get(21)?;
