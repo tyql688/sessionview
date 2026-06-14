@@ -216,11 +216,18 @@ pub(crate) fn tool_icon(name: &str, metadata: Option<&ToolMetadata>) -> &'static
         "WebSearch" | "WebFetch" => "🌐",
         "ImageGeneration" | "ReadMediaFile" => "🖼️",
         "DynamicTool" => "🧩",
+        "JavaScript" => "🟨",
+        "ComputerUse" => "🖱️",
+        "Workflow" => "🔁",
+        "StructuredOutput" => "📊",
         "ToolSearch" => "🧰",
         "Skill" => "⚡",
         "AskUserQuestion" => "❓",
         "CronCreate" | "CronList" | "CronDelete" | "ScheduleWakeup" => "⏰",
         "CreateGoal" | "GetGoal" | "SetGoalBudget" | "UpdateGoal" => "🎯",
+        "SendMessage" => "✉️",
+        "RequestPermissions" => "🔐",
+        "ListMcpResourcesTool" => "🔌",
         _ => "⚙",
     }
 }
@@ -323,8 +330,72 @@ pub(crate) fn tool_summary(name: &str, input: &str, metadata: Option<&ToolMetada
             join_non_empty([cron, prompt])
         }
         "CronDelete" => string_field(&obj, &["id"]).unwrap_or_default().to_string(),
+        "Skill" => string_field(&obj, &["skill"])
+            .unwrap_or_default()
+            .to_string(),
+        "ToolSearch" | "WebSearch" => string_field(&obj, &["query", "Query"])
+            .unwrap_or_default()
+            .to_string(),
+        "WebFetch" => string_field(&obj, &["url", "Url"])
+            .unwrap_or_default()
+            .to_string(),
         "ReadMediaFile" => string_field(&obj, &["path"])
             .map(shorten_home_path)
+            .unwrap_or_default(),
+        "Workflow" => string_field(&obj, &["name", "description", "script"])
+            .map(|s| {
+                if s.len() > 60 {
+                    format!("{}...", truncate_char_boundary(s, 57))
+                } else {
+                    s.to_string()
+                }
+            })
+            .unwrap_or_default(),
+        "StructuredOutput" => string_field(
+            &obj,
+            &[
+                "finding_id",
+                "title",
+                "analysis",
+                "summary",
+                "corrected_root_cause",
+                "minimal_fix",
+            ],
+        )
+        .map(|s| {
+            if s.len() > 60 {
+                format!("{}...", truncate_char_boundary(s, 57))
+            } else {
+                s.to_string()
+            }
+        })
+        .unwrap_or_default(),
+        "JavaScript" => string_field(&obj, &["title", "code"])
+            .map(|s| {
+                if s.len() > 60 {
+                    format!("{}...", truncate_char_boundary(s, 57))
+                } else {
+                    s.to_string()
+                }
+            })
+            .unwrap_or_default(),
+        "ComputerUse" => {
+            let app = string_field(&obj, &["app"])
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            let action = string_field(&obj, &["key", "direction", "element_index", "action"])
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            join_non_empty([app, action])
+        }
+        "SendMessage" => string_field(&obj, &["description", "prompt", "message", "content"])
+            .map(|s| {
+                if s.len() > 60 {
+                    format!("{}...", truncate_char_boundary(s, 57))
+                } else {
+                    s.to_string()
+                }
+            })
             .unwrap_or_default(),
         "AskUserQuestion" => {
             let questions = obj
@@ -504,6 +575,24 @@ fn structured_record(metadata: &ToolMetadata) -> Option<&serde_json::Map<String,
     metadata.structured.as_ref()?.as_object()
 }
 
+fn render_output_result_fields(structured: &serde_json::Map<String, Value>) -> String {
+    let mut html = String::new();
+    for key in ["output", "content", "result", "stdout", "stderr", "error"] {
+        if let Some(value) = string_field(structured, &[key]) {
+            if !value.is_empty() {
+                html.push_str(&render_pre_field(key, value));
+            }
+        }
+    }
+    if let Some(value) = structured.get("success") {
+        html.push_str(&render_field("success", &value_to_short_string(value)));
+    }
+    if let Some(value) = structured.get("durationSeconds") {
+        html.push_str(&render_field("duration", &value_to_short_string(value)));
+    }
+    html
+}
+
 pub(crate) fn render_tool_result_detail(metadata: Option<&ToolMetadata>) -> String {
     let Some(metadata) = metadata else {
         return String::new();
@@ -573,13 +662,32 @@ pub(crate) fn render_tool_result_detail(metadata: Option<&ToolMetadata>) -> Stri
             }
             if let Some(matches) = structured.get("matches").and_then(|v| v.as_array()) {
                 html.push_str(&render_field("matches", &matches.len().to_string()));
+            } else if let Some(total) = structured.get("total_deferred_tools") {
+                html.push_str(&render_field("matches", &value_to_short_string(total)));
+            }
+        }
+        "WebSearch" => {
+            if let Some(query) = string_field(structured, &["query"]) {
+                html.push_str(&render_field("query", query));
+            }
+            if let Some(count) = structured.get("searchCount") {
+                html.push_str(&render_field("searches", &value_to_short_string(count)));
+            }
+            if let Some(duration) = structured.get("durationSeconds") {
+                html.push_str(&render_field("duration", &value_to_short_string(duration)));
+            }
+            if let Some(results) = structured.get("results").and_then(|v| v.as_array()) {
+                html.push_str(&render_field("results", &results.len().to_string()));
             }
         }
         "WebFetch" => {
-            for key in ["url", "code", "codeText", "durationMs"] {
+            for key in ["url", "code", "codeText", "bytes", "durationMs"] {
                 if let Some(value) = structured.get(key) {
                     html.push_str(&render_field(key, &value_to_short_string(value)));
                 }
+            }
+            if let Some(result) = string_field(structured, &["result"]) {
+                html.push_str(&render_pre_field("result", result));
             }
         }
         "ImageGeneration" => {
@@ -597,8 +705,84 @@ pub(crate) fn render_tool_result_detail(metadata: Option<&ToolMetadata>) -> Stri
                 }
             }
         }
+        "JavaScript" | "ComputerUse" | "StructuredOutput" | "SendMessage" | "ReadMediaFile" => {
+            html.push_str(&render_output_result_fields(structured));
+        }
+        "AskUserQuestion" => {
+            if let Some(questions) = structured.get("questions").and_then(|v| v.as_array()) {
+                html.push_str(&render_field("questions", &questions.len().to_string()));
+            }
+            if let Some(answers) = structured.get("answers") {
+                html.push_str(&render_field("answers", &value_to_short_string(answers)));
+            }
+        }
+        "ScheduleWakeup" => {
+            for key in ["scheduledFor", "clampedDelaySeconds", "wasClamped"] {
+                if let Some(value) = structured.get(key) {
+                    html.push_str(&render_field(key, &value_to_short_string(value)));
+                }
+            }
+        }
+        "Skill" => {
+            if let Some(command) = string_field(structured, &["commandName", "skill"]) {
+                html.push_str(&render_field("command", command));
+            }
+            if let Some(success) = structured.get("success") {
+                html.push_str(&render_field("success", &value_to_short_string(success)));
+            }
+        }
+        "Workflow" => {
+            for key in [
+                "workflowName",
+                "status",
+                "summary",
+                "runId",
+                "taskId",
+                "taskType",
+                "scriptPath",
+                "transcriptDir",
+            ] {
+                if let Some(value) = structured.get(key) {
+                    html.push_str(&render_field(key, &value_to_short_string(value)));
+                }
+            }
+        }
+        "CreateGoal" | "GetGoal" | "SetGoalBudget" | "UpdateGoal" => {
+            for key in [
+                "status",
+                "objective",
+                "remainingTokens",
+                "token_budget",
+                "completionBudgetReport",
+            ] {
+                if let Some(value) = structured.get(key) {
+                    html.push_str(&render_field(key, &value_to_short_string(value)));
+                }
+            }
+        }
         _ if metadata.category == "task" => {
-            for key in ["taskId", "task_id", "statusChange", "message"] {
+            if let Some(task) = structured.get("task").and_then(|value| value.as_object()) {
+                for key in ["id", "subject", "task_id", "status", "task_type", "output"] {
+                    if let Some(value) = task.get(key) {
+                        html.push_str(&render_field(key, &value_to_short_string(value)));
+                    }
+                }
+            }
+            if let Some(tasks) = structured.get("tasks").and_then(|value| value.as_array()) {
+                html.push_str(&render_field("tasks", &tasks.len().to_string()));
+            }
+            for key in [
+                "taskId",
+                "task_id",
+                "task_type",
+                "status",
+                "statusChange",
+                "updatedFields",
+                "command",
+                "message",
+                "success",
+                "retrieval_status",
+            ] {
                 if let Some(value) = structured.get(key) {
                     html.push_str(&render_field(key, &value_to_short_string(value)));
                 }
@@ -742,6 +926,10 @@ mod tests {
         assert_eq!(tool_icon("Read", None), "📄");
         assert_eq!(tool_icon("Bash", None), "💻");
         assert_eq!(tool_icon("ReadMediaFile", None), "🖼️");
+        assert_eq!(tool_icon("JavaScript", None), "🟨");
+        assert_eq!(tool_icon("ComputerUse", None), "🖱️");
+        assert_eq!(tool_icon("StructuredOutput", None), "📊");
+        assert_eq!(tool_icon("Workflow", None), "🔁");
         assert_eq!(tool_icon("TaskOutput", None), "📋");
         assert_eq!(tool_icon("CronList", None), "⏰");
         assert_eq!(tool_icon("SetGoalBudget", None), "🎯");
@@ -873,6 +1061,42 @@ mod tests {
         assert!(html.contains("Run pwd"));
         assert!(html.contains("/Users/alice/project"));
         assert!(html.contains(r#"<pre class="tool-cmd">hello world</pre>"#));
+    }
+
+    #[test]
+    fn render_tool_result_detail_handles_recent_tool_outputs() {
+        let mut task = metadata("TaskOutput", "task");
+        task.status = Some("success".into());
+        task.structured = Some(json!({
+            "retrieval_status": "completed",
+            "task": {
+                "task_id": "task-123",
+                "status": "completed",
+                "output": "new tools found"
+            }
+        }));
+        let task_html = render_tool_result_detail(Some(&task));
+        assert!(task_html.contains("task-123"));
+        assert!(task_html.contains("new tools found"));
+
+        let mut web = metadata("WebSearch", "web");
+        web.status = Some("success".into());
+        web.structured = Some(json!({
+            "query": "ccsession tools",
+            "searchCount": 1,
+            "durationSeconds": 0.25,
+            "results": [{ "title": "result" }]
+        }));
+        let web_html = render_tool_result_detail(Some(&web));
+        assert!(web_html.contains("ccsession tools"));
+        assert!(web_html.contains(r#"<span class="tool-field-label">results</span>"#));
+        assert!(web_html.contains(r#"<span class="tool-field-value">1</span>"#));
+
+        let mut scalar = metadata("SendMessage", "agent");
+        scalar.status = Some("success".into());
+        scalar.structured = Some(json!({ "output": "sent" }));
+        let scalar_html = render_tool_result_detail(Some(&scalar));
+        assert!(scalar_html.contains(r#"<pre class="tool-cmd">sent</pre>"#));
     }
 
     #[test]

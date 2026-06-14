@@ -254,13 +254,99 @@ function formatToolSearchResult({ structured }: FormatterContext): Line[] {
   ];
 }
 
+function formatTaskResult({ structured, metadata }: FormatterContext): Line[] {
+  const lines: Line[] = [];
+  const task = nestedRecord(structured.task);
+
+  if (metadata.canonical_name === "TaskCreate") {
+    const id = firstString(task ?? structured, ["id", "taskId", "task_id"]);
+    const subject = firstString(task ?? structured, ["subject", "description"]);
+    if (id) lines.push({ label: "task", value: id });
+    if (subject) lines.push({ label: "subject", value: subject });
+    return lines;
+  }
+
+  if (metadata.canonical_name === "TaskList") {
+    if (Array.isArray(structured.tasks)) {
+      lines.push({ label: "tasks", value: String(structured.tasks.length) });
+      const preview = structured.tasks
+        .map((item) => {
+          const record = nestedRecord(item);
+          if (!record) return "";
+          return firstString(record, [
+            "subject",
+            "description",
+            "task_id",
+            "id",
+          ]);
+        })
+        .filter(Boolean)
+        .slice(0, 5)
+        .join("\n");
+      if (preview) lines.push({ label: "preview", value: preview });
+    }
+    return lines;
+  }
+
+  if (metadata.canonical_name === "TaskOutput") {
+    for (const [label, key] of [
+      ["retrieval", "retrieval_status"],
+      ["task", "task_id"],
+      ["status", "status"],
+      ["type", "task_type"],
+      ["description", "description"],
+      ["output", "output"],
+    ] as const) {
+      const value = firstString(task ?? structured, [key]);
+      if (value) lines.push({ label, value });
+    }
+    return lines;
+  }
+
+  for (const key of [
+    "taskId",
+    "task_id",
+    "task_type",
+    "status",
+    "statusChange",
+    "updatedFields",
+    "command",
+    "message",
+    "success",
+  ]) {
+    if (structured[key] !== undefined) {
+      lines.push({
+        label: key,
+        value: valueToDisplayString(structured[key]),
+      });
+    }
+  }
+  return lines;
+}
+
+function formatWebSearchResult({ structured }: FormatterContext): Line[] {
+  const lines: Line[] = [];
+  const query = firstString(structured, ["query"]);
+  if (query) lines.push({ label: "query", value: query });
+  const searchCount = maybeNumber(structured.searchCount);
+  if (searchCount) lines.push({ label: "searches", value: searchCount });
+  const duration = maybeNumber(structured.durationSeconds);
+  if (duration) lines.push({ label: "duration", value: `${duration}s` });
+  if (Array.isArray(structured.results)) {
+    lines.push({ label: "results", value: String(structured.results.length) });
+  }
+  return lines;
+}
+
 function formatWebFetchResult({ structured }: FormatterContext): Line[] {
   const lines: Line[] = [];
-  for (const key of ["url", "code", "codeText", "durationMs"]) {
+  for (const key of ["url", "code", "codeText", "bytes", "durationMs"]) {
     if (structured[key] !== undefined) {
       lines.push({ label: key, value: String(structured[key]) });
     }
   }
+  const result = firstString(structured, ["result"]);
+  if (result) lines.push({ label: "result", value: result });
   return lines;
 }
 
@@ -295,6 +381,109 @@ function formatDynamicToolResult({ structured }: FormatterContext): Line[] {
   }
   const content = firstString(structured, ["content"]);
   if (content) lines.push({ label: "result", value: content });
+  const error = firstString(structured, ["error"]);
+  if (error) lines.push({ label: "error", value: error });
+  return lines;
+}
+
+function formatQuestionResult({ structured }: FormatterContext): Line[] {
+  const lines: Line[] = [];
+  if (Array.isArray(structured.questions)) {
+    lines.push({
+      label: "questions",
+      value: String(structured.questions.length),
+    });
+  }
+  const answers = nestedRecord(structured.answers);
+  if (answers && Object.keys(answers).length > 0) {
+    lines.push({ label: "answers", value: valueToDisplayString(answers) });
+  }
+  return lines;
+}
+
+function formatScheduleResult({ structured }: FormatterContext): Line[] {
+  const lines: Line[] = [];
+  for (const key of ["scheduledFor", "clampedDelaySeconds", "wasClamped"]) {
+    if (structured[key] !== undefined) {
+      lines.push({ label: key, value: valueToDisplayString(structured[key]) });
+    }
+  }
+  return lines;
+}
+
+function formatSkillResult({ structured }: FormatterContext): Line[] {
+  const lines: Line[] = [];
+  const command = firstString(structured, ["commandName", "skill"]);
+  if (command) lines.push({ label: "command", value: command });
+  if (typeof structured.success === "boolean") {
+    lines.push({
+      label: "success",
+      value: structured.success ? "true" : "false",
+    });
+  }
+  return lines;
+}
+
+function formatWorkflowResult({ structured }: FormatterContext): Line[] {
+  const lines: Line[] = [];
+  for (const key of [
+    "workflowName",
+    "status",
+    "summary",
+    "runId",
+    "taskId",
+    "taskType",
+  ]) {
+    if (structured[key] !== undefined) {
+      lines.push({ label: key, value: valueToDisplayString(structured[key]) });
+    }
+  }
+  for (const key of ["scriptPath", "transcriptDir"]) {
+    const value = firstString(structured, [key]);
+    if (value) lines.push(toolLine(key, value));
+  }
+  return lines;
+}
+
+function formatOutputResult({ structured }: FormatterContext): Line[] {
+  const lines: Line[] = [];
+  for (const key of [
+    "output",
+    "content",
+    "result",
+    "stdout",
+    "stderr",
+    "error",
+  ]) {
+    const value = firstString(structured, [key]);
+    if (value) lines.push({ label: key, value });
+  }
+  if (typeof structured.success === "boolean") {
+    lines.push({
+      label: "success",
+      value: structured.success ? "true" : "false",
+    });
+  }
+  const duration = maybeNumber(
+    structured.durationSeconds ?? structured.duration_seconds,
+  );
+  if (duration) lines.push({ label: "duration", value: `${duration}s` });
+  return lines;
+}
+
+function formatGoalResult({ structured }: FormatterContext): Line[] {
+  const lines: Line[] = [];
+  for (const key of [
+    "status",
+    "objective",
+    "remainingTokens",
+    "token_budget",
+    "completionBudgetReport",
+  ]) {
+    if (structured[key] !== undefined) {
+      lines.push({ label: key, value: valueToDisplayString(structured[key]) });
+    }
+  }
   return lines;
 }
 
@@ -330,10 +519,29 @@ const RESULT_FORMATTERS: Record<string, ResultFormatter> = {
   Edit: formatFileEditResult,
   Write: formatFileEditResult,
   Agent: formatAgentResult,
+  TaskCreate: formatTaskResult,
+  TaskUpdate: formatTaskResult,
+  TaskList: formatTaskResult,
+  TaskOutput: formatTaskResult,
+  TaskStop: formatTaskResult,
   ToolSearch: formatToolSearchResult,
+  WebSearch: formatWebSearchResult,
   WebFetch: formatWebFetchResult,
   ImageGeneration: formatImageGenerationResult,
   DynamicTool: formatDynamicToolResult,
+  JavaScript: formatOutputResult,
+  ComputerUse: formatOutputResult,
+  StructuredOutput: formatOutputResult,
+  SendMessage: formatOutputResult,
+  AskUserQuestion: formatQuestionResult,
+  ScheduleWakeup: formatScheduleResult,
+  Skill: formatSkillResult,
+  Workflow: formatWorkflowResult,
+  ReadMediaFile: formatOutputResult,
+  CreateGoal: formatGoalResult,
+  GetGoal: formatGoalResult,
+  SetGoalBudget: formatGoalResult,
+  UpdateGoal: formatGoalResult,
 };
 
 /** Category-based fallback for canonical names without a dedicated formatter. */

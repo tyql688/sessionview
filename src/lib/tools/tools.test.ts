@@ -340,6 +340,148 @@ describe("tools/result", () => {
     );
   });
 
+  it("formats recently observed task result shapes", () => {
+    const taskOutput = formatToolResultMetadata({
+      raw_name: "TaskOutput",
+      canonical_name: "TaskOutput",
+      display_name: "task output",
+      category: "task",
+      status: "success",
+      result_kind: "task_status",
+      structured: {
+        retrieval_status: "completed",
+        task: {
+          task_id: "task-123",
+          status: "completed",
+          task_type: "analysis",
+          description: "scan tools",
+          output: "new tools found",
+        },
+      },
+    });
+
+    expect(taskOutput?.lines).toContainEqual({
+      label: "task",
+      value: "task-123",
+    });
+    expect(taskOutput?.lines).toContainEqual({
+      label: "output",
+      value: "new tools found",
+    });
+
+    const taskList = formatToolResultMetadata({
+      raw_name: "TaskList",
+      canonical_name: "TaskList",
+      display_name: "task list",
+      category: "task",
+      status: "success",
+      result_kind: "task_status",
+      structured: {
+        tasks: [
+          { id: "1", subject: "scan Claude" },
+          { id: "2", subject: "scan Codex" },
+        ],
+      },
+    });
+
+    expect(taskList?.lines).toContainEqual({ label: "tasks", value: "2" });
+    expect(taskList?.lines).toContainEqual({
+      label: "preview",
+      value: "scan Claude\nscan Codex",
+    });
+  });
+
+  it("formats recently observed web and interaction results", () => {
+    const webSearch = formatToolResultMetadata({
+      raw_name: "WebSearch",
+      canonical_name: "WebSearch",
+      display_name: "web search",
+      category: "web",
+      status: "success",
+      result_kind: "web_result",
+      structured: {
+        query: "ccsession tools",
+        searchCount: 1,
+        durationSeconds: 0.25,
+        results: [{ title: "result" }],
+      },
+    });
+
+    expect(webSearch?.lines).toContainEqual({
+      label: "results",
+      value: "1",
+    });
+    expect(webSearch?.lines).toContainEqual({
+      label: "duration",
+      value: "0.25s",
+    });
+
+    const question = formatToolResultMetadata({
+      raw_name: "AskUserQuestion",
+      canonical_name: "AskUserQuestion",
+      display_name: "ask user",
+      category: "interaction",
+      status: "success",
+      result_kind: "interaction_result",
+      structured: {
+        questions: [{ question: "Ship it?" }],
+        answers: { "Ship it?": "yes" },
+      },
+    });
+
+    expect(question?.lines).toContainEqual({
+      label: "questions",
+      value: "1",
+    });
+    expect(question?.lines).toContainEqual({
+      label: "answers",
+      value: "Ship it?: yes",
+    });
+  });
+
+  it("formats workflow and scalar tool outputs", () => {
+    const workflow = formatToolResultMetadata({
+      raw_name: "Workflow",
+      canonical_name: "Workflow",
+      display_name: "workflow",
+      category: "tool",
+      status: "success",
+      result_kind: "tool_output",
+      structured: {
+        workflowName: "audit",
+        status: "completed",
+        summary: "all checks passed",
+        transcriptDir: "/Users/alice/workflows/wf_1",
+      },
+    });
+
+    expect(workflow?.lines).toContainEqual({
+      label: "summary",
+      value: "all checks passed",
+    });
+    expect(workflow?.lines).toContainEqual({
+      label: "transcriptDir",
+      value: "/Users/alice/workflows/wf_1",
+    });
+
+    const sendMessage = formatToolResultMetadata({
+      raw_name: "SendMessage",
+      canonical_name: "SendMessage",
+      display_name: "send message",
+      category: "agent",
+      status: "success",
+      result_kind: "tool_output",
+      structured: {
+        output: "sent",
+      },
+    });
+
+    expect(sendMessage?.lines).toContainEqual({
+      label: "output",
+      value: "sent",
+    });
+  });
+
   it("formats image generation and dynamic tool metadata", () => {
     const imageDetail = formatToolResultMetadata({
       raw_name: "image_generation_call",

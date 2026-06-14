@@ -135,8 +135,45 @@ pub(super) fn result_kind_for_tool(raw_name: &str, result: Option<&Value>) -> Op
     if result.get("task").is_some()
         || result.get("taskId").is_some()
         || result.get("task_id").is_some()
+        || result.get("tasks").is_some()
     {
         return Some("task_status".to_string());
+    }
+    if canonical_name == "ToolSearch" {
+        return Some("search_result".to_string());
+    }
+    if matches!(canonical_name.as_str(), "WebSearch" | "WebFetch") {
+        return Some("web_result".to_string());
+    }
+    if matches!(
+        canonical_name.as_str(),
+        "AskUserQuestion" | "RequestPermissions"
+    ) {
+        return Some("interaction_result".to_string());
+    }
+    if matches!(
+        canonical_name.as_str(),
+        "ScheduleWakeup" | "CronCreate" | "CronList" | "CronDelete"
+    ) {
+        return Some("schedule_result".to_string());
+    }
+    if matches!(
+        canonical_name.as_str(),
+        "CreateGoal" | "GetGoal" | "SetGoalBudget" | "UpdateGoal"
+    ) {
+        return Some("goal_status".to_string());
+    }
+    if matches!(
+        canonical_name.as_str(),
+        "DynamicTool"
+            | "JavaScript"
+            | "ComputerUse"
+            | "Workflow"
+            | "StructuredOutput"
+            | "Skill"
+            | "SendMessage"
+    ) {
+        return Some("tool_output".to_string());
     }
     None
 }

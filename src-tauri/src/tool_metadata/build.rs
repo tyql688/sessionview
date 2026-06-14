@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 use super::names::{canonical_tool_name, display_tool_name, parse_mcp_tool_name, tool_category};
 use super::result::{compact_json_value, normalized_status, result_kind_for_tool};
@@ -94,6 +94,9 @@ pub fn enrich_tool_metadata(metadata: &mut ToolMetadata, result: ToolResultFacts
     let existing_structured = metadata.structured.take();
     let result_structured = result.raw_result.map(|value| {
         let mut compact = compact_json_value(value, 0);
+        if !compact.is_object() {
+            compact = json!({ "output": compact });
+        }
         normalize_structured_result(&mut compact);
         compact
     });
@@ -632,6 +635,93 @@ mod tests {
         assert_eq!(goal.category, "goal");
         assert_eq!(goal.display_name, "create goal");
         assert_eq!(goal.summary.as_deref(), Some("finish refactor"));
+    }
+
+    #[test]
+    fn enriches_recent_tool_result_shapes() {
+        let mut send_message = build_tool_metadata(ToolCallFacts {
+            provider: Provider::Claude,
+            raw_name: "SendMessage",
+            input: Some(&json!({ "message": "notify parent" })),
+            call_id: Some("toolu_send"),
+            assistant_id: None,
+        });
+        enrich_tool_metadata(
+            &mut send_message,
+            ToolResultFacts {
+                raw_result: Some(&json!("sent")),
+                is_error: Some(false),
+                status: None,
+                artifact_path: None,
+            },
+        );
+        assert_eq!(send_message.result_kind.as_deref(), Some("tool_output"));
+        assert_eq!(
+            send_message
+                .structured
+                .as_ref()
+                .and_then(|value| value.get("output"))
+                .and_then(|value| value.as_str()),
+            Some("sent")
+        );
+
+        let mut task_list = build_tool_metadata(ToolCallFacts {
+            provider: Provider::Claude,
+            raw_name: "TaskList",
+            input: Some(&json!({})),
+            call_id: Some("toolu_tasks"),
+            assistant_id: None,
+        });
+        enrich_tool_metadata(
+            &mut task_list,
+            ToolResultFacts {
+                raw_result: Some(&json!({ "tasks": [{ "id": "1", "subject": "scan tools" }] })),
+                is_error: Some(false),
+                status: None,
+                artifact_path: None,
+            },
+        );
+        assert_eq!(task_list.result_kind.as_deref(), Some("task_status"));
+
+        let mut web_search = build_tool_metadata(ToolCallFacts {
+            provider: Provider::Claude,
+            raw_name: "WebSearch",
+            input: Some(&json!({ "query": "ccsession tools" })),
+            call_id: Some("toolu_web"),
+            assistant_id: None,
+        });
+        enrich_tool_metadata(
+            &mut web_search,
+            ToolResultFacts {
+                raw_result: Some(&json!({
+                    "query": "ccsession tools",
+                    "searchCount": 1,
+                    "results": [{ "title": "result" }]
+                })),
+                is_error: Some(false),
+                status: None,
+                artifact_path: None,
+            },
+        );
+        assert_eq!(web_search.result_kind.as_deref(), Some("web_result"));
+
+        let mut skill = build_tool_metadata(ToolCallFacts {
+            provider: Provider::Claude,
+            raw_name: "Skill",
+            input: Some(&json!({ "skill": "imagegen" })),
+            call_id: Some("toolu_skill"),
+            assistant_id: None,
+        });
+        enrich_tool_metadata(
+            &mut skill,
+            ToolResultFacts {
+                raw_result: Some(&json!({ "commandName": "imagegen", "success": true })),
+                is_error: Some(false),
+                status: None,
+                artifact_path: None,
+            },
+        );
+        assert_eq!(skill.result_kind.as_deref(), Some("tool_output"));
     }
 
     #[test]

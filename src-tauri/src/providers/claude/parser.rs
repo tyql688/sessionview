@@ -702,7 +702,16 @@ mod tests {
         assert_eq!(metadata.category, "search");
         assert_eq!(metadata.summary.as_deref(), Some("select:TaskCreate"));
         assert_eq!(metadata.status.as_deref(), Some("success"));
-        assert_eq!(metadata.result_kind.as_deref(), None);
+        assert_eq!(metadata.result_kind.as_deref(), Some("search_result"));
+        assert_eq!(
+            metadata
+                .structured
+                .as_ref()
+                .and_then(|value| value.get("matches"))
+                .and_then(|value| value.as_array())
+                .map(Vec::len),
+            Some(1)
+        );
         assert_eq!(tool.content, "TaskCreate found");
     }
 
