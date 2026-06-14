@@ -20,6 +20,8 @@ export interface CreateSessionSearchOptions {
   loading: Accessor<boolean>;
   /** The current session id (matched against a pending global search). */
   sessionId: Accessor<string>;
+  /** Load older message windows until the query can be resolved or exhausted. */
+  loadUntilSearchMatch: (term: string) => Promise<number | null>;
   /** Register the debounce timer for cleanup by the owning component. */
   registerDebounce: (clear: () => void) => void;
 }
@@ -58,6 +60,7 @@ export function createSessionSearch(
 
   let sessionSearchDebounce: ReturnType<typeof setTimeout> | undefined;
   let suppressNextSearchEffect = false;
+  let searchRequestId = 0;
   opts.registerDebounce(() => clearTimeout(sessionSearchDebounce));
 
   function focusFirstRenderedSearchMatch() {
@@ -82,7 +85,8 @@ export function createSessionSearch(
     });
   }
 
-  function commitSessionSearch(raw: string) {
+  async function commitSessionSearch(raw: string) {
+    const requestId = ++searchRequestId;
     const term = raw.trim();
     setSearchMatchIdx(0);
     if (!term) {
@@ -92,9 +96,15 @@ export function createSessionSearch(
     }
 
     const entries = opts.filteredEntries();
-    const matchIdx = findNewestMatchingEntryIndex(entries, term);
-    setSearchFocusEntryIndex(matchIdx >= 0 ? matchIdx : null);
+    let matchIdx = findNewestMatchingEntryIndex(entries, term);
     setActiveSessionSearch(term);
+    if (matchIdx < 0) {
+      matchIdx = (await opts.loadUntilSearchMatch(term)) ?? -1;
+    }
+    if (requestId !== searchRequestId || term !== sessionSearch().trim()) {
+      return;
+    }
+    setSearchFocusEntryIndex(matchIdx >= 0 ? matchIdx : null);
     focusFirstRenderedSearchMatch();
   }
 
@@ -110,7 +120,7 @@ export function createSessionSearch(
     suppressNextSearchEffect = true;
     setSessionSearch(pending.query);
     setSearchBarOpen(true);
-    commitSessionSearch(pending.query);
+    void commitSessionSearch(pending.query);
   });
 
   createEffect(
@@ -121,11 +131,11 @@ export function createSessionSearch(
         return;
       }
       if (!raw.trim()) {
-        commitSessionSearch("");
+        void commitSessionSearch("");
         return;
       }
       sessionSearchDebounce = setTimeout(
-        () => commitSessionSearch(raw),
+        () => void commitSessionSearch(raw),
         SESSION_SEARCH_DEBOUNCE_MS,
       );
     }),

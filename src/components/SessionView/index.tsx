@@ -78,6 +78,8 @@ export function SessionView(props: {
   let loadOlderDebounce: (() => void) | undefined;
   let sessionSearchDebounce: (() => void) | undefined;
   let prevSessionId: string | null = null;
+  let loadUntilSearchMatchRef: (term: string) => Promise<number | null> =
+    async () => null;
 
   function withTokenTotals(
     metaData: SessionMeta,
@@ -113,6 +115,7 @@ export function SessionView(props: {
     getMessagesRef: () => messagesRef,
     loading,
     sessionId: () => props.session.id,
+    loadUntilSearchMatch: (term) => loadUntilSearchMatchRef(term),
     registerDebounce: (clear) => {
       sessionSearchDebounce = clear;
     },
@@ -128,6 +131,7 @@ export function SessionView(props: {
     visibleEntries,
     hasMore,
     loadOlderEntries,
+    loadUntilSearchMatch: loadUntilSearchMatchImpl,
     handleMessagesScroll,
   } = createSessionPagination({
     sessionId: () => props.session.id,
@@ -143,6 +147,7 @@ export function SessionView(props: {
       loadOlderDebounce = clear;
     },
   });
+  loadUntilSearchMatchRef = loadUntilSearchMatchImpl;
 
   createEffect(
     on(

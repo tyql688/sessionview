@@ -3,7 +3,10 @@ import type { Accessor, Setter } from "solid-js";
 import { getSessionMessagesWindow, isLoadCanceledError } from "../../lib/tauri";
 import type { Message, SessionMeta, TokenTotals } from "../../lib/types";
 import type { ProcessedEntry } from "./hooks";
-import { searchWindowBounds } from "./search-utils";
+import {
+  findNewestMatchingEntryIndex,
+  searchWindowBounds,
+} from "./search-utils";
 
 export const BATCH_SIZE = 80;
 export const LOAD_MORE_THRESHOLD = 1;
@@ -42,6 +45,7 @@ export interface CreateSessionPaginationResult {
   visibleEntries: Accessor<ProcessedEntry[]>;
   hasMore: Accessor<boolean>;
   loadOlderEntries: () => void;
+  loadUntilSearchMatch: (term: string) => Promise<number | null>;
   handleMessagesScroll: (e: Event) => void;
 }
 
@@ -116,8 +120,11 @@ export function createSessionPagination(
     });
   }
 
-  async function loadOlderTail() {
-    if (olderFetchInFlight || windowStart() <= 0) return;
+  async function loadOlderTail(options: {
+    revealLoadedEntries: boolean;
+    pinScroll: boolean;
+  }): Promise<boolean> {
+    if (olderFetchInFlight || windowStart() <= 0) return false;
     const sessionId = opts.sessionId();
     olderFetchInFlight = true;
     const newStart = Math.max(0, windowStart() - TAIL_BATCH);
@@ -125,7 +132,7 @@ export function createSessionPagination(
     const scrollBefore = opts.getMessagesRef()?.scrollTop ?? 0;
     try {
       const older = await getSessionMessagesWindow(sessionId, newStart, span);
-      if (sessionId !== opts.sessionId()) return;
+      if (sessionId !== opts.sessionId()) return false;
       opts.setMeta((prev) => opts.withTokenTotals(prev, older.token_totals));
       // Prepend the newly fetched older messages and grow `visibleCount`
       // by the same amount so the just-fetched entries actually become
@@ -135,11 +142,17 @@ export function createSessionPagination(
       opts.setMessages((prev) => [...older.messages, ...prev]);
       setWindowStart(newStart);
       setTotalMessages(older.total);
-      setVisibleCount((count) => count + older.messages.length);
-      pinScrollAfterPrepend(scrollBefore);
+      if (options.revealLoadedEntries) {
+        setVisibleCount((count) => count + older.messages.length);
+      }
+      if (options.pinScroll) {
+        pinScrollAfterPrepend(scrollBefore);
+      }
+      return older.messages.length > 0;
     } catch (e) {
-      if (isLoadCanceledError(e)) return;
+      if (isLoadCanceledError(e)) return false;
       console.warn("load older messages failed:", e);
+      return false;
     } finally {
       olderFetchInFlight = false;
     }
@@ -158,8 +171,25 @@ export function createSessionPagination(
       return;
     }
     if (windowStart() > 0) {
-      void loadOlderTail();
+      void loadOlderTail({ revealLoadedEntries: true, pinScroll: true });
     }
+  }
+
+  async function loadUntilSearchMatch(term: string): Promise<number | null> {
+    let matchIndex = findNewestMatchingEntryIndex(opts.filteredEntries(), term);
+    if (matchIndex >= 0) return matchIndex;
+
+    while (windowStart() > 0) {
+      const loaded = await loadOlderTail({
+        revealLoadedEntries: false,
+        pinScroll: false,
+      });
+      if (!loaded) break;
+      matchIndex = findNewestMatchingEntryIndex(opts.filteredEntries(), term);
+      if (matchIndex >= 0) return matchIndex;
+    }
+
+    return null;
   }
 
   function handleMessagesScroll(e: Event) {
@@ -199,6 +229,7 @@ export function createSessionPagination(
     visibleEntries,
     hasMore,
     loadOlderEntries,
+    loadUntilSearchMatch,
     handleMessagesScroll,
   };
 }

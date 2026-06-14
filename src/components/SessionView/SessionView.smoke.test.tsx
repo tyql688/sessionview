@@ -1,7 +1,8 @@
-import { render, waitFor } from "@solidjs/testing-library";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, waitFor } from "@solidjs/testing-library";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Message, SessionMeta } from "../../lib/types";
+import { SESSION_COMMAND_EVENTS } from "../../lib/session-command-events";
 
 // Minimal synthetic session payloads. The backend is fully mocked: `invoke`
 // dispatches on the Tauri command name so the session-load effect resolves
@@ -43,39 +44,45 @@ const MESSAGES: Message[] = [
   },
 ];
 
+let openWindowMessages = MESSAGES;
+let openWindowStart = 0;
+let totalMessages = MESSAGES.length;
+let messagesWindowMessages = MESSAGES;
+const messagesWindowCalls: Array<Record<string, unknown> | undefined> = [];
+
+function tokenTotals() {
+  return {
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+  };
+}
+
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn(async (command: string) => {
+  invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
     switch (command) {
       case "get_session_open_window":
         return {
           meta: META,
           window: {
-            total: MESSAGES.length,
-            start: 0,
-            messages: MESSAGES,
+            total: totalMessages,
+            start: openWindowStart,
+            messages: openWindowMessages,
             parse_warning_count: 0,
-            token_totals: {
-              input_tokens: 0,
-              output_tokens: 0,
-              cache_read_tokens: 0,
-              cache_write_tokens: 0,
-            },
+            token_totals: tokenTotals(),
           },
         };
       case "get_session_meta":
         return META;
       case "get_session_messages_window":
+        messagesWindowCalls.push(args);
         return {
-          total: MESSAGES.length,
-          start: 0,
-          messages: MESSAGES,
+          total: totalMessages,
+          start: typeof args?.offset === "number" ? (args.offset as number) : 0,
+          messages: messagesWindowMessages,
           parse_warning_count: 0,
-          token_totals: {
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-          },
+          token_totals: tokenTotals(),
         };
       case "is_favorite":
         return false;
@@ -105,6 +112,14 @@ beforeAll(() => {
   }
 });
 
+beforeEach(() => {
+  openWindowMessages = MESSAGES;
+  openWindowStart = 0;
+  totalMessages = MESSAGES.length;
+  messagesWindowMessages = MESSAGES;
+  messagesWindowCalls.length = 0;
+});
+
 describe("SessionView smoke", () => {
   it("mounts and renders messages once the load resolves", async () => {
     const { findByText } = render(() => (
@@ -129,6 +144,61 @@ describe("SessionView smoke", () => {
     expect(await findByText("Hello there")).toBeInTheDocument();
     await waitFor(() =>
       expect(document.querySelector(".session-messages")).not.toBeNull(),
+    );
+  });
+
+  it("loads older user messages when in-session search misses the initial tail", async () => {
+    const olderUserMessage: Message = {
+      ...MESSAGES[0],
+      content: "我发的旧内容",
+      timestamp: "2026-04-11T02:25:15.000Z",
+    };
+    openWindowMessages = [MESSAGES[1]];
+    openWindowStart = 1;
+    totalMessages = 2;
+    messagesWindowMessages = [olderUserMessage];
+
+    const { findByText } = render(() => (
+      <SessionView
+        session={{
+          id: META.id,
+          provider: "claude",
+          title: META.title,
+          project_name: "smoke",
+          is_sidechain: false,
+          source_path: META.source_path,
+          project_path: META.project_path,
+        }}
+        active={true}
+        onRefreshTree={() => {}}
+        onCloseTab={() => {}}
+      />
+    ));
+
+    expect(await findByText("General Kenobi reply")).toBeInTheDocument();
+    document.dispatchEvent(
+      new CustomEvent(SESSION_COMMAND_EVENTS.sessionSearch),
+    );
+    const input = await waitFor(() => {
+      const el = document.querySelector<HTMLInputElement>(
+        ".session-search-input",
+      );
+      expect(el).not.toBeNull();
+      return el!;
+    });
+
+    fireEvent.input(input, { target: { value: "我发的旧内容" } });
+
+    await waitFor(() =>
+      expect(messagesWindowCalls).toContainEqual(
+        expect.objectContaining({ offset: 0, limit: 1 }),
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        document.querySelector(".msg-row-user mark.search-highlight")
+          ?.textContent,
+      ).toBe("我发的旧内容"),
     );
   });
 });
