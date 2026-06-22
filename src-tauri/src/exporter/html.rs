@@ -231,7 +231,14 @@ pub fn render(detail: &SessionDetail) -> String {
     let project = html_escape(&detail.meta.project_name);
     let count = detail.meta.message_count;
     let date = format_epoch(detail.meta.created_at, "—");
-    let file_size = fmt_file_size(detail.meta.file_size_bytes);
+    // OpenCode reuses file_size_bytes to carry the whole opencode.db size for
+    // incremental-poll freshness, not a per-session size — render it as unknown
+    // instead of repeating the same DB size on every exported session.
+    let file_size = if matches!(detail.meta.provider, Provider::OpenCode) {
+        fmt_file_size(0)
+    } else {
+        fmt_file_size(detail.meta.file_size_bytes)
+    };
     let model = detail.meta.model.as_deref().unwrap_or("");
     let cc_version = detail.meta.cc_version.as_deref().unwrap_or("");
     let git_branch = detail.meta.git_branch.as_deref().unwrap_or("");

@@ -143,7 +143,16 @@ export function SessionToolbar(props: {
           {t("session.messages")}
         </span>
         <span class="info-sep">&middot;</span>
-        <span>{formatFileSize(props.meta().file_size_bytes)}</span>
+        {/* OpenCode reuses file_size_bytes to carry the whole opencode.db size
+            for incremental-poll freshness, not a per-session size. Surfacing it
+            would show the same DB size on every session, so render it as unknown. */}
+        <span>
+          {formatFileSize(
+            props.meta().provider === "opencode"
+              ? 0
+              : props.meta().file_size_bytes,
+          )}
+        </span>
         <Show when={totalTokens()}>
           <span class="info-sep">&middot;</span>
           <span
