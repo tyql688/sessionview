@@ -77,6 +77,7 @@ hljs.registerLanguage("graphql", graphql);
 
 const HIGHLIGHT_CACHE_LIMIT = 128;
 const HIGHLIGHT_CACHE_MAX_CODE_CHARS = 100_000;
+const LAZY_HIGHLIGHT_MIN_CODE_CHARS = 20_000;
 const highlightCache = new Map<string, string>();
 
 function highlightCacheKey(code: string, language: string): string {
@@ -131,17 +132,51 @@ export function CodeBlock(props: {
 }) {
   const { t } = useI18n();
   const [copied, setCopied] = createSignal(false);
+  const [highlightReady, setHighlightReady] = createSignal(false);
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
   let codeRef: HTMLElement | undefined;
+  let highlightObserver: IntersectionObserver | undefined;
 
-  onCleanup(() => clearTimeout(copyTimer));
+  onCleanup(() => {
+    clearTimeout(copyTimer);
+    highlightObserver?.disconnect();
+  });
+
+  createEffect(() => {
+    highlightObserver?.disconnect();
+    highlightObserver = undefined;
+
+    const lang = props.language?.toLowerCase();
+    if (
+      !codeRef ||
+      !lang ||
+      props.code.length < LAZY_HIGHLIGHT_MIN_CODE_CHARS
+    ) {
+      setHighlightReady(true);
+      return;
+    }
+
+    if (typeof IntersectionObserver === "undefined") {
+      setHighlightReady(true);
+      return;
+    }
+
+    setHighlightReady(false);
+    highlightObserver = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      setHighlightReady(true);
+      highlightObserver?.disconnect();
+      highlightObserver = undefined;
+    });
+    highlightObserver.observe(codeRef);
+  });
 
   createEffect(() => {
     if (!codeRef) return;
 
     codeRef.textContent = props.code;
     const lang = props.language?.toLowerCase();
-    if (lang) {
+    if (lang && highlightReady()) {
       const highlighted = highlightCode(props.code, lang);
       if (highlighted !== undefined) {
         codeRef.innerHTML = highlighted;
