@@ -29,16 +29,44 @@ export interface RenderMarkdownOptions {
   onPreview: (src: string, source: string) => void;
 }
 
+const PARSED_MARKDOWN_CACHE_LIMIT = 256;
+const PARSED_MARKDOWN_CACHE_MAX_CHARS = 250_000;
+const parsedMarkdownCache = new Map<string, ParsedMarkdownDocument>();
+
+function getCachedMarkdown(raw: string): ParsedMarkdownDocument | undefined {
+  const cached = parsedMarkdownCache.get(raw);
+  if (!cached) return undefined;
+  parsedMarkdownCache.delete(raw);
+  parsedMarkdownCache.set(raw, cached);
+  return cached;
+}
+
+function setCachedMarkdown(raw: string, parsed: ParsedMarkdownDocument): void {
+  if (raw.length > PARSED_MARKDOWN_CACHE_MAX_CHARS) return;
+
+  parsedMarkdownCache.set(raw, parsed);
+  while (parsedMarkdownCache.size > PARSED_MARKDOWN_CACHE_LIMIT) {
+    const oldest = parsedMarkdownCache.keys().next().value;
+    if (oldest === undefined) break;
+    parsedMarkdownCache.delete(oldest);
+  }
+}
+
 export function parseMarkdownDocument(raw: string): ParsedMarkdownDocument {
+  const cached = getCachedMarkdown(raw);
+  if (cached) return cached;
+
   const tree = parseMarkdownAst(raw);
   const footnotes = collectFootnotes(tree);
-  return {
+  const parsed = {
     tree,
     definitions: collectDefinitions(tree),
     footnoteDefinitions: footnotes.definitions,
     footnoteOrder: footnotes.order,
     footnoteNumbers: footnotes.numbers,
   };
+  setCachedMarkdown(raw, parsed);
+  return parsed;
 }
 
 /**
