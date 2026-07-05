@@ -16,6 +16,7 @@ import type {
 } from "../../lib/types";
 import {
   getSessionOpenWindow,
+  getSessionMessagesWindow,
   cancelSessionLoad,
   trashSession,
   resumeSession,
@@ -43,7 +44,6 @@ import {
   createSessionPagination,
   BATCH_SIZE,
   LOAD_MORE_THRESHOLD,
-  MINIMAP_JUMP_BATCH,
   INITIAL_TAIL,
 } from "./createSessionPagination";
 
@@ -95,12 +95,23 @@ export function SessionView(props: {
   // Role-filter slice: hiddenRoles + filteredEntries + roleCounts.
   const { hiddenRoles, roleCounts, filteredEntries, toggleRole } =
     createRoleFilter(processedEntries);
+  const userTurnByEntryKey = createMemo(() => {
+    const turns = new Map<string, number>();
+    let ordinal = 0;
+    for (const entry of filteredEntries()) {
+      if (entry.type === "message" && entry.msg.role === "user") {
+        turns.set(entry.key, ordinal);
+        ordinal += 1;
+      }
+    }
+    return turns;
+  });
 
   // Windowed-loading slice: visibleCount/windowStart/totalMessages signals,
   // visibleEntries/hasMore memos, and the scroll-driven older-page fetch.
   const {
-    visibleCount,
     setVisibleCount,
+    windowStart,
     setWindowStart,
     setTotalMessages,
     visibleEntries,
@@ -182,6 +193,7 @@ export function SessionView(props: {
           setParseWarningCount(tail.parse_warning_count ?? 0);
           setTotalMessages(tail.total);
           setWindowStart(tail.start);
+          void hydrateCompleteSession(sessionId, version, tail.start);
         } catch (e) {
           if (version !== loadVersion) return;
           if (isLoadCanceledError(e)) return; // user navigated away
@@ -229,6 +241,28 @@ export function SessionView(props: {
     () => meta().source_path || props.session.source_path || "",
   );
 
+  async function hydrateCompleteSession(
+    sessionId: string,
+    version: number,
+    start: number,
+  ) {
+    if (start <= 0) return;
+
+    try {
+      const older = await getSessionMessagesWindow(sessionId, 0, start);
+      if (version !== loadVersion || sessionId !== props.session.id) return;
+      if (windowStart() !== start) return;
+
+      setMeta((prev) => withTokenTotals(prev, older.token_totals));
+      setMessages((prev) => [...older.messages, ...prev]);
+      setWindowStart(older.start);
+      setTotalMessages(older.total);
+    } catch (e) {
+      if (isLoadCanceledError(e)) return;
+      console.warn("load complete session failed:", e);
+    }
+  }
+
   async function reloadSession() {
     try {
       // Refresh meta + tail. Backend cache compares mtime so an actual
@@ -247,6 +281,7 @@ export function SessionView(props: {
       setParseWarningCount(tail.parse_warning_count ?? 0);
       setTotalMessages(tail.total);
       setWindowStart(tail.start);
+      void hydrateCompleteSession(sessionId, loadVersion, tail.start);
       // Auto-scroll to newest if new messages arrived (column-reverse: bottom = scrollTop 0)
       if (tail.messages.length > oldCount) {
         requestAnimationFrame(() => {
@@ -415,7 +450,11 @@ export function SessionView(props: {
                   );
                 }
                 return (
-                  <div class="session-entry" data-entry-key={entry.key}>
+                  <div
+                    class="session-entry"
+                    data-entry-key={entry.key}
+                    data-turn={userTurnByEntryKey().get(entry.key)}
+                  >
                     <MessageBubble
                       message={entry.msg}
                       provider={meta().provider}
@@ -439,31 +478,7 @@ export function SessionView(props: {
           <TimelineMinimap
             entries={filteredEntries()}
             messagesRef={messagesRef}
-            onScrollToFraction={(fraction) => {
-              const total = filteredEntries().length;
-              const targetCount = Math.min(
-                total,
-                Math.ceil(total * (1 - fraction)) + BATCH_SIZE,
-              );
-              if (targetCount > visibleCount()) {
-                setVisibleCount((current) =>
-                  Math.min(
-                    total,
-                    Math.min(targetCount, current + MINIMAP_JUMP_BATCH),
-                  ),
-                );
-              }
-              // fraction: 0=top(oldest), 1=bottom(newest)
-              // column-reverse: scrollTop=0 is bottom, negative is up
-              requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                  if (!messagesRef) return;
-                  const maxScroll =
-                    messagesRef.scrollHeight - messagesRef.clientHeight;
-                  messagesRef.scrollTop = -(1 - fraction) * maxScroll;
-                });
-              });
-            }}
+            onRevealEntry={revealEntry}
           />
         </div>
       </Show>

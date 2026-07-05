@@ -215,6 +215,7 @@
   display: flex;
   flex: 1;
   overflow: hidden;
+  position: relative;
 }
 
 /* Messages */
@@ -251,17 +252,123 @@
 
 /* Timeline minimap */
 .timeline-minimap {
+  position: absolute;
+  inset: 0 14px 0 auto;
+  z-index: 10;
+  display: flex;
   width: 36px;
-  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.timeline-minimap-strip {
+  display: flex;
+  max-height: calc(100% - 32px);
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  pointer-events: auto;
+}
+
+.timeline-minimap-row {
   position: relative;
+}
+
+.timeline-minimap-button {
+  display: flex;
+  align-items: center;
+  padding: 2px 6px;
+  border: 0;
   background: transparent;
+  color: inherit;
   cursor: pointer;
 }
 
-.timeline-minimap-canvas {
-  width: 100%;
-  height: 100%;
+.timeline-minimap-tick {
   display: block;
+  height: 2px;
+  border-radius: var(--radius-full);
+  transition:
+    width var(--dur-base) var(--ease-out),
+    background-color var(--dur-base) var(--ease-out);
+}
+
+.timeline-minimap-tick-base {
+  background: color-mix(in srgb, var(--text-primary) 25%, transparent);
+}
+
+.timeline-minimap-tick-far {
+  background: color-mix(in srgb, var(--text-primary) 30%, transparent);
+}
+
+.timeline-minimap-tick-mid {
+  background: color-mix(in srgb, var(--text-primary) 40%, transparent);
+}
+
+.timeline-minimap-tick-near {
+  background: color-mix(in srgb, var(--text-primary) 50%, transparent);
+}
+
+.timeline-minimap-tick-peak {
+  background: color-mix(in srgb, var(--text-primary) 70%, transparent);
+}
+
+.timeline-minimap-tick-active {
+  background: var(--text-primary);
+}
+
+.timeline-minimap-card {
+  position: absolute;
+  right: 100%;
+  z-index: 20;
+  display: flex;
+  width: 320px;
+  flex-direction: column;
+  gap: 4px;
+  margin-right: 4px;
+  padding: 12px;
+  border: 0.5px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  background: var(--bg-editor);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-2);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.timeline-minimap-card-top {
+  top: 0;
+}
+
+.timeline-minimap-card-middle {
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.timeline-minimap-card-bottom {
+  bottom: 0;
+}
+
+.timeline-minimap-card-title,
+.timeline-minimap-card-reply {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.timeline-minimap-card-title {
+  -webkit-line-clamp: 2;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.timeline-minimap-card-reply {
+  -webkit-line-clamp: 3;
+  color: var(--text-secondary);
 }
 
 /* Session info meta tags */
