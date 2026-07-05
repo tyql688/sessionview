@@ -142,6 +142,30 @@ pub struct SessionOpenWindow {
     pub window: SessionMessagesWindow,
 }
 
+#[derive(Serialize, Clone)]
+pub struct SessionTurnOutlineEntry {
+    pub ordinal: usize,
+    pub message_index: usize,
+    pub user_text: String,
+    pub reply_text: String,
+}
+
+const OUTLINE_PREVIEW_CHARS: usize = 240;
+const OUTLINE_PREVIEW_SCAN_CHARS: usize = OUTLINE_PREVIEW_CHARS * 4;
+
+fn outline_preview(content: &str) -> String {
+    content
+        .chars()
+        .take(OUTLINE_PREVIEW_SCAN_CHARS)
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(OUTLINE_PREVIEW_CHARS)
+        .collect()
+}
+
 #[tauri::command]
 pub async fn reindex(state: State<'_, AppState>) -> CommandResult<usize> {
     let state = state.inner().clone();
@@ -356,6 +380,61 @@ pub async fn get_session_messages_window(
                 offset,
                 limit,
             ))
+        })
+    })
+    .await
+    .context("task join error")?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn get_session_turn_outline(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> CommandResult<Vec<SessionTurnOutlineEntry>> {
+    let state = state.inner().clone();
+    tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<SessionTurnOutlineEntry>> {
+        let meta = load_session_meta(&state.db, &session_id).map_err(anyhow::Error::msg)?;
+        let source_path = meta.source_path.clone();
+        with_load_guard(&state, &session_id, &source_path, |_flag| {
+            let (messages, _, _) = load_messages_cached(&state, &meta)?;
+            if load_cancel::is_canceled() {
+                return Err(canceled_error());
+            }
+
+            let mut outline: Vec<SessionTurnOutlineEntry> = Vec::new();
+            let mut ordinal = 0;
+            for (message_index, message) in messages.iter().enumerate() {
+                match message.role {
+                    crate::models::MessageRole::User => {
+                        let user_text = outline_preview(&message.content);
+                        if user_text.is_empty() {
+                            continue;
+                        }
+                        outline.push(SessionTurnOutlineEntry {
+                            ordinal,
+                            message_index,
+                            user_text,
+                            reply_text: String::new(),
+                        });
+                        ordinal += 1;
+                    }
+                    crate::models::MessageRole::Assistant => {
+                        let Some(last) = outline.last_mut() else {
+                            continue;
+                        };
+                        if !last.reply_text.is_empty() {
+                            continue;
+                        }
+                        let reply_text = outline_preview(&message.content);
+                        if !reply_text.is_empty() {
+                            last.reply_text = reply_text;
+                        }
+                    }
+                    crate::models::MessageRole::Tool | crate::models::MessageRole::System => {}
+                }
+            }
+            Ok(outline)
         })
     })
     .await

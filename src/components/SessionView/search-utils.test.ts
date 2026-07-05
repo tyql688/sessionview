@@ -24,18 +24,21 @@ describe("session search utilities", () => {
         key: "m1",
         type: "message",
         msg: message("英文内容"),
+        messageIndex: 0,
         searchHaystack: "英文内容".toLocaleLowerCase(),
       },
       {
         key: "m2",
         type: "message",
         msg: message("第一条中文命中"),
+        messageIndex: 1,
         searchHaystack: "第一条中文命中".toLocaleLowerCase(),
       },
       {
         key: "m3",
         type: "message",
         msg: message("最新中文命中"),
+        messageIndex: 2,
         searchHaystack: "最新中文命中".toLocaleLowerCase(),
       },
     ];

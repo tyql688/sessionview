@@ -6,13 +6,20 @@ import { isAgentToolMessage } from "../../lib/subagent";
 /// entry is built so per-keystroke search walks
 /// avoid re-lowercasing every entry.
 export type ProcessedEntry =
-  | { key: string; type: "message"; msg: Message; searchHaystack: string }
+  | {
+      key: string;
+      type: "message";
+      msg: Message;
+      messageIndex: number;
+      searchHaystack: string;
+    }
   | { key: string; type: "time-sep"; time: string; searchHaystack: string }
   | {
       key: string;
       type: "merged-tools";
       tools: string[];
       messages: Message[];
+      messageIndices: number[];
       searchHaystack: string;
     };
 
@@ -49,21 +56,25 @@ export function isRenderableMessage(msg: Message): boolean {
 
 export function processMessages(msgs: Message[]): ProcessedEntry[] {
   const entries: ProcessedEntry[] = [];
-  const renderableMsgs = msgs.filter(isRenderableMessage);
+  const renderableMsgs = msgs
+    .map((msg, messageIndex) => ({ msg, messageIndex }))
+    .filter(({ msg }) => isRenderableMessage(msg));
   let i = 0;
 
   while (i < renderableMsgs.length) {
-    const msg = renderableMsgs[i];
+    const { msg, messageIndex } = renderableMsgs[i];
 
     // Try to merge consecutive tool messages
     if (isMergeableToolMessage(msg)) {
       const toolGroup: Message[] = [msg];
+      const toolIndices: number[] = [messageIndex];
       let j = i + 1;
       while (
         j < renderableMsgs.length &&
-        isMergeableToolMessage(renderableMsgs[j])
+        isMergeableToolMessage(renderableMsgs[j].msg)
       ) {
-        toolGroup.push(renderableMsgs[j]);
+        toolGroup.push(renderableMsgs[j].msg);
+        toolIndices.push(renderableMsgs[j].messageIndex);
         j++;
       }
       if (toolGroup.length > 1) {
@@ -75,6 +86,7 @@ export function processMessages(msgs: Message[]): ProcessedEntry[] {
           type: "merged-tools",
           tools: toolNames,
           messages: toolGroup,
+          messageIndices: toolIndices,
           // Tool groups are not searchable — search covers user + assistant only.
           searchHaystack: "",
         });
@@ -83,6 +95,7 @@ export function processMessages(msgs: Message[]): ProcessedEntry[] {
           key: `msg-${i}-${msg.role}-${msg.timestamp ?? "none"}`,
           type: "message",
           msg,
+          messageIndex,
           searchHaystack: messageHaystack(msg),
         });
       }
@@ -116,6 +129,7 @@ export function processMessages(msgs: Message[]): ProcessedEntry[] {
       key: `msg-${i}-${msg.role}-${msg.timestamp ?? "none"}`,
       type: "message",
       msg,
+      messageIndex,
       searchHaystack: messageHaystack(msg),
     });
     i++;

@@ -97,6 +97,8 @@ vi.mock("@tauri-apps/api/core", () => ({
           parse_warning_count: 0,
           token_totals: tokenTotals(),
         };
+      case "get_session_turn_outline":
+        return [];
       case "is_favorite":
         return false;
       case "cancel_session_load":

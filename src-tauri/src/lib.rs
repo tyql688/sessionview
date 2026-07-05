@@ -287,6 +287,7 @@ pub fn run() {
             commands::get_session_meta,
             commands::get_session_open_window,
             commands::get_session_messages_window,
+            commands::get_session_turn_outline,
             commands::cancel_session_load,
             commands::get_child_sessions,
             commands::get_child_session_counts,

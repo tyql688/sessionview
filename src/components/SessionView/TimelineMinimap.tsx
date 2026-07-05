@@ -1,16 +1,7 @@
-import {
-  createEffect,
-  createMemo,
-  createSignal,
-  For,
-  onCleanup,
-  Show,
-} from "solid-js";
-import type { ProcessedEntry } from "./hooks";
+import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
+import type { SessionTurnOutlineEntry } from "../../lib/tauri";
 
 const MIN_TURNS_TO_SHOW = 2;
-const PREVIEW_CHARS = 240;
-const PREVIEW_SCAN_CHARS = PREVIEW_CHARS * 4;
 const SCROLL_REST_MS = 180;
 const ACTIVE_MARGIN_PX = 32;
 
@@ -22,57 +13,10 @@ const MOUNTAIN = [
 ] as const;
 const BASE_WIDTH = 5;
 
-interface TurnOutlineEntry {
-  ordinal: number;
-  entryIndex: number;
-  userText: string;
-  replyText: string;
-}
-
 interface MinimapProps {
-  entries: ProcessedEntry[];
+  outline: SessionTurnOutlineEntry[];
   messagesRef: HTMLDivElement | undefined;
-  onRevealEntry?: (entryIndex: number) => void;
-}
-
-function previewText(content: string): string {
-  return content
-    .slice(0, PREVIEW_SCAN_CHARS)
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, PREVIEW_CHARS);
-}
-
-function buildTurnOutline(entries: ProcessedEntry[]): TurnOutlineEntry[] {
-  const outline: TurnOutlineEntry[] = [];
-  let ordinal = -1;
-
-  for (let entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
-    const entry = entries[entryIndex];
-    if (entry.type !== "message") continue;
-
-    if (entry.msg.role === "user") {
-      ordinal += 1;
-      outline.push({
-        ordinal,
-        entryIndex,
-        userText: previewText(entry.msg.content),
-        replyText: "",
-      });
-      continue;
-    }
-
-    if (entry.msg.role !== "assistant") continue;
-    const last = outline[outline.length - 1];
-    if (!last || last.replyText.length > 0) continue;
-
-    const replyText = previewText(entry.msg.content);
-    if (replyText.length > 0) {
-      outline[outline.length - 1] = { ...last, replyText };
-    }
-  }
-
-  return outline;
+  onRevealMessage: (messageIndex: number) => Promise<boolean>;
 }
 
 function anchorFor(scroller: HTMLElement, ordinal: number): HTMLElement | null {
@@ -81,7 +25,7 @@ function anchorFor(scroller: HTMLElement, ordinal: number): HTMLElement | null {
 
 function currentTickFromScroll(
   scroller: HTMLElement,
-  turns: TurnOutlineEntry[],
+  turns: SessionTurnOutlineEntry[],
 ): number {
   if (turns.length === 0) return 0;
 
@@ -115,13 +59,12 @@ function currentTickFromScroll(
 }
 
 export function TimelineMinimap(props: MinimapProps) {
-  const turns = createMemo(() => buildTurnOutline(props.entries));
   const [active, setActive] = createSignal(0);
   const [hovered, setHovered] = createSignal<number | null>(null);
   const [scrolling, setScrolling] = createSignal(false);
 
   createEffect(() => {
-    const currentTurns = turns();
+    const currentTurns = props.outline;
     const scroller = props.messagesRef;
     if (!scroller || currentTurns.length < MIN_TURNS_TO_SHOW) return;
 
@@ -150,9 +93,10 @@ export function TimelineMinimap(props: MinimapProps) {
     });
   });
 
-  function jumpTo(turn: TurnOutlineEntry) {
+  async function jumpTo(turn: SessionTurnOutlineEntry) {
     setHovered(null);
-    props.onRevealEntry?.(turn.entryIndex);
+    const revealed = await props.onRevealMessage(turn.message_index);
+    if (!revealed) return;
 
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -198,14 +142,14 @@ export function TimelineMinimap(props: MinimapProps) {
   }
 
   function cardPosition(index: number): string {
-    const count = turns().length;
+    const count = props.outline.length;
     if (index < count / 3) return "timeline-minimap-card-top";
     if (index >= (count * 2) / 3) return "timeline-minimap-card-bottom";
     return "timeline-minimap-card-middle";
   }
 
   return (
-    <Show when={turns().length >= MIN_TURNS_TO_SHOW}>
+    <Show when={props.outline.length >= MIN_TURNS_TO_SHOW}>
       <div class="timeline-minimap">
         <div
           class="timeline-minimap-strip"
@@ -213,7 +157,7 @@ export function TimelineMinimap(props: MinimapProps) {
             props.messagesRef?.scrollBy({ top: event.deltaY });
           }}
         >
-          <For each={turns()}>
+          <For each={props.outline}>
             {(turn, index) => (
               <div
                 class="timeline-minimap-row"
@@ -222,9 +166,9 @@ export function TimelineMinimap(props: MinimapProps) {
               >
                 <button
                   type="button"
-                  aria-label={turn.userText || `#${turn.ordinal + 1}`}
+                  aria-label={turn.user_text || `#${turn.ordinal + 1}`}
                   class="timeline-minimap-button"
-                  onClick={() => jumpTo(turn)}
+                  onClick={() => void jumpTo(turn)}
                 >
                   <span
                     class={`timeline-minimap-tick ${tickClass(index())}`}
@@ -235,14 +179,14 @@ export function TimelineMinimap(props: MinimapProps) {
                   <button
                     type="button"
                     class={`timeline-minimap-card ${cardPosition(index())}`}
-                    onClick={() => jumpTo(turn)}
+                    onClick={() => void jumpTo(turn)}
                   >
                     <span class="timeline-minimap-card-title">
-                      {turn.userText || "…"}
+                      {turn.user_text || "…"}
                     </span>
-                    <Show when={turn.replyText}>
+                    <Show when={turn.reply_text}>
                       <span class="timeline-minimap-card-reply">
-                        {turn.replyText}
+                        {turn.reply_text}
                       </span>
                     </Show>
                   </button>

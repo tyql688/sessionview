@@ -40,6 +40,7 @@ export interface CreateSessionPaginationResult {
   loadOlderEntries: () => void;
   resolveCompleteSearchMatch: (term: string) => Promise<number | null>;
   revealEntry: (entryIndex: number) => void;
+  revealMessageIndex: (messageIndex: number) => Promise<boolean>;
   handleMessagesScroll: (e: Event) => void;
 }
 
@@ -90,6 +91,43 @@ export function createSessionPagination(
     if (requiredCount > visibleCount()) {
       setVisibleCount(requiredCount);
     }
+  }
+
+  async function revealMessageIndex(messageIndex: number): Promise<boolean> {
+    if (messageIndex < 0 || messageIndex >= totalMessages()) return false;
+
+    if (messageIndex < windowStart()) {
+      if (olderFetchInFlight) return false;
+      const sessionId = opts.sessionId();
+      olderFetchInFlight = true;
+      try {
+        const span = windowStart() - messageIndex;
+        const older = await getSessionMessagesWindow(
+          sessionId,
+          messageIndex,
+          span,
+        );
+        if (sessionId !== opts.sessionId()) return false;
+        opts.setMeta((prev) => opts.withTokenTotals(prev, older.token_totals));
+        opts.setMessages((prev) => [...older.messages, ...prev]);
+        setWindowStart(older.start);
+        setTotalMessages(older.total);
+      } catch (e) {
+        if (isLoadCanceledError(e)) return false;
+        console.warn("reveal message failed:", e);
+        return false;
+      } finally {
+        olderFetchInFlight = false;
+      }
+    }
+
+    const entryIndex = opts.filteredEntries().findIndex((entry) => {
+      if (entry.type !== "message") return false;
+      return entry.messageIndex === messageIndex;
+    });
+    if (entryIndex < 0) return false;
+    revealEntry(entryIndex);
+    return true;
   }
 
   // Re-pin the scroll position to where the user was looking right
@@ -247,6 +285,7 @@ export function createSessionPagination(
     loadOlderEntries,
     resolveCompleteSearchMatch,
     revealEntry,
+    revealMessageIndex,
     handleMessagesScroll,
   };
 }

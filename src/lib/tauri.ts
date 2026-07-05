@@ -44,6 +44,13 @@ export interface SessionOpenWindow {
   window: SessionMessagesWindow;
 }
 
+export interface SessionTurnOutlineEntry {
+  ordinal: number;
+  message_index: number;
+  user_text: string;
+  reply_text: string;
+}
+
 /**
  * Wrap a Tauri invocation so failures surface to the user as a toast
  * (plus `console.error`) and then rethrow. Use for user-triggered
@@ -155,6 +162,14 @@ export async function getSessionMessagesWindow(
     sessionId,
     offset,
     limit,
+  });
+}
+
+export async function getSessionTurnOutline(
+  sessionId: string,
+): Promise<SessionTurnOutlineEntry[]> {
+  return invoke<SessionTurnOutlineEntry[]>("get_session_turn_outline", {
+    sessionId,
   });
 }
 

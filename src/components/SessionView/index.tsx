@@ -16,11 +16,12 @@ import type {
 } from "../../lib/types";
 import {
   getSessionOpenWindow,
-  getSessionMessagesWindow,
+  getSessionTurnOutline,
   cancelSessionLoad,
   trashSession,
   resumeSession,
   isLoadCanceledError,
+  type SessionTurnOutlineEntry,
 } from "../../lib/tauri";
 import { useI18n } from "../../i18n/index";
 import { MessageBubble } from "../MessageBubble";
@@ -55,6 +56,7 @@ export function SessionView(props: {
 }) {
   const { t } = useI18n();
   const [messages, setMessages] = createSignal<Message[]>([]);
+  const [outline, setOutline] = createSignal<SessionTurnOutlineEntry[]>([]);
   const processedEntries = createMemo(() => processMessages(messages()));
 
   const [loading, setLoading] = createSignal(true);
@@ -95,14 +97,10 @@ export function SessionView(props: {
   // Role-filter slice: hiddenRoles + filteredEntries + roleCounts.
   const { hiddenRoles, roleCounts, filteredEntries, toggleRole } =
     createRoleFilter(processedEntries);
-  const userTurnByEntryKey = createMemo(() => {
-    const turns = new Map<string, number>();
-    let ordinal = 0;
-    for (const entry of filteredEntries()) {
-      if (entry.type === "message" && entry.msg.role === "user") {
-        turns.set(entry.key, ordinal);
-        ordinal += 1;
-      }
+  const userTurnByMessageIndex = createMemo(() => {
+    const turns = new Map<number, number>();
+    for (const entry of outline()) {
+      turns.set(entry.message_index, entry.ordinal);
     }
     return turns;
   });
@@ -111,7 +109,6 @@ export function SessionView(props: {
   // visibleEntries/hasMore memos, and the scroll-driven older-page fetch.
   const {
     setVisibleCount,
-    windowStart,
     setWindowStart,
     setTotalMessages,
     visibleEntries,
@@ -119,6 +116,7 @@ export function SessionView(props: {
     loadOlderEntries,
     resolveCompleteSearchMatch,
     revealEntry,
+    revealMessageIndex,
     handleMessagesScroll,
   } = createSessionPagination({
     sessionId: () => props.session.id,
@@ -173,6 +171,7 @@ export function SessionView(props: {
         setLoading(true);
         setError(null);
         setMessages([]);
+        setOutline([]);
         setParseWarningCount(0);
         setVisibleCount(BATCH_SIZE);
         setTotalMessages(0);
@@ -193,7 +192,7 @@ export function SessionView(props: {
           setParseWarningCount(tail.parse_warning_count ?? 0);
           setTotalMessages(tail.total);
           setWindowStart(tail.start);
-          void hydrateCompleteSession(sessionId, version, tail.start);
+          void refreshOutline(sessionId, version);
         } catch (e) {
           if (version !== loadVersion) return;
           if (isLoadCanceledError(e)) return; // user navigated away
@@ -241,25 +240,14 @@ export function SessionView(props: {
     () => meta().source_path || props.session.source_path || "",
   );
 
-  async function hydrateCompleteSession(
-    sessionId: string,
-    version: number,
-    start: number,
-  ) {
-    if (start <= 0) return;
-
+  async function refreshOutline(sessionId: string, version: number) {
     try {
-      const older = await getSessionMessagesWindow(sessionId, 0, start);
+      const nextOutline = await getSessionTurnOutline(sessionId);
       if (version !== loadVersion || sessionId !== props.session.id) return;
-      if (windowStart() !== start) return;
-
-      setMeta((prev) => withTokenTotals(prev, older.token_totals));
-      setMessages((prev) => [...older.messages, ...prev]);
-      setWindowStart(older.start);
-      setTotalMessages(older.total);
+      setOutline(nextOutline);
     } catch (e) {
       if (isLoadCanceledError(e)) return;
-      console.warn("load complete session failed:", e);
+      console.warn("load session outline failed:", e);
     }
   }
 
@@ -281,7 +269,7 @@ export function SessionView(props: {
       setParseWarningCount(tail.parse_warning_count ?? 0);
       setTotalMessages(tail.total);
       setWindowStart(tail.start);
-      void hydrateCompleteSession(sessionId, loadVersion, tail.start);
+      void refreshOutline(sessionId, loadVersion);
       // Auto-scroll to newest if new messages arrived (column-reverse: bottom = scrollTop 0)
       if (tail.messages.length > oldCount) {
         requestAnimationFrame(() => {
@@ -453,7 +441,7 @@ export function SessionView(props: {
                   <div
                     class="session-entry"
                     data-entry-key={entry.key}
-                    data-turn={userTurnByEntryKey().get(entry.key)}
+                    data-turn={userTurnByMessageIndex().get(entry.messageIndex)}
                   >
                     <MessageBubble
                       message={entry.msg}
@@ -476,9 +464,9 @@ export function SessionView(props: {
             </Show>
           </div>
           <TimelineMinimap
-            entries={filteredEntries()}
+            outline={outline()}
             messagesRef={messagesRef}
-            onRevealEntry={revealEntry}
+            onRevealMessage={revealMessageIndex}
           />
         </div>
       </Show>
