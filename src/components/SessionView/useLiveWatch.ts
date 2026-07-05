@@ -1,6 +1,6 @@
 import { createEffect, on, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listenBackendEvent, type UnlistenFn } from "../../lib/backend-events";
 import {
   getProviderWatchConfig,
   getProviderWatchVersion,
@@ -72,17 +72,20 @@ export function useLiveWatch(opts: UseLiveWatchOptions): void {
           return;
         }
 
-        const unlisten = await listen<string[]>("sessions-changed", (event) => {
-          const changedPaths = event.payload ?? [];
-          if (!activeSourcePath) return;
-          if (!changedPaths.includes(activeSourcePath)) return;
+        const unlisten = await listenBackendEvent(
+          "sessions-changed",
+          (payload) => {
+            const changedPaths = payload ?? [];
+            if (!activeSourcePath) return;
+            if (!changedPaths.includes(activeSourcePath)) return;
 
-          clearTimeout(watchDebounce);
-          watchDebounce = setTimeout(
-            () => void opts.reload(),
-            watchConfig.debounceMs,
-          );
-        });
+            clearTimeout(watchDebounce);
+            watchDebounce = setTimeout(
+              () => void opts.reload(),
+              watchConfig.debounceMs,
+            );
+          },
+        );
 
         if (iteration.cancelled) {
           // A newer iteration (or onCleanup) ran while listen() was in

@@ -6,7 +6,7 @@ import {
   Show,
   ErrorBoundary,
 } from "solid-js";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listenBackendEvent, type UnlistenFn } from "../lib/backend-events";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ActivityBar } from "../components/ActivityBar";
 import { Explorer } from "../components/Explorer";
@@ -51,7 +51,7 @@ import {
   focusAdjacentGroup,
   syncAllTabTitles,
 } from "../stores/editorGroups";
-import type { TreeNode, Provider, MaintenanceEvent } from "../lib/types";
+import type { TreeNode, Provider } from "../lib/types";
 import { useI18n } from "../i18n";
 import { createKeyboardHandler } from "./KeyboardShortcuts";
 import { createSyncManager } from "./SyncManager";
@@ -195,24 +195,26 @@ export default function App() {
     });
     window.addEventListener("open-subagent", handleOpenSubagent);
 
-    unlistenWatcher = await listen<string[]>("sessions-changed", (event) => {
-      for (const path of event.payload ?? []) {
-        if (path.length > 0) {
-          debouncedChangedPaths.add(path);
+    unlistenWatcher = await listenBackendEvent(
+      "sessions-changed",
+      (payload) => {
+        for (const path of payload ?? []) {
+          if (path.length > 0) {
+            debouncedChangedPaths.add(path);
+          }
         }
-      }
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        const changedPaths = [...debouncedChangedPaths];
-        debouncedChangedPaths.clear();
-        void sync.syncFromDisk({ changedPaths });
-      }, 500);
-    });
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          const changedPaths = [...debouncedChangedPaths];
+          debouncedChangedPaths.clear();
+          void sync.syncFromDisk({ changedPaths });
+        }, 500);
+      },
+    );
 
-    unlistenMaintenance = await listen<MaintenanceEvent>(
+    unlistenMaintenance = await listenBackendEvent(
       "maintenance-status",
-      (event) => {
-        const payload = event.payload;
+      (payload) => {
         if (payload.phase === "started") {
           const message =
             payload.job === "refresh_usage"

@@ -9,7 +9,7 @@ import {
   onCleanup,
   onMount,
 } from "solid-js";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listenBackendEvent, type UnlistenFn } from "../../lib/backend-events";
 import type { SessionRef, TreeNode } from "../../lib/types";
 import {
   getChildSessionCounts,
@@ -84,7 +84,7 @@ export function EditorGroupsContainer(props: {
 
   onMount(() => {
     let unlisten: UnlistenFn | undefined;
-    listen<void>("sessions-changed", () =>
+    listenBackendEvent("sessions-changed", () =>
       setRecentVersion((version) => version + 1),
     ).then((fn) => {
       unlisten = fn;

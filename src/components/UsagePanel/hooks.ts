@@ -8,7 +8,7 @@ import {
   type Accessor,
   type Resource,
 } from "solid-js";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listenBackendEvent, type UnlistenFn } from "../../lib/backend-events";
 import { useI18n } from "../../i18n/index";
 import {
   getActivityCalendar,
@@ -59,7 +59,6 @@ import { errorMessage } from "../../lib/errors";
 import type {
   ActivityCalendar,
   IndexStats,
-  MaintenanceEvent,
   MaintenanceJob,
   ModelCost,
   PricingCatalogStatus,
@@ -260,10 +259,9 @@ export function createUsageResources(selectedProviderKeys: Accessor<string[]>) {
       "visibilitychange",
       handleUsageDataChangedIfStale,
     );
-    unlistenMaintenance = await listen<MaintenanceEvent>(
+    unlistenMaintenance = await listenBackendEvent(
       "maintenance-status",
-      (event) => {
-        const payload = event.payload;
+      (payload) => {
         if (payload.phase === "started") {
           setActiveMaintenanceJob(payload.job);
           return;
