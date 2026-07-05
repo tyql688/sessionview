@@ -17,6 +17,9 @@ import type {
 } from "mdast";
 import { CodeBlock } from "../../CodeBlock";
 import { MermaidBlock } from "../../MermaidBlock";
+import { errorMessage } from "../../../lib/errors";
+import { openExternalUrl } from "../../../lib/external-links";
+import { toastError } from "../../../stores/toast";
 import { LocalImage, RemoteImage, isLocalPath } from "../ImagePreview";
 import { renderKatex } from "./katex";
 import { isSafeUrl, wrapHighlight } from "./utils";
@@ -403,12 +406,19 @@ function renderLinkNode(
       title={node.title ?? undefined}
       onClick={(event) => {
         event.preventDefault();
-        window.open(node.url, "_blank");
+        openMarkdownLink(node.url);
       }}
     >
       {renderInlineNodes(node.children, context)}
     </a>
   );
+}
+
+function openMarkdownLink(url: string): void {
+  void openExternalUrl(url).catch((error: unknown) => {
+    console.error("Failed to open external link:", error);
+    toastError(errorMessage(error));
+  });
 }
 
 function renderLinkReferenceNode(
@@ -431,7 +441,7 @@ function renderLinkReferenceNode(
       title={definition.title ?? undefined}
       onClick={(event) => {
         event.preventDefault();
-        window.open(definition.url, "_blank");
+        openMarkdownLink(definition.url);
       }}
     >
       {renderInlineNodes(node.children, context)}

@@ -1,4 +1,5 @@
 import { For, type JSX } from "solid-js";
+import { isExternalUrl } from "../../../lib/external-links";
 
 export function wrapHighlight(text: string, term?: string): JSX.Element {
   if (!term) return <>{text}</>;
@@ -20,12 +21,5 @@ export function wrapHighlight(text: string, term?: string): JSX.Element {
 }
 
 export function isSafeUrl(url: string): boolean {
-  if (url.startsWith("/")) return true;
-  try {
-    const parsed = new URL(url, "https://placeholder");
-    return ["http:", "https:", "mailto:"].includes(parsed.protocol);
-  } catch (error) {
-    console.warn("Failed to parse markdown URL:", error);
-    return false;
-  }
+  return isExternalUrl(url);
 }
