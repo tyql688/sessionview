@@ -166,6 +166,42 @@ fn outline_preview(content: &str) -> String {
         .collect()
 }
 
+fn build_session_turn_outline(messages: &[Message]) -> Vec<SessionTurnOutlineEntry> {
+    let mut outline: Vec<SessionTurnOutlineEntry> = Vec::new();
+    let mut ordinal = 0;
+    for (message_index, message) in messages.iter().enumerate() {
+        match message.role {
+            crate::models::MessageRole::User => {
+                let user_text = outline_preview(&message.content);
+                if user_text.is_empty() {
+                    continue;
+                }
+                outline.push(SessionTurnOutlineEntry {
+                    ordinal,
+                    message_index,
+                    user_text,
+                    reply_text: String::new(),
+                });
+                ordinal += 1;
+            }
+            crate::models::MessageRole::Assistant => {
+                let Some(last) = outline.last_mut() else {
+                    continue;
+                };
+                if !last.reply_text.is_empty() {
+                    continue;
+                }
+                let reply_text = outline_preview(&message.content);
+                if !reply_text.is_empty() {
+                    last.reply_text = reply_text;
+                }
+            }
+            crate::models::MessageRole::Tool | crate::models::MessageRole::System => {}
+        }
+    }
+    outline
+}
+
 #[tauri::command]
 pub async fn reindex(state: State<'_, AppState>) -> CommandResult<usize> {
     let state = state.inner().clone();
@@ -402,39 +438,7 @@ pub async fn get_session_turn_outline(
                 return Err(canceled_error());
             }
 
-            let mut outline: Vec<SessionTurnOutlineEntry> = Vec::new();
-            let mut ordinal = 0;
-            for (message_index, message) in messages.iter().enumerate() {
-                match message.role {
-                    crate::models::MessageRole::User => {
-                        let user_text = outline_preview(&message.content);
-                        if user_text.is_empty() {
-                            continue;
-                        }
-                        outline.push(SessionTurnOutlineEntry {
-                            ordinal,
-                            message_index,
-                            user_text,
-                            reply_text: String::new(),
-                        });
-                        ordinal += 1;
-                    }
-                    crate::models::MessageRole::Assistant => {
-                        let Some(last) = outline.last_mut() else {
-                            continue;
-                        };
-                        if !last.reply_text.is_empty() {
-                            continue;
-                        }
-                        let reply_text = outline_preview(&message.content);
-                        if !reply_text.is_empty() {
-                            last.reply_text = reply_text;
-                        }
-                    }
-                    crate::models::MessageRole::Tool | crate::models::MessageRole::System => {}
-                }
-            }
-            Ok(outline)
+            Ok(build_session_turn_outline(messages.as_ref()))
         })
     })
     .await
@@ -830,11 +834,11 @@ fn load_messages_from_provider_or_canceled(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_session_messages_window, canceled_error, session_window_bounds, subagent_meta_title,
-        CANCEL_ERROR,
+        build_session_messages_window, build_session_turn_outline, canceled_error,
+        session_window_bounds, subagent_meta_title, CANCEL_ERROR,
     };
     use crate::error::CommandError;
-    use crate::models::{Message, TokenTotals};
+    use crate::models::{Message, MessageRole, TokenTotals};
 
     /// The cancel sentinel must reach the command boundary unchanged so
     /// the frontend's `isLoadCanceledError` (`msg.includes(...)`) keeps
@@ -874,6 +878,30 @@ mod tests {
         assert_eq!(window.messages.len(), 2);
         assert_eq!(window.messages[0].content, "message 3");
         assert_eq!(window.parse_warning_count, 2);
+    }
+
+    #[test]
+    fn build_session_turn_outline_pairs_user_with_first_assistant_reply() {
+        let messages = vec![
+            Message::new(MessageRole::System, "ignored"),
+            Message::new(MessageRole::User, " first   question "),
+            Message::new(MessageRole::Assistant, " first reply "),
+            Message::new(MessageRole::Assistant, "ignored follow-up"),
+            Message::new(MessageRole::Tool, "ignored tool"),
+            Message::new(MessageRole::User, "second question"),
+        ];
+
+        let outline = build_session_turn_outline(&messages);
+
+        assert_eq!(outline.len(), 2);
+        assert_eq!(outline[0].ordinal, 0);
+        assert_eq!(outline[0].message_index, 1);
+        assert_eq!(outline[0].user_text, "first question");
+        assert_eq!(outline[0].reply_text, "first reply");
+        assert_eq!(outline[1].ordinal, 1);
+        assert_eq!(outline[1].message_index, 5);
+        assert_eq!(outline[1].user_text, "second question");
+        assert!(outline[1].reply_text.is_empty());
     }
 
     #[test]
