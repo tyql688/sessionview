@@ -1,6 +1,14 @@
-import type React from "react";
 import { useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 import type { SessionMeta } from "../lib/types";
 import { exportSession } from "../lib/tauri";
 import { useI18n } from "../i18n/index";
@@ -24,12 +32,6 @@ export function ExportDialog(props: {
   const { t } = useI18n();
   const [format, setFormat] = useState<ExportFormat>("json");
   const [exporting, setExporting] = useState(false);
-
-  function handleOverlayClick(e: React.MouseEvent) {
-    if (e.target === e.currentTarget) {
-      props.onClose();
-    }
-  }
 
   async function handleExport() {
     const selected = FORMAT_OPTIONS.find((f) => f.value === format);
@@ -57,36 +59,43 @@ export function ExportDialog(props: {
   }
 
   return (
-    props.open && (
-      <div className="modal-overlay" onClick={handleOverlayClick}>
-        <div className="modal-card">
-          <div className="modal-title">{t("export.title")}</div>
-          <div className="export-formats">
-            {FORMAT_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                className={`export-format-card ${format === opt.value ? "active" : ""}`}
-                onClick={() => setFormat(opt.value)}
-              >
-                <span className="export-format-label">{t(opt.labelKey)}</span>
-                <span className="export-format-ext">.{opt.ext}</span>
-              </button>
-            ))}
-          </div>
-          <div className="modal-actions">
-            <button className="btn btn-secondary" onClick={props.onClose}>
-              {t("confirm.cancel")}
-            </button>
+    <Dialog
+      open={props.open}
+      onOpenChange={(open) => {
+        if (!open) props.onClose();
+      }}
+    >
+      <DialogContent showCloseButton={false}>
+        <DialogHeader>
+          <DialogTitle>{t("export.title")}</DialogTitle>
+        </DialogHeader>
+        <div className="grid grid-cols-3 gap-2">
+          {FORMAT_OPTIONS.map((opt) => (
             <button
-              className="btn btn-primary"
-              onClick={handleExport}
-              disabled={exporting}
+              key={opt.value}
+              type="button"
+              className={cn(
+                "flex flex-col items-center gap-0.5 rounded-lg border px-3 py-2.5 text-sm transition-colors",
+                format === opt.value
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border text-muted-foreground hover:bg-muted",
+              )}
+              onClick={() => setFormat(opt.value)}
             >
-              {exporting ? "..." : t("session.export")}
+              <span className="font-medium">{t(opt.labelKey)}</span>
+              <span className="text-xs text-muted-foreground">.{opt.ext}</span>
             </button>
-          </div>
+          ))}
         </div>
-      </div>
-    )
+        <DialogFooter>
+          <Button variant="outline" onClick={props.onClose}>
+            {t("confirm.cancel")}
+          </Button>
+          <Button onClick={() => void handleExport()} disabled={exporting}>
+            {exporting ? "..." : t("session.export")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

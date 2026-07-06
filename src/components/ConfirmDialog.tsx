@@ -1,4 +1,13 @@
-import type React from "react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useI18n } from "../i18n/index";
 
 export function ConfirmDialog(props: {
@@ -12,37 +21,30 @@ export function ConfirmDialog(props: {
 }) {
   const { t } = useI18n();
 
-  function handleOverlayClick(e: React.MouseEvent) {
-    if (e.target === e.currentTarget) {
-      props.onCancel();
-    }
-  }
-
   return (
-    props.open && (
-      <div
-        className="modal-overlay"
-        onClick={handleOverlayClick}
-        role="dialog"
-        aria-modal="true"
-        aria-label={props.title}
-      >
-        <div className="modal-card">
-          <div className="modal-title">{props.title}</div>
-          <div className="modal-message">{props.message}</div>
-          <div className="modal-actions">
-            <button className="btn btn-secondary" onClick={props.onCancel}>
-              {t("confirm.cancel")}
-            </button>
-            <button
-              className={`btn ${props.danger ? "btn-danger" : "btn-primary"}`}
-              onClick={props.onConfirm}
-            >
-              {props.confirmLabel}
-            </button>
-          </div>
-        </div>
-      </div>
-    )
+    <AlertDialog
+      open={props.open}
+      onOpenChange={(open) => {
+        if (!open) props.onCancel();
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{props.title}</AlertDialogTitle>
+          <AlertDialogDescription>{props.message}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={props.onCancel}>
+            {t("confirm.cancel")}
+          </AlertDialogCancel>
+          <AlertDialogAction
+            variant={props.danger ? "destructive" : "default"}
+            onClick={props.onConfirm}
+          >
+            {props.confirmLabel}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

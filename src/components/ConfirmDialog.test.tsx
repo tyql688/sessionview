@@ -14,7 +14,7 @@ describe("ConfirmDialog", () => {
         onCancel={() => {}}
       />,
     );
-    expect(queryByRole("dialog")).toBeNull();
+    expect(queryByRole("alertdialog")).toBeNull();
   });
 
   it("renders title, message and confirm label when open", () => {
@@ -28,9 +28,8 @@ describe("ConfirmDialog", () => {
         onCancel={() => {}}
       />,
     );
-    const dialog = getByRole("dialog");
+    const dialog = getByRole("alertdialog");
     expect(dialog).toBeInTheDocument();
-    expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(getByText("Delete session")).toBeInTheDocument();
     expect(getByText("Are you sure?")).toBeInTheDocument();
     expect(getByText("Delete")).toBeInTheDocument();
@@ -64,6 +63,7 @@ describe("ConfirmDialog", () => {
         onCancel={() => {}}
       />,
     );
-    expect(getByText("Delete")).toHaveClass("btn-danger");
+    // The destructive variant carries the destructive token classes.
+    expect(getByText("Delete").className).toContain("destructive");
   });
 });

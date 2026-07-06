@@ -1,5 +1,15 @@
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { useI18n } from "../i18n/index";
 
 export function InputDialog(props: {
@@ -19,19 +29,13 @@ export function InputDialog(props: {
   useEffect(() => {
     if (props.open) {
       setValue(props.defaultValue);
-      // Focus input after render
+      // Focus input after the dialog portal renders
       requestAnimationFrame(() => {
         inputRef.current?.focus();
         inputRef.current?.select();
       });
     }
   }, [props.open, props.defaultValue]);
-
-  function handleOverlayClick(e: React.MouseEvent) {
-    if (e.target === e.currentTarget) {
-      props.onCancel();
-    }
-  }
 
   function handleSubmit() {
     const trimmed = value.trim();
@@ -46,26 +50,24 @@ export function InputDialog(props: {
     if (e.key === "Enter") {
       e.preventDefault();
       handleSubmit();
-    } else if (e.key === "Escape") {
-      props.onCancel();
     }
   }
 
   return (
-    props.open && (
-      <div
-        className="modal-overlay"
-        onClick={handleOverlayClick}
-        role="dialog"
-        aria-modal="true"
-        aria-label={props.title}
-      >
-        <div className="modal-card">
-          <div className="modal-title">{props.title}</div>
-          <div className="modal-message">{props.label}</div>
-          <input
+    <Dialog
+      open={props.open}
+      onOpenChange={(open) => {
+        if (!open) props.onCancel();
+      }}
+    >
+      <DialogContent showCloseButton={false}>
+        <DialogHeader>
+          <DialogTitle>{props.title}</DialogTitle>
+          <DialogDescription>{props.label}</DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-1">
+          <Input
             ref={inputRef}
-            className="modal-input"
             type="text"
             value={value}
             maxLength={props.maxLength}
@@ -73,20 +75,18 @@ export function InputDialog(props: {
             onKeyDown={handleKeyDown}
           />
           {props.maxLength !== undefined && (
-            <div className="modal-input-counter">
+            <div className="self-end text-xs text-muted-foreground tabular-nums">
               {value.length}/{props.maxLength}
             </div>
           )}
-          <div className="modal-actions">
-            <button className="btn btn-secondary" onClick={props.onCancel}>
-              {t("confirm.cancel")}
-            </button>
-            <button className="btn btn-primary" onClick={handleSubmit}>
-              {props.confirmLabel}
-            </button>
-          </div>
         </div>
-      </div>
-    )
+        <DialogFooter>
+          <Button variant="outline" onClick={props.onCancel}>
+            {t("confirm.cancel")}
+          </Button>
+          <Button onClick={handleSubmit}>{props.confirmLabel}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
