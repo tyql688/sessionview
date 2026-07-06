@@ -15,7 +15,8 @@ const BASE_WIDTH = 5;
 
 interface MinimapProps {
   outline: SessionTurnOutlineEntry[];
-  messagesRef: HTMLDivElement | undefined;
+  /** Scroll container element; null until it mounts (state twin of the ref). */
+  messagesRef: HTMLDivElement | null;
   onRevealMessage: (messageIndex: number) => Promise<boolean>;
 }
 

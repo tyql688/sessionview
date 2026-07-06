@@ -70,6 +70,10 @@ export function SessionView(props: {
   }));
   const loadVersionRef = useRef(0);
   const messagesRef = useRef<HTMLDivElement | null>(null);
+  // State twin of messagesRef: children that need to re-run effects when the
+  // scroll container (un)mounts must receive the element as a prop — a bare
+  // ref mutation never re-renders, so a snapshot prop goes stale.
+  const [messagesEl, setMessagesEl] = useState<HTMLDivElement | null>(null);
   const loadOlderDebounceRef = useRef<(() => void) | undefined>(undefined);
   const sessionSearchDebounceRef = useRef<(() => void) | undefined>(undefined);
   const prevSessionIdRef = useRef<string | null>(null);
@@ -401,7 +405,10 @@ export function SessionView(props: {
         <div className="session-messages-container">
           <div
             className="session-messages"
-            ref={messagesRef}
+            ref={(el) => {
+              messagesRef.current = el;
+              setMessagesEl(el);
+            }}
             onScroll={(e) => handleMessagesScroll(e.nativeEvent)}
           >
             {visibleEntries.map((entry) => {
@@ -461,7 +468,7 @@ export function SessionView(props: {
           </div>
           <TimelineMinimap
             outline={outline}
-            messagesRef={messagesRef.current ?? undefined}
+            messagesRef={messagesEl}
             onRevealMessage={revealMessageIndex}
           />
         </div>
