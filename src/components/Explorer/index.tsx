@@ -89,7 +89,9 @@ export function Explorer(props: {
     let tree = filterBlockedFolders(props.tree);
     if (!showOrphans) tree = filterOrphanSubagents(tree);
     return timeGrouping ? applyTimeGrouping(tree, t) : tree;
-    // `blockedFolders` drives filterBlockedFolders' internal getBlockedFolders()
+    // `blockedFolders` drives filterBlockedFolders' internal getBlockedFolders(),
+    // so it's a real dep even though not textually referenced here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.tree, showOrphans, timeGrouping, blockedFolders, t]);
 
   // O(1) session ID → project path lookup, rebuilt when props.tree changes

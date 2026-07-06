@@ -310,7 +310,6 @@ export default function App() {
       clearTimeout(debounceTimer);
       debouncedChangedPaths.clear();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filteredTree = tree.filter(

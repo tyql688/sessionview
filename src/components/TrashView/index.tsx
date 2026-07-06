@@ -205,13 +205,11 @@ export function TrashView(props: { onRefreshTree: () => void }) {
           )}
         </div>
 
-        {expanded && !isLeaf && (
-          <>
-            {node.children.map((child) => (
-              <TrashTreeNode key={child.id} node={child} depth={depth + 1} />
-            ))}
-          </>
-        )}
+        {expanded &&
+          !isLeaf &&
+          node.children.map((child) => (
+            <TrashTreeNode key={child.id} node={child} depth={depth + 1} />
+          ))}
       </div>
     );
   }

@@ -19,6 +19,8 @@ export function ContextMenu(props: Props) {
     const handleDocClick = () => props.onClose();
     document.addEventListener("click", handleDocClick);
     return () => document.removeEventListener("click", handleDocClick);
+    // onClose is the only reactive read; the "destructure props" hint is noise here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.onClose]);
 
   const pos = props.position;

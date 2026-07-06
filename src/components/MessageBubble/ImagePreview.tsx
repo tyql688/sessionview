@@ -193,6 +193,8 @@ export function ImagePreview(props: {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
+    // onClose is the only reactive read; the "destructure props" hint is noise here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.onClose]);
 
   return (

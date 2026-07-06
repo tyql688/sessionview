@@ -58,13 +58,11 @@ export function TabBar(props: {
     const ro = new ResizeObserver(checkOverflow);
     ro.observe(el);
     return () => ro.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Re-check overflow when tabs change (count, titles, or preview state)
   useEffect(() => {
     checkOverflow();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.tabs]);
 
   // Scroll active tab into view
@@ -148,7 +146,6 @@ export function TabBar(props: {
   useEffect(() => {
     document.addEventListener("mousedown", handleDocClick);
     return () => document.removeEventListener("mousedown", handleDocClick);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
