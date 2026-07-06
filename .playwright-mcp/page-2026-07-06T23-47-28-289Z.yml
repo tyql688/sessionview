@@ -1,0 +1,65 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic:
+      - generic: <cc-session/>
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - button "资源管理器" [ref=e8] [cursor=pointer]:
+          - img [ref=e9]
+        - button "收藏" [ref=e12] [cursor=pointer]:
+          - img [ref=e13]
+        - button "用量统计" [ref=e15] [cursor=pointer]:
+          - img [ref=e16]
+        - button "屏蔽文件夹" [ref=e20] [cursor=pointer]:
+          - img [ref=e21]
+        - button "回收站" [ref=e24] [cursor=pointer]:
+          - img [ref=e25]
+      - button "设置" [ref=e28] [cursor=pointer]:
+        - img [ref=e29]
+    - generic [ref=e34]:
+      - generic [ref=e35]: 资源管理器
+      - generic [ref=e36]:
+        - generic [ref=e37]:
+          - button "按提供商分组" [ref=e38] [cursor=pointer]:
+            - img [ref=e39]
+          - button "按目录分组" [ref=e43] [cursor=pointer]:
+            - img [ref=e44]
+        - button "←" [ref=e46] [cursor=pointer]
+    - generic [ref=e50]:
+      - img [ref=e52]
+      - paragraph [ref=e54]: Cannot read properties of undefined (reading 'invoke')
+      - generic [ref=e55]:
+        - generic [ref=e56]:
+          - generic [ref=e57]: ⇧⌘F
+          - text: 搜索
+        - generic [ref=e58]:
+          - generic [ref=e59]: ⌘1-9
+          - text: 切换到标签 1-9
+  - generic [ref=e60]:
+    - generic [ref=e61]:
+      - generic [ref=e63]: 已索引 — 0 个会话
+      - generic [ref=e64]: ·
+      - generic [ref=e65]: 0 个提供商
+    - generic [ref=e66]:
+      - button "💻" [ref=e67] [cursor=pointer]
+      - generic [ref=e68]:
+        - button "EN" [ref=e69] [cursor=pointer]
+        - generic [ref=e70]: "|"
+        - button "中" [ref=e71] [cursor=pointer]
+  - region "Notifications alt+T":
+    - list:
+      - listitem [ref=e72]:
+        - img [ref=e74]
+        - generic [ref=e79]: "TypeError: Cannot read properties of undefined (reading 'invoke')"
+      - listitem [ref=e80]:
+        - img [ref=e82]
+        - generic [ref=e87]: "TypeError: Cannot read properties of undefined (reading 'invoke')"
+      - listitem [ref=e88]:
+        - img [ref=e90]
+        - generic [ref=e95]: "TypeError: Cannot read properties of undefined (reading 'invoke')"
+      - listitem:
+        - generic:
+          - img
+        - generic:
+          - generic: "TypeError: Cannot read properties of undefined (reading 'invoke')"

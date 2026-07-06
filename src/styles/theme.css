@@ -128,6 +128,17 @@
 }
 
 @layer base {
+  /* The old hand-written universal reset lived unlayered in layout.css,
+   * which outranked every @layer utilities rule — silently zeroing ALL
+   * Tailwind margin/padding utilities app-wide. It belongs down here in
+   * base, below utilities. */
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
   * {
     @apply border-border outline-ring/50;
   }
