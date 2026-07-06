@@ -1,4 +1,6 @@
-import { useEffect } from "react";
+import { Menu } from "@base-ui/react/menu";
+import { useMemo } from "react";
+import { cn } from "@/lib/utils";
 
 export interface MenuItemDef {
   label: string | (() => string);
@@ -14,55 +16,70 @@ interface Props {
   onClose: () => void;
 }
 
+/**
+ * Imperative context menu: callers open it at pointer coordinates (the
+ * right-click position becomes a zero-size virtual anchor), Base UI handles
+ * positioning, collision flipping, focus and dismissal.
+ */
 export function ContextMenu(props: Props) {
-  useEffect(() => {
-    const handleDocClick = () => props.onClose();
-    document.addEventListener("click", handleDocClick);
-    return () => document.removeEventListener("click", handleDocClick);
-    // onClose is the only reactive read; the "destructure props" hint is noise here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.onClose]);
-
-  const pos = props.position;
-  if (!pos) return null;
+  const { position } = props;
+  const anchor = useMemo(() => {
+    if (!position) return null;
+    return {
+      getBoundingClientRect: () =>
+        DOMRect.fromRect({ x: position.x, y: position.y, width: 0, height: 0 }),
+    };
+  }, [position]);
 
   return (
-    <div
-      className="context-menu"
-      ref={(el) => {
-        if (!el) return;
-        requestAnimationFrame(() => {
-          const rect = el.getBoundingClientRect();
-          const vw = window.innerWidth;
-          const vh = window.innerHeight;
-          if (rect.right > vw)
-            el.style.left = `${Math.max(4, pos.x - rect.width)}px`;
-          if (rect.bottom > vh)
-            el.style.top = `${Math.max(4, pos.y - rect.height)}px`;
-        });
+    <Menu.Root
+      open={position !== null}
+      onOpenChange={(open) => {
+        if (!open) props.onClose();
       }}
-      style={{ left: `${pos.x}px`, top: `${pos.y}px` }}
-      onClick={(e) => e.stopPropagation()}
+      modal={false}
     >
-      {props.items.map((item, i) =>
-        !item.separator ? (
-          <button
-            key={i}
-            className={`context-menu-item${item.danger ? " danger" : ""}`}
-            onClick={() => {
-              item.onClick();
-              props.onClose();
-            }}
-          >
-            <span>
-              {typeof item.label === "function" ? item.label() : item.label}
-            </span>
-            {item.shortcut && <span className="shortcut">{item.shortcut}</span>}
-          </button>
-        ) : (
-          <div key={i} className="context-menu-separator" />
-        ),
-      )}
-    </div>
+      <Menu.Portal>
+        <Menu.Positioner
+          anchor={anchor}
+          side="bottom"
+          align="start"
+          sideOffset={2}
+          className="z-[300] outline-none"
+        >
+          <Menu.Popup className="min-w-44 rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none duration-100 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
+            {props.items.map((item, i) =>
+              item.separator ? (
+                <Menu.Separator key={i} className="-mx-1 my-1 h-px bg-border" />
+              ) : (
+                <Menu.Item
+                  key={i}
+                  className={cn(
+                    "flex cursor-default items-center justify-between gap-6 rounded-md px-2 py-1.5 text-sm outline-none select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground",
+                    item.danger &&
+                      "text-destructive data-highlighted:bg-destructive/10 data-highlighted:text-destructive",
+                  )}
+                  onClick={() => {
+                    item.onClick();
+                    props.onClose();
+                  }}
+                >
+                  <span>
+                    {typeof item.label === "function"
+                      ? item.label()
+                      : item.label}
+                  </span>
+                  {item.shortcut && (
+                    <span className="text-xs text-muted-foreground">
+                      {item.shortcut}
+                    </span>
+                  )}
+                </Menu.Item>
+              ),
+            )}
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
   );
 }
