@@ -23,6 +23,13 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* Streamdown ships precompiled Tailwind class names (including
+ * dark:text-[var(--shiki-dark)] for shiki dual themes) — the host Tailwind
+ * build must scan its dist for those utilities to exist. The dark: variant
+ * then follows our [data-theme] binding below. */
+@source "../../node_modules/streamdown/dist";
+@source "../../node_modules/@streamdown";
+
 /* `dark:` follows the app's data-theme attribute (driven by the theme store),
  * not the OS media query — "system" mode is resolved to an explicit attribute
  * value by applyTheme(). */
