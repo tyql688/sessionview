@@ -32,7 +32,7 @@ const UsagePanel = lazy(() =>
   import("@/features/usage").then((m) => ({ default: m.UsagePanel })),
 );
 import { KeyboardOverlay } from "@/app/KeyboardOverlay";
-import { ToastContainer } from "@/components/ToastContainer";
+import { Toaster } from "@/components/ui/sonner";
 import {
   trashSession,
   getChildSessions,
@@ -507,7 +507,7 @@ export default function App() {
             setShowSearchOverlay(false);
           }}
         />
-        <ToastContainer />
+        <Toaster position="bottom-right" />
       </div>
     </ErrorBoundary>
   );
