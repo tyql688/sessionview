@@ -189,7 +189,10 @@ export function MessageBubble(props: {
                 {props.message.role === "user" ? (
                   <UserIcon />
                 ) : (
-                  <ProviderIcon provider={props.provider ?? "claude"} />
+                  <ProviderIcon
+                    provider={props.provider ?? "claude"}
+                    size={20}
+                  />
                 )}
               </div>
               <div

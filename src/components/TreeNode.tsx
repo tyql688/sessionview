@@ -3,6 +3,7 @@ import { formatTreeTime } from "../lib/formatters";
 import type { TreeNode } from "../lib/types";
 import { useI18n } from "../i18n/index";
 import { isSelected, toggleSelected } from "../stores/selection";
+import { getProviderColor } from "../stores/providerSnapshots";
 import { ProviderDot } from "./icons";
 
 // Re-exports for backward compatibility
@@ -92,6 +93,19 @@ export function formatSessionLabel(raw: string, fallback = "Untitled"): string {
   }
 
   return label || fallback;
+}
+
+/** Distinct providers among a directory group's sessions, in child order. */
+function directoryProviders(
+  node: TreeNode,
+): NonNullable<TreeNode["provider"]>[] {
+  const seen = new Set<NonNullable<TreeNode["provider"]>>();
+  for (const child of node.children) {
+    if (child.node_type === "session" && child.provider) {
+      seen.add(child.provider);
+    }
+  }
+  return [...seen];
 }
 
 /** Recursively collect all session node IDs under a tree node. */
@@ -230,6 +244,21 @@ export function TreeNodeComponent(props: {
           !isOrphanFolder() && (
             <span className="tree-node-icon">
               <FolderIcon />
+            </span>
+          )}
+        {props.sessionProviderDot &&
+          props.node.node_type === "project" &&
+          directoryProviders(props.node).length > 0 && (
+            <span className="tree-provider-cluster">
+              {directoryProviders(props.node)
+                .slice(0, 4)
+                .map((provider) => (
+                  <i
+                    key={provider}
+                    className="tree-provider-cluster-dot"
+                    style={{ background: getProviderColor(provider) }}
+                  />
+                ))}
             </span>
           )}
         {isOrphanFolder() && (

@@ -10,16 +10,16 @@ import type { JSX } from "react";
 import type { Provider } from "../lib/types";
 import { getProviderColor } from "../stores/providerSnapshots";
 
-const ICON_SIZE = 14;
+const DEFAULT_ICON_SIZE = 14;
 
 // Custom SVGs for providers not in @lobehub/icons:
 // - pi: no @lobehub brand icon exists.
 // - cc-mirror: a Claude mirror, not a real brand — the Claude glyph tinted pink.
-function PiIcon() {
+function PiIcon({ size }: { size: number }) {
   return (
     <svg
-      width={ICON_SIZE}
-      height={ICON_SIZE}
+      width={size}
+      height={size}
       viewBox="0 0 800 800"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
@@ -35,11 +35,11 @@ function PiIcon() {
   );
 }
 
-function CcMirrorIcon() {
+function CcMirrorIcon({ size }: { size: number }) {
   return (
     <svg
-      width={ICON_SIZE}
-      height={ICON_SIZE}
+      width={size}
+      height={size}
       viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
     >
@@ -52,24 +52,29 @@ function CcMirrorIcon() {
   );
 }
 
-// Provider brand logos. The 6 mainstream providers use official @lobehub/icons
+// Provider brand logos. Mainstream providers use official @lobehub/icons
 // colored variants (the app's provider colors match their brand colors); Pi and
-// cc-mirror keep custom SVGs above.
-const PROVIDER_ICONS: Record<Provider, () => JSX.Element> = {
-  claude: () => <Claude.Color size={ICON_SIZE} />,
-  codex: () => <Codex.Color size={ICON_SIZE} />,
-  antigravity: () => <Antigravity.Color size={ICON_SIZE} />,
+// cc-mirror keep custom SVGs above. Kimi's brand mark is black-on-light /
+// white-on-dark, so it uses the monochrome variant tinted by text-primary.
+const PROVIDER_ICONS: Record<Provider, (size: number) => JSX.Element> = {
+  claude: (size) => <Claude.Color size={size} />,
+  codex: (size) => <Codex.Color size={size} />,
+  antigravity: (size) => <Antigravity.Color size={size} />,
   // OpenCode + Cursor have no .Color variant in @lobehub/icons — use base.
-  opencode: () => <OpenCode size={ICON_SIZE} />,
-  kimi: () => <Kimi.Color size={ICON_SIZE} />,
-  cursor: () => <Cursor size={ICON_SIZE} />,
-  "cc-mirror": () => <CcMirrorIcon />,
-  pi: () => <PiIcon />,
+  opencode: (size) => <OpenCode size={size} />,
+  kimi: (size) => (
+    <span style={{ color: "var(--text-primary)", display: "inline-flex" }}>
+      <Kimi size={size} />
+    </span>
+  ),
+  cursor: (size) => <Cursor size={size} />,
+  "cc-mirror": (size) => <CcMirrorIcon size={size} />,
+  pi: (size) => <PiIcon size={size} />,
 };
 
-export function ProviderIcon(props: { provider: Provider }) {
-  const Icon = PROVIDER_ICONS[props.provider];
-  return Icon ? <Icon /> : <span>?</span>;
+export function ProviderIcon(props: { provider: Provider; size?: number }) {
+  const icon = PROVIDER_ICONS[props.provider];
+  return icon ? icon(props.size ?? DEFAULT_ICON_SIZE) : <span>?</span>;
 }
 
 export function ProviderDot(props: { provider: Provider }) {

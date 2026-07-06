@@ -259,6 +259,24 @@
   font-weight: 600;
 }
 
+.tree-provider-cluster {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  margin-right: 2px;
+}
+
+.tree-provider-cluster-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1px solid var(--bg-explorer);
+}
+
+.tree-provider-cluster-dot + .tree-provider-cluster-dot {
+  margin-left: -2px;
+}
+
 .tree-node-time {
   flex-shrink: 0;
   font-size: 10px;
