@@ -3,7 +3,7 @@ import {
   extractImages,
   parseContent,
   sanitizeMessageForClipboard,
-} from "./message-content";
+} from "@/lib/message-content";
 
 describe("extractImages", () => {
   it("pulls sourced and bare placeholders out of the markdown", () => {

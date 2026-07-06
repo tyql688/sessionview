@@ -1,16 +1,16 @@
 import { ChevronDown, ExternalLink } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { useI18n } from "../../i18n/index";
-import { fmtTokens } from "../../lib/formatters";
+import { useI18n } from "@/i18n/index";
+import { fmtTokens } from "@/lib/formatters";
 import {
   matchesSubagentSession,
   type SubagentMatchRequest,
-} from "../../lib/subagent";
-import { getChildSessions, getSessionOpenWindow } from "../../lib/tauri";
-import type { Message, SessionMeta } from "../../lib/types";
-import { errorMessage } from "../../lib/errors";
-import { openSession } from "../../stores/editorGroups";
+} from "@/lib/subagent";
+import { getChildSessions, getSessionOpenWindow } from "@/lib/tauri";
+import type { Message, SessionMeta } from "@/lib/types";
+import { errorMessage } from "@/lib/errors";
+import { openSession } from "@/stores/editorGroups";
 
 const TAIL_MESSAGES = 4;
 

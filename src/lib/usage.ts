@@ -3,7 +3,7 @@ import type {
   PrevPeriodTotals,
   ProviderSnapshot,
   UsageStats,
-} from "./types";
+} from "@/lib/types";
 
 export type UsageSortState = { col: string; asc: boolean };
 export type ChartMetric = "tokens" | "cost";

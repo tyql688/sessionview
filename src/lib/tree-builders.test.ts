@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildFavoritesTree, buildTrashTree } from "./tree-builders";
-import type { SessionMeta, TrashMeta } from "./types";
+import { buildFavoritesTree, buildTrashTree } from "@/lib/tree-builders";
+import type { SessionMeta, TrashMeta } from "@/lib/types";
 
 function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
   return {

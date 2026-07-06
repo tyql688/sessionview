@@ -1,11 +1,11 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { SessionTurnOutlineEntry } from "../../lib/tauri";
+import type { SessionTurnOutlineEntry } from "@/lib/tauri";
 import {
   TimelineMinimap,
   currentTickFromOffsets,
   sampleOutline,
-} from "./TimelineMinimap";
+} from "@/components/SessionView/TimelineMinimap";
 
 function outlineOf(count: number): SessionTurnOutlineEntry[] {
   return Array.from({ length: count }, (_, i) => ({

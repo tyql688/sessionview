@@ -7,8 +7,8 @@ import {
   OpenCode,
 } from "@lobehub/icons";
 import type { JSX } from "react";
-import type { Provider } from "../lib/types";
-import { getProviderColor } from "../stores/providerSnapshots";
+import type { Provider } from "@/lib/types";
+import { getProviderColor } from "@/stores/providerSnapshots";
 
 const DEFAULT_ICON_SIZE = 14;
 

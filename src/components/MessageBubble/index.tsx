@@ -1,28 +1,31 @@
 import { lazy, Suspense, useState, useMemo } from "react";
-import type { Message, Provider } from "../../lib/types";
-import { ProviderIcon, UserIcon } from "../icons";
-import { useI18n } from "../../i18n/index";
-import { parseTimestamp } from "../../lib/formatters";
+import type { Message, Provider } from "@/lib/types";
+import { ProviderIcon, UserIcon } from "@/components/icons";
+import { useI18n } from "@/i18n/index";
+import { parseTimestamp } from "@/lib/formatters";
 import {
   extractImages,
   sanitizeMessageForClipboard,
-} from "../../lib/message-content";
+} from "@/lib/message-content";
 import {
   ImagePreview,
   isLocalPath,
   LocalImage,
   RemoteImage,
-} from "./ImagePreview";
-import { ThinkingBlock } from "./ThinkingBlock";
-import { CopyMessageButton, TokenUsageDisplay } from "./TokenUsage";
-import { ToolMessage } from "./ToolMessage";
+} from "@/components/MessageBubble/ImagePreview";
+import { ThinkingBlock } from "@/components/MessageBubble/ThinkingBlock";
+import {
+  CopyMessageButton,
+  TokenUsageDisplay,
+} from "@/components/MessageBubble/TokenUsage";
+import { ToolMessage } from "@/components/MessageBubble/ToolMessage";
 
 // The markdown engine (streamdown + shiki/katex/mermaid plugins) is by far
 // the heaviest frontend dependency — load it on demand so the app shell and
 // explorer render without it. The fallback shows the raw text, so the brief
 // first-load gap still reads.
 const Markdown = lazy(() =>
-  import("../../features/session/timeline/Markdown").then((module) => ({
+  import("@/features/session/timeline/Markdown").then((module) => ({
     default: module.Markdown,
   })),
 );

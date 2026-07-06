@@ -5,14 +5,14 @@ import {
   useRef,
   useState,
 } from "react";
-import type { SessionMeta, SessionRef, TreeNode } from "../../lib/types";
+import type { SessionMeta, SessionRef, TreeNode } from "@/lib/types";
 import {
   getChildSessionCounts,
   invokeWithFallback,
   listRecentSessions,
-} from "../../lib/tauri";
-import { isPathBlocked } from "../../stores/settings";
-import { errorMessage } from "../../lib/errors";
+} from "@/lib/tauri";
+import { isPathBlocked } from "@/stores/settings";
+import { errorMessage } from "@/lib/errors";
 import {
   useGroups,
   useActiveGroupId,
@@ -20,9 +20,9 @@ import {
   focusGroup,
   setGroupFlexBasis,
   createGroupFromDrop,
-} from "../../stores/editorGroups";
-import { EditorArea } from "./EditorArea";
-import { SplitHandle } from "./SplitHandle";
+} from "@/stores/editorGroups";
+import { EditorArea } from "@/components/Editor/EditorArea";
+import { SplitHandle } from "@/components/Editor/SplitHandle";
 
 export function EditorGroupsContainer(props: {
   onTabSelect: (groupId: string, tabId: string) => void;

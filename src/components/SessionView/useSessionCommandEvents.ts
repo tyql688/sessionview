@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import {
   SESSION_COMMAND_EVENTS,
   type SessionCommandEvent,
-} from "../../lib/session-command-events";
+} from "@/lib/session-command-events";
 
 export interface UseSessionCommandEventsOptions {
   active: boolean;

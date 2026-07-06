@@ -1,8 +1,8 @@
-import type { SessionMeta, TrashMeta, TreeNode, Provider } from "./types";
+import type { SessionMeta, TrashMeta, TreeNode, Provider } from "@/lib/types";
 import {
   getProviderLabel,
   getProviderSortOrder,
-} from "../stores/providerSnapshots";
+} from "@/stores/providerSnapshots";
 
 const KNOWN_PROVIDER_KEYS = new Set<string>([
   "claude",

@@ -1,5 +1,5 @@
 import { diffLines } from "diff";
-import { shortenHomePath } from "./formatters";
+import { shortenHomePath } from "@/lib/formatters";
 
 export type ToolDiffLineType = "context" | "add" | "remove" | "skip";
 

@@ -4,17 +4,17 @@ import {
   useRef,
   useState,
 } from "react";
-import type { SessionRef, Provider } from "../../lib/types";
-import { useI18n } from "../../i18n/index";
-import { ContextMenu, type MenuItemDef } from "../ContextMenu";
-import { isMac } from "../../lib/platform";
-import { moveTabToGroup } from "../../stores/editorGroups";
+import type { SessionRef, Provider } from "@/lib/types";
+import { useI18n } from "@/i18n/index";
+import { ContextMenu, type MenuItemDef } from "@/components/ContextMenu";
+import { isMac } from "@/lib/platform";
+import { moveTabToGroup } from "@/stores/editorGroups";
 import {
   parseTabDragPayload,
   serializeTabDragPayload,
   TAB_DRAG_FALLBACK_MIME,
   TAB_DRAG_MIME,
-} from "./tabDragPayload";
+} from "@/components/Editor/tabDragPayload";
 
 function providerColor(provider: Provider): string {
   return `var(--${provider})`;

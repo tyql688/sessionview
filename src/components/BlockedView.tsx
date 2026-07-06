@@ -1,9 +1,9 @@
-import { useI18n } from "../i18n/index";
+import { useI18n } from "@/i18n/index";
 import {
   removeBlockedFolder,
   useBlockedFolders,
   useBlockedFoldersError,
-} from "../stores/settings";
+} from "@/stores/settings";
 
 export function BlockedView(props: { onRefreshTree?: () => void }) {
   const { t } = useI18n();

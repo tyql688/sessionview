@@ -7,7 +7,7 @@ import {
   filterScannedProviderSnapshots,
   makeEmptyUsageStats,
   totalUsageTokens,
-} from "./usage";
+} from "@/lib/usage";
 
 describe("makeEmptyUsageStats", () => {
   it("returns zeroed usage collections", () => {

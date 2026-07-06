@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type { TrashMeta, TreeNode } from "../../lib/types";
+import type { TrashMeta, TreeNode } from "@/lib/types";
 import {
   listTrash,
   restoreSession,
@@ -8,12 +8,12 @@ import {
   emptyTrash,
   permanentDeleteTrash,
   permanentDeleteTrashBatch,
-} from "../../lib/tauri";
-import { collectSessionIds } from "../../lib/tree-utils";
-import { buildTrashTree } from "../../lib/tree-builders";
-import { useI18n } from "../../i18n/index";
-import { toast, toastError } from "../../stores/toast";
-import { errorMessage } from "../../lib/errors";
+} from "@/lib/tauri";
+import { collectSessionIds } from "@/lib/tree-utils";
+import { buildTrashTree } from "@/lib/tree-builders";
+import { useI18n } from "@/i18n/index";
+import { toast, toastError } from "@/stores/toast";
+import { errorMessage } from "@/lib/errors";
 
 // --- Trash list, tree building, and trash actions ------------------------------
 

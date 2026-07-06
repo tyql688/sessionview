@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseSearchQuery } from "./search";
+import { parseSearchQuery } from "@/stores/search";
 
 describe("parseSearchQuery", () => {
   it("extracts provider, project, and free text", () => {

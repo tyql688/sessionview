@@ -7,8 +7,8 @@ import {
   weekday,
   type HeatmapCell,
   type HeatmapGrid,
-} from "./heatmap";
-import type { ActivityDay } from "./types";
+} from "@/lib/heatmap";
+import type { ActivityDay } from "@/lib/types";
 
 function day(date: string, sessions: number): ActivityDay {
   return {

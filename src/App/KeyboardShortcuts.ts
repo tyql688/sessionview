@@ -1,8 +1,8 @@
-import type { SessionRef } from "../lib/types";
+import type { SessionRef } from "@/lib/types";
 import {
   dispatchSessionCommand,
   SESSION_COMMAND_EVENTS,
-} from "../lib/session-command-events";
+} from "@/lib/session-command-events";
 
 export interface KeyboardDeps {
   activeTabId: () => string | null;

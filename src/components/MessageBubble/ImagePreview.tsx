@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
-import { readImageBase64 } from "../../lib/tauri";
-import { cachedLoad } from "../../lib/image-cache";
-import { shortenHomePath } from "../../lib/formatters";
-import { useI18n } from "../../i18n/index";
+import { readImageBase64 } from "@/lib/tauri";
+import { cachedLoad } from "@/lib/image-cache";
+import { shortenHomePath } from "@/lib/formatters";
+import { useI18n } from "@/i18n/index";
 
 export function isLocalPath(source: string): boolean {
   return (

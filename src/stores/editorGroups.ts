@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { SessionRef } from "../lib/types";
+import type { SessionRef } from "@/lib/types";
 
 export interface EditorGroup {
   id: string;
@@ -29,7 +29,7 @@ interface EditorGroupsState {
 
 const initialGroup = makeGroup();
 
-export const useEditorGroupsStore = create<EditorGroupsState>(() => ({
+const useEditorGroupsStore = create<EditorGroupsState>(() => ({
   groups: [initialGroup],
   activeGroupId: initialGroup.id,
 }));
@@ -402,11 +402,9 @@ export const useActiveGroup = () =>
   useEditorGroupsStore((s) => s.groups.find((g) => g.id === s.activeGroupId));
 
 export {
-  MAX_GROUPS,
   getGroups,
   getActiveGroupId,
   activeGroup,
-  findGroupBySession,
   openSession,
   openPreview,
   pinTab,
@@ -419,7 +417,6 @@ export {
   createGroupFromDrop,
   focusGroup,
   focusAdjacentGroup,
-  setActiveGroupId,
   setActiveTabInGroup,
   setGroupFlexBasis,
   syncAllTabTitles,

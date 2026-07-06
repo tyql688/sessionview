@@ -4,7 +4,7 @@ import {
   buildPatchLineDiff,
   buildStructuredPatchLineDiff,
   buildToolLineDiff,
-} from "./diff";
+} from "@/lib/diff";
 
 describe("buildToolLineDiff", () => {
   it("renders unchanged lines as context and changed lines as remove/add", () => {

@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   getPollWatchProviders,
   getProviderWatchConfig,
-} from "./provider-watch";
-import type { Provider } from "./types";
+} from "@/lib/provider-watch";
+import type { Provider } from "@/lib/types";
 
 const ALL_PROVIDERS: Provider[] = [
   "claude",

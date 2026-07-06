@@ -1,7 +1,7 @@
 import { useState } from "react";
-import type { TokenUsage } from "../../lib/types";
-import { useI18n } from "../../i18n/index";
-import { toastError } from "../../stores/toast";
+import type { TokenUsage } from "@/lib/types";
+import { useI18n } from "@/i18n/index";
+import { toastError } from "@/stores/toast";
 
 export function CopyMessageButton(props: {
   content: string;

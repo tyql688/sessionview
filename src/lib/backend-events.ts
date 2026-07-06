@@ -1,5 +1,5 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { MaintenanceEvent } from "./types";
+import type { MaintenanceEvent } from "@/lib/types";
 
 export interface BackendEventPayloads {
   "sessions-changed": string[];

@@ -1,16 +1,14 @@
 import type React from "react";
-import { formatTreeTime } from "../lib/formatters";
-import type { TreeNode } from "../lib/types";
-import { useI18n } from "../i18n/index";
-import { isSelected, toggleSelected } from "../stores/selection";
-import { getProviderColor } from "../stores/providerSnapshots";
-import { ProviderDot } from "./icons";
+import { formatTreeTime } from "@/lib/formatters";
+import type { TreeNode } from "@/lib/types";
+import { useI18n } from "@/i18n/index";
+import { isSelected, toggleSelected } from "@/stores/selection";
+import { getProviderColor } from "@/stores/providerSnapshots";
+import { ProviderDot } from "@/components/icons";
 
-// Re-exports for backward compatibility
-export { ProviderDot } from "./icons";
-export { collectSessionIds, collectSessionNodes } from "../lib/tree-utils";
+export { collectSessionNodes } from "@/lib/tree-utils";
 
-export function ChevronIcon(props: { expanded: boolean }) {
+function ChevronIcon(props: { expanded: boolean }) {
   return (
     <svg
       width="16"
@@ -26,7 +24,7 @@ export function ChevronIcon(props: { expanded: boolean }) {
   );
 }
 
-export function FolderIcon() {
+function FolderIcon() {
   return (
     <svg
       width="16"
@@ -41,7 +39,7 @@ export function FolderIcon() {
   );
 }
 
-export function ChatIcon() {
+function ChatIcon() {
   return (
     <svg
       width="16"
@@ -56,7 +54,7 @@ export function ChatIcon() {
   );
 }
 
-export function ClockIcon() {
+function ClockIcon() {
   return (
     <svg
       width="16"
@@ -72,7 +70,7 @@ export function ClockIcon() {
   );
 }
 
-export function formatSessionLabel(raw: string, fallback = "Untitled"): string {
+function formatSessionLabel(raw: string, fallback = "Untitled"): string {
   let label = raw;
   label = label.replace(/^##\s*TASK:\s*/i, "");
   label = label.replace(/^\d+\.\s*TASK:\s*/i, "");

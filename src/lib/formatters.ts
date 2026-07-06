@@ -1,4 +1,4 @@
-import { getLocale } from "../i18n/index";
+import { getLocale } from "@/i18n/index";
 
 export function parseTimestamp(ts: string | null): number | null {
   if (!ts) return null;

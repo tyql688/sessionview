@@ -1,8 +1,8 @@
 import type { CSSProperties } from "react";
-import { useI18n } from "../../i18n/index";
-import type { MaintenanceJob, ProviderSnapshot } from "../../lib/types";
-import type { CustomDateRange } from "../../stores/usageView";
-import { toLocalISODate } from "../../lib/formatters";
+import { useI18n } from "@/i18n/index";
+import type { MaintenanceJob, ProviderSnapshot } from "@/lib/types";
+import type { CustomDateRange } from "@/stores/usageView";
+import { toLocalISODate } from "@/lib/formatters";
 
 export interface ProviderChipInfo {
   color: string;

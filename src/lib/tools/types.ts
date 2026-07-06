@@ -1,4 +1,4 @@
-import type { ToolDetail } from "../types";
+import type { ToolDetail } from "@/lib/types";
 
 export type { ToolDetail };
 

@@ -16,7 +16,7 @@ interface UpdaterState {
   errorDetail: string | null;
 }
 
-export const useUpdaterStore = create<UpdaterState>(() => ({
+const useUpdaterStore = create<UpdaterState>(() => ({
   phase: "idle",
   availableVersion: null,
   errorDetail: null,

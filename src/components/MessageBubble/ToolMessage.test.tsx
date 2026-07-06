@@ -1,8 +1,8 @@
 import { fireEvent, render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import type { Message } from "../../lib/types";
-import { ToolMessage } from "./ToolMessage";
+import type { Message } from "@/lib/types";
+import { ToolMessage } from "@/components/MessageBubble/ToolMessage";
 
 const agentMessage: Message = {
   role: "tool",

@@ -1,36 +1,36 @@
 import { Component, lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { listenBackendEvent, type UnlistenFn } from "../lib/backend-events";
+import { listenBackendEvent, type UnlistenFn } from "@/lib/backend-events";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ActivityBar } from "../components/ActivityBar";
-import { Explorer } from "../components/Explorer";
-import { EditorGroupsContainer } from "../components/Editor/EditorGroupsContainer";
-import { StatusBar } from "../components/StatusBar";
-import { SearchOverlay } from "../components/SearchOverlay";
+import { ActivityBar } from "@/components/ActivityBar";
+import { Explorer } from "@/components/Explorer";
+import { EditorGroupsContainer } from "@/components/Editor/EditorGroupsContainer";
+import { StatusBar } from "@/components/StatusBar";
+import { SearchOverlay } from "@/components/SearchOverlay";
 
 // Side panels load on first open — none of them belong in the startup chunk
 // (the usage panel alone pulls the chart/heatmap stack).
 const SettingsPanel = lazy(() =>
-  import("../components/SettingsPanel").then((m) => ({
+  import("@/components/SettingsPanel").then((m) => ({
     default: m.SettingsPanel,
   })),
 );
 const TrashView = lazy(() =>
-  import("../components/TrashView").then((m) => ({ default: m.TrashView })),
+  import("@/components/TrashView").then((m) => ({ default: m.TrashView })),
 );
 const FavoritesView = lazy(() =>
-  import("../components/FavoritesView").then((m) => ({
+  import("@/components/FavoritesView").then((m) => ({
     default: m.FavoritesView,
   })),
 );
 const BlockedView = lazy(() =>
-  import("../components/BlockedView").then((m) => ({ default: m.BlockedView })),
+  import("@/components/BlockedView").then((m) => ({ default: m.BlockedView })),
 );
 const UsagePanel = lazy(() =>
-  import("../components/UsagePanel").then((m) => ({ default: m.UsagePanel })),
+  import("@/components/UsagePanel").then((m) => ({ default: m.UsagePanel })),
 );
-import { KeyboardOverlay } from "../components/KeyboardOverlay";
-import { ToastContainer } from "../components/ToastContainer";
+import { KeyboardOverlay } from "@/components/KeyboardOverlay";
+import { ToastContainer } from "@/components/ToastContainer";
 import {
   trashSession,
   getChildSessions,
@@ -39,12 +39,12 @@ import {
   getTodayCost,
   getTodayTokens,
   invokeWithFallback,
-} from "../lib/tauri";
-import { isMac, isWindows } from "../lib/platform";
-import { useDisabledProviders } from "../stores/settings";
-import { loadProviderSnapshots } from "../stores/providerSnapshots";
-import { toast, toastError, toastInfo } from "../stores/toast";
-import { checkForUpdate } from "../stores/updater";
+} from "@/lib/tauri";
+import { isMac, isWindows } from "@/lib/platform";
+import { useDisabledProviders } from "@/stores/settings";
+import { loadProviderSnapshots } from "@/stores/providerSnapshots";
+import { toast, toastError, toastInfo } from "@/stores/toast";
+import { checkForUpdate } from "@/stores/updater";
 import {
   getGroups,
   activeGroup,
@@ -61,14 +61,14 @@ import {
   focusGroup,
   focusAdjacentGroup,
   syncAllTabTitles,
-} from "../stores/editorGroups";
-import type { TreeNode, Provider } from "../lib/types";
-import { useI18n } from "../i18n";
-import { createKeyboardHandler } from "./KeyboardShortcuts";
-import { createSyncManager } from "./SyncManager";
-import { createOpenSubagentHandler } from "./SubagentOpen";
-import { TitleBar } from "./TitleBar";
-import "../styles/index.css";
+} from "@/stores/editorGroups";
+import type { TreeNode, Provider } from "@/lib/types";
+import { useI18n } from "@/i18n";
+import { createKeyboardHandler } from "@/App/KeyboardShortcuts";
+import { createSyncManager } from "@/App/SyncManager";
+import { createOpenSubagentHandler } from "@/App/SubagentOpen";
+import { TitleBar } from "@/App/TitleBar";
+import "@/styles/index.css";
 
 // Linux derived locally (platform.ts is intentionally minimal). On Linux the
 // app hides native decorations like Windows, so it needs the same custom

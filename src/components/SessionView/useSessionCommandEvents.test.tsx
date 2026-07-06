@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 import {
   dispatchSessionCommand,
   SESSION_COMMAND_EVENTS,
-} from "../../lib/session-command-events";
-import { useSessionCommandEvents } from "./useSessionCommandEvents";
+} from "@/lib/session-command-events";
+import { useSessionCommandEvents } from "@/components/SessionView/useSessionCommandEvents";
 
 describe("useSessionCommandEvents", () => {
   it("runs every session command while the view is active", () => {

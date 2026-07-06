@@ -1,9 +1,14 @@
-import { useI18n } from "../../i18n/index";
-import type { SessionCostRow } from "../../lib/types";
-import { ROW_LIMIT_OPTIONS, type UsageSortState } from "../../lib/usage";
-import { fmtActive, fmtCost, fmtTokens, sortIcon } from "./formatters";
-import type { LimitOption } from "../../stores/usageView";
-import type { ProviderChipInfo } from "./Toolbar";
+import { useI18n } from "@/i18n/index";
+import type { SessionCostRow } from "@/lib/types";
+import { ROW_LIMIT_OPTIONS, type UsageSortState } from "@/lib/usage";
+import {
+  fmtActive,
+  fmtCost,
+  fmtTokens,
+  sortIcon,
+} from "@/components/UsagePanel/formatters";
+import type { LimitOption } from "@/stores/usageView";
+import type { ProviderChipInfo } from "@/components/UsagePanel/Toolbar";
 
 export interface SessionTableProps {
   visibleSessions: SessionCostRow[];

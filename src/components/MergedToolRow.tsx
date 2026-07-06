@@ -1,7 +1,7 @@
 import { useState } from "react";
-import type { Message, Provider } from "../lib/types";
-import { toolDisplayName, toolIcon } from "../lib/tools";
-import { MessageBubble } from "./MessageBubble";
+import type { Message, Provider } from "@/lib/types";
+import { toolDisplayName, toolIcon } from "@/lib/tools";
+import { MessageBubble } from "@/components/MessageBubble";
 
 export function MergedToolRow(props: {
   tools: string[];

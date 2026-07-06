@@ -1,4 +1,4 @@
-import { type Toast, useToastStore } from "../stores/toast";
+import { type Toast, useToastStore } from "@/stores/toast";
 
 function toastIcon(type: Toast["type"]): string {
   switch (type) {

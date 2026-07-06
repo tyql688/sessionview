@@ -1,16 +1,16 @@
-import type { SessionMeta, Message } from "../../lib/types";
-import { useI18n } from "../../i18n/index";
+import type { SessionMeta, Message } from "@/lib/types";
+import { useI18n } from "@/i18n/index";
 import {
   getProviderLabel,
   useProviderSnapshotVersion,
-} from "../../stores/providerSnapshots";
+} from "@/stores/providerSnapshots";
 import {
   formatTimestamp,
   formatDuration,
   fmtTokens,
   formatFileSize,
   shortenHomePath,
-} from "../../lib/formatters";
+} from "@/lib/formatters";
 
 export function SessionToolbar(props: {
   meta: SessionMeta;

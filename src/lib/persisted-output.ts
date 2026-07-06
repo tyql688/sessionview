@@ -1,4 +1,4 @@
-import { resolvePersistedOutput } from "./tauri";
+import { resolvePersistedOutput } from "@/lib/tauri";
 
 const TAG_START = "<persisted-output>";
 const TAG_END = "</persisted-output>";

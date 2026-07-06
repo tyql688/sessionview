@@ -31,14 +31,6 @@ export function selectionCount(): number {
 }
 
 // Reactive hooks for components.
-export function useSelectedIds(): Set<string> {
-  return useSelectionStore((state) => state.selectedIds);
-}
-
-export function useIsSelected(id: string): boolean {
-  return useSelectionStore((state) => state.selectedIds.has(id));
-}
-
 export function useSelectionCount(): number {
   return useSelectionStore((state) => state.selectedIds.size);
 }

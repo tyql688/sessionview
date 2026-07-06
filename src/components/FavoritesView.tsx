@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listFavorites } from "../lib/tauri";
-import type { SessionMeta, SessionRef, TreeNode } from "../lib/types";
-import { useI18n } from "../i18n/index";
-import { buildFavoritesTree } from "../lib/tree-builders";
-import { toastError } from "../stores/toast";
-import { errorMessage } from "../lib/errors";
-import { useFavoriteVersion } from "../stores/favorites";
-import { TreeNodeComponent } from "./TreeNode";
+import { listFavorites } from "@/lib/tauri";
+import type { SessionMeta, SessionRef, TreeNode } from "@/lib/types";
+import { useI18n } from "@/i18n/index";
+import { buildFavoritesTree } from "@/lib/tree-builders";
+import { toastError } from "@/stores/toast";
+import { errorMessage } from "@/lib/errors";
+import { useFavoriteVersion } from "@/stores/favorites";
+import { TreeNodeComponent } from "@/components/TreeNode";
 
 export function FavoritesView(props: {
   onOpenSession: (s: SessionRef) => void;

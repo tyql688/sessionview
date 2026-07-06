@@ -8,7 +8,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useI18n } from "../i18n/index";
+import { useI18n } from "@/i18n/index";
 
 export function ConfirmDialog(props: {
   open: boolean;

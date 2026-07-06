@@ -1,7 +1,7 @@
 import { create } from "zustand";
-import { searchSessions } from "../lib/tauri";
-import type { SearchFilters, SearchResult } from "../lib/types";
-import { toastError } from "./toast";
+import { searchSessions } from "@/lib/tauri";
+import type { SearchFilters, SearchResult } from "@/lib/types";
+import { toastError } from "@/stores/toast";
 
 // Pending in-session search: set by the global search overlay when opening a
 // session so SessionView can auto-apply the query and scroll to the first match.
@@ -17,7 +17,7 @@ interface SearchState {
   pendingSessionSearch: PendingSessionSearch | null;
 }
 
-export const useSearchStore = create<SearchState>(() => ({
+const useSearchStore = create<SearchState>(() => ({
   query: "",
   results: [],
   isSearching: false,
@@ -109,10 +109,6 @@ export function clearSearch() {
 
 export function setPendingSessionSearch(value: PendingSessionSearch | null) {
   useSearchStore.setState({ pendingSessionSearch: value });
-}
-
-export function getPendingSessionSearch(): PendingSessionSearch | null {
-  return useSearchStore.getState().pendingSessionSearch;
 }
 
 // Reactive hooks for components.

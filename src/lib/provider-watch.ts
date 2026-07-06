@@ -1,10 +1,9 @@
 import {
-  getProviderSnapshotVersion,
   getProvidersForWatchStrategy,
   getProviderWatchStrategy,
   loadProviderSnapshots,
-} from "../stores/providerSnapshots";
-import type { Provider } from "./types";
+} from "@/stores/providerSnapshots";
+import type { Provider } from "@/lib/types";
 
 export interface ProviderWatchBehavior {
   debounceMs: number;
@@ -40,8 +39,4 @@ export function getPollWatchProviders(): Provider[] {
 
 export function loadProviderWatchSnapshots(): Promise<void> | undefined {
   return loadProviderSnapshots();
-}
-
-export function getProviderWatchVersion(): number {
-  return getProviderSnapshotVersion();
 }

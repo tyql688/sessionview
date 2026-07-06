@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { Message } from "../../lib/types";
-import { isRenderableMessage, processMessages } from "./hooks";
+import type { Message } from "@/lib/types";
+import { isRenderableMessage, processMessages } from "@/components/SessionView/hooks";
 
 const baseMessage: Message = {
   role: "assistant",

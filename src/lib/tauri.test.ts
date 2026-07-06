@@ -7,7 +7,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke,
 }));
 
-vi.mock("../stores/toast", () => ({
+vi.mock("@/stores/toast", () => ({
   toastError,
 }));
 
@@ -19,7 +19,7 @@ describe("tauri api wrappers", () => {
   });
 
   it("getSessionDetail sends only sessionId", async () => {
-    const { getSessionDetail } = await import("./tauri");
+    const { getSessionDetail } = await import("@/lib/tauri");
 
     await getSessionDetail("sess-1");
 
@@ -29,7 +29,7 @@ describe("tauri api wrappers", () => {
   });
 
   it("getSessionOpenWindow sends sessionId and window bounds", async () => {
-    const { getSessionOpenWindow } = await import("./tauri");
+    const { getSessionOpenWindow } = await import("@/lib/tauri");
 
     await getSessionOpenWindow("sess-1", -300, 300);
 
@@ -41,7 +41,7 @@ describe("tauri api wrappers", () => {
   });
 
   it("exportSession uses the simplified session-based payload", async () => {
-    const { exportSession } = await import("./tauri");
+    const { exportSession } = await import("@/lib/tauri");
 
     await exportSession("sess-1", "json", "/tmp/out.json");
 
@@ -53,7 +53,7 @@ describe("tauri api wrappers", () => {
   });
 
   it("resumeSession sends sessionId plus terminal app", async () => {
-    const { resumeSession } = await import("./tauri");
+    const { resumeSession } = await import("@/lib/tauri");
 
     await resumeSession("sess-1", "iTerm");
 
@@ -64,7 +64,7 @@ describe("tauri api wrappers", () => {
   });
 
   it("getResumeCommand sends only sessionId", async () => {
-    const { getResumeCommand } = await import("./tauri");
+    const { getResumeCommand } = await import("@/lib/tauri");
 
     await getResumeCommand("sess-1");
 
@@ -74,7 +74,7 @@ describe("tauri api wrappers", () => {
   });
 
   it("trashSession sends only sessionId", async () => {
-    const { trashSession } = await import("./tauri");
+    const { trashSession } = await import("@/lib/tauri");
 
     await trashSession("sess-1");
 
@@ -84,7 +84,7 @@ describe("tauri api wrappers", () => {
   });
 
   it("getProviderSnapshots calls the snapshot endpoint", async () => {
-    const { getProviderSnapshots } = await import("./tauri");
+    const { getProviderSnapshots } = await import("@/lib/tauri");
 
     await getProviderSnapshots();
 
@@ -92,7 +92,7 @@ describe("tauri api wrappers", () => {
   });
 
   it("readToolResultText sends path", async () => {
-    const { readToolResultText } = await import("./tauri");
+    const { readToolResultText } = await import("@/lib/tauri");
 
     await readToolResultText("/tmp/tool-results/out.txt");
 
@@ -102,7 +102,7 @@ describe("tauri api wrappers", () => {
   });
 
   it("exportSessionsBatch sends string ids instead of tuple payloads", async () => {
-    const { exportSessionsBatch } = await import("./tauri");
+    const { exportSessionsBatch } = await import("@/lib/tauri");
 
     await exportSessionsBatch(["s1", "s2"], "markdown", "/tmp/export.zip");
 
@@ -127,7 +127,7 @@ describe("invokeWithToast", () => {
   });
 
   it("returns the resolved value on success and does not toast", async () => {
-    const { invokeWithToast } = await import("./tauri");
+    const { invokeWithToast } = await import("@/lib/tauri");
 
     const result = await invokeWithToast(Promise.resolve(42), "compute answer");
 
@@ -136,7 +136,7 @@ describe("invokeWithToast", () => {
   });
 
   it("toasts with context + error message and rethrows on failure", async () => {
-    const { invokeWithToast } = await import("./tauri");
+    const { invokeWithToast } = await import("@/lib/tauri");
     const err = new Error("boom");
 
     await expect(
@@ -148,7 +148,7 @@ describe("invokeWithToast", () => {
   });
 
   it("handles non-Error throwables by stringifying them", async () => {
-    const { invokeWithToast } = await import("./tauri");
+    const { invokeWithToast } = await import("@/lib/tauri");
 
     await expect(
       invokeWithToast(Promise.reject("plain string"), "ctx"),
@@ -171,7 +171,7 @@ describe("invokeWithFallback", () => {
   });
 
   it("returns the resolved value on success", async () => {
-    const { invokeWithFallback } = await import("./tauri");
+    const { invokeWithFallback } = await import("@/lib/tauri");
 
     const result = await invokeWithFallback(
       Promise.resolve(42),
@@ -184,7 +184,7 @@ describe("invokeWithFallback", () => {
   });
 
   it("returns the fallback and logs (but does NOT toast) on failure", async () => {
-    const { invokeWithFallback } = await import("./tauri");
+    const { invokeWithFallback } = await import("@/lib/tauri");
 
     const result = await invokeWithFallback(
       Promise.reject(new Error("network down")),
@@ -198,7 +198,7 @@ describe("invokeWithFallback", () => {
   });
 
   it("accepts a widened fallback type (T | undefined)", async () => {
-    const { invokeWithFallback } = await import("./tauri");
+    const { invokeWithFallback } = await import("@/lib/tauri");
 
     const result = await invokeWithFallback<number, undefined>(
       Promise.reject(new Error("x")),

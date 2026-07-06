@@ -8,8 +8,8 @@ import {
   fmtActive,
   sortIcon,
   makeFmtChartValue,
-} from "./formatters";
-import { getLocale, i18next } from "../../i18n/index";
+} from "@/components/UsagePanel/formatters";
+import { getLocale, i18next } from "@/i18n/index";
 
 // fmtTokens follows the UI language; pin it so assertions don't depend on the
 // machine's navigator.language.

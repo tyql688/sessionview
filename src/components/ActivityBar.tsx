@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { useI18n } from "../i18n/index";
+import { useI18n } from "@/i18n/index";
 
 interface ActivityItem {
   id: string;

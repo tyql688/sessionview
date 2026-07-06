@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { collectSessionIds, collectSessionNodes } from "./tree-utils";
-import type { TreeNode } from "./types";
+import { collectSessionIds, collectSessionNodes } from "@/lib/tree-utils";
+import type { TreeNode } from "@/lib/types";
 
 function makeSessionNode(id: string): TreeNode {
   return {

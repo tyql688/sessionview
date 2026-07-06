@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 const EXTERNAL_URL_PROTOCOLS = new Set(["http:", "https:", "mailto:", "tel:"]);
 
-export function normalizeExternalUrl(rawUrl: string): string {
+function normalizeExternalUrl(rawUrl: string): string {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
@@ -15,16 +15,6 @@ export function normalizeExternalUrl(rawUrl: string): string {
   }
 
   return parsed.href;
-}
-
-export function isExternalUrl(rawUrl: string): boolean {
-  try {
-    normalizeExternalUrl(rawUrl);
-    return true;
-  } catch (error) {
-    console.warn("Rejected markdown link URL:", error);
-    return false;
-  }
 }
 
 export async function openExternalUrl(rawUrl: string): Promise<void> {

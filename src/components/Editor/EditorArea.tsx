@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import type { SessionMeta, SessionRef } from "../../lib/types";
-import { useI18n } from "../../i18n/index";
-import { useGroups } from "../../stores/editorGroups";
-import { formatTimestamp } from "../../lib/formatters";
-import { TabBar } from "./TabBar";
-import { SessionView } from "../SessionView";
-import { ProviderIcon } from "../icons";
-import { isMac } from "../../lib/platform";
+import type { SessionMeta, SessionRef } from "@/lib/types";
+import { useI18n } from "@/i18n/index";
+import { useGroups } from "@/stores/editorGroups";
+import { formatTimestamp } from "@/lib/formatters";
+import { TabBar } from "@/components/Editor/TabBar";
+import { SessionView } from "@/components/SessionView";
+import { ProviderIcon } from "@/components/icons";
+import { isMac } from "@/lib/platform";
 
 export function EditorArea(props: {
   groupId: string;

@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listenBackendEvent, type UnlistenFn } from "../../lib/backend-events";
-import { useI18n } from "../../i18n/index";
+import { listenBackendEvent, type UnlistenFn } from "@/lib/backend-events";
+import { useI18n } from "@/i18n/index";
 import {
   getActivityCalendar,
   getIndexStats,
   getPricingCatalogStatus,
   getSessionCount,
   getUsageStats,
-} from "../../lib/tauri";
+} from "@/lib/tauri";
 import {
   getProviderSnapshotVersion,
   listProviderSnapshots,
   refreshProviderSnapshots,
   useProviderSnapshotVersion,
-} from "../../stores/providerSnapshots";
+} from "@/stores/providerSnapshots";
 import {
   useRangeDays,
   useCustomRange,
@@ -32,7 +32,7 @@ import {
   useProjectSort,
   useSessionSort,
   type CustomDateRange,
-} from "../../stores/usageView";
+} from "@/stores/usageView";
 import {
   buildDailyChartData,
   compareUsageValues,
@@ -41,14 +41,14 @@ import {
   totalUsageTokens,
   trendPercent,
   type UsageSortState,
-} from "../../lib/usage";
+} from "@/lib/usage";
 import {
   buildHeatmapGrid,
   dateRangeForYear,
   type HeatmapGrid,
-} from "../../lib/heatmap";
-import { formatLocalDateTime, toLocalISODate } from "../../lib/formatters";
-import { errorMessage } from "../../lib/errors";
+} from "@/lib/heatmap";
+import { formatLocalDateTime, toLocalISODate } from "@/lib/formatters";
+import { errorMessage } from "@/lib/errors";
 import type {
   ActivityCalendar,
   IndexStats,
@@ -58,14 +58,14 @@ import type {
   ProjectCost,
   SessionCostRow,
   UsageStats,
-} from "../../lib/types";
+} from "@/lib/types";
 import {
   SHORT_PROVIDER_LABELS,
   fmtTokens,
   fmtPct,
   formatProjectPath as formatProjectPathRaw,
-} from "./formatters";
-import type { ProviderChipInfo } from "./Toolbar";
+} from "@/components/UsagePanel/formatters";
+import type { ProviderChipInfo } from "@/components/UsagePanel/Toolbar";
 
 // --- Async resource helper (mirrors Solid's createResource) -------------------
 

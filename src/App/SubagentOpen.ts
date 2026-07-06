@@ -1,5 +1,5 @@
-import type { SessionRef } from "../lib/types";
-import { matchesSubagentSession } from "../lib/subagent";
+import type { SessionRef } from "@/lib/types";
+import { matchesSubagentSession } from "@/lib/subagent";
 
 export interface OpenSubagentDetail {
   description?: string;

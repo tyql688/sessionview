@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import type { SessionRef } from "../lib/types";
+import type { SessionRef } from "@/lib/types";
 import {
   getGroups as groups,
   getActiveGroupId as activeGroupId,
@@ -15,7 +15,7 @@ import {
   createGroupFromDrop,
   focusAdjacentGroup,
   _reset,
-} from "./editorGroups";
+} from "@/stores/editorGroups";
 
 function makeSession(id: string): SessionRef {
   return {

@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { HeatmapMetric } from "../lib/heatmap";
-import type { ChartMetric, UsageSortState } from "../lib/usage";
+import type { HeatmapMetric } from "@/lib/heatmap";
+import type { ChartMetric, UsageSortState } from "@/lib/usage";
 
 // Persistent Usage-panel UI state. UsagePanel is destroyed and recreated on
 // every view switch, so hoisting the persistent inputs to a module-scope store
@@ -17,8 +17,8 @@ export interface CustomDateRange {
 // import it from this store.
 export type LimitOption = 10 | 25 | 50 | 100;
 
-export type { ChartMetric, UsageSortState } from "../lib/usage";
-export type { HeatmapMetric } from "../lib/heatmap";
+export type { ChartMetric, UsageSortState } from "@/lib/usage";
+export type { HeatmapMetric } from "@/lib/heatmap";
 
 interface UsageViewState {
   rangeDays: number | null;
@@ -38,7 +38,7 @@ interface UsageViewState {
   sessionSort: UsageSortState;
 }
 
-export const useUsageViewStore = create<UsageViewState>(() => ({
+const useUsageViewStore = create<UsageViewState>(() => ({
   rangeDays: 7,
   customRange: null,
   selectedProviders: new Set<string>(),

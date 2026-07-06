@@ -1,14 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useI18n } from "../../i18n/index";
-import { shortenHomePath } from "../../lib/formatters";
-import type { ProviderSnapshot } from "../../lib/types";
+import { useI18n } from "@/i18n/index";
+import { shortenHomePath } from "@/lib/formatters";
+import type { ProviderSnapshot } from "@/lib/types";
 import {
   useDisabledProviders,
   useDisabledProvidersError,
   toggleProvider,
-} from "../../stores/settings";
-import { useProviderSnapshotVersion } from "../../stores/providerSnapshots";
-import { toastError } from "../../stores/toast";
+} from "@/stores/settings";
+import { useProviderSnapshotVersion } from "@/stores/providerSnapshots";
+import { toastError } from "@/stores/toast";
 
 export function DataSourceSettings(props: {
   providerSnapshots: () => ProviderSnapshot[];

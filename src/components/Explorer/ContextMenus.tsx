@@ -1,10 +1,10 @@
-import type { MenuItemDef } from "../ContextMenu";
-import type { Provider, TreeNode } from "../../lib/types";
-import { openInFolder } from "../../lib/tauri";
-import { errorMessage } from "../../lib/errors";
-import { toast, toastError } from "../../stores/toast";
-import { selectionCount } from "../../stores/selection";
-import { bumpFavoriteVersion } from "../../stores/favorites";
+import type { MenuItemDef } from "@/components/ContextMenu";
+import type { Provider, TreeNode } from "@/lib/types";
+import { openInFolder } from "@/lib/tauri";
+import { errorMessage } from "@/lib/errors";
+import { toast, toastError } from "@/stores/toast";
+import { selectionCount } from "@/stores/selection";
+import { bumpFavoriteVersion } from "@/stores/favorites";
 
 export interface SessionMenuContext {
   node: TreeNode;

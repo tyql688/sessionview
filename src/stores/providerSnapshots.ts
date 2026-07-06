@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { getProviderSnapshots } from "../lib/tauri";
-import type { Provider, ProviderSnapshot } from "../lib/types";
+import { getProviderSnapshots } from "@/lib/tauri";
+import type { Provider, ProviderSnapshot } from "@/lib/types";
 
 type ProviderSnapshotMap = Partial<Record<Provider, ProviderSnapshot>>;
 type ProviderWatchStrategy = ProviderSnapshot["watch_strategy"];

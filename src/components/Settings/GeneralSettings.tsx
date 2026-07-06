@@ -1,15 +1,15 @@
-import { useI18n } from "../../i18n/index";
-import type { Locale } from "../../i18n/index";
-import { useTheme, setTheme } from "../../stores/theme";
-import type { Theme } from "../../stores/theme";
+import { useI18n } from "@/i18n/index";
+import type { Locale } from "@/i18n/index";
+import { useTheme, setTheme } from "@/stores/theme";
+import type { Theme } from "@/stores/theme";
 import {
   useTerminalApp,
   setTerminalApp,
   useShowOrphans,
   setShowOrphans,
-} from "../../stores/settings";
-import type { TerminalApp } from "../../stores/settings";
-import { isMac, isWindows } from "../../lib/platform";
+} from "@/stores/settings";
+import type { TerminalApp } from "@/stores/settings";
+import { isMac, isWindows } from "@/lib/platform";
 
 const validThemes: Theme[] = ["light", "dark", "system"];
 const validTerminals: TerminalApp[] = isMac

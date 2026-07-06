@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { useI18n } from "../../i18n/index";
-import type { IndexStats } from "../../lib/types";
-import { getIndexStats, startRebuildIndex, clearIndex } from "../../lib/tauri";
-import { toast, toastError, toastInfo } from "../../stores/toast";
-import { errorMessage } from "../../lib/errors";
-import { formatFileSize } from "../../lib/formatters";
-import { ConfirmDialog } from "../ConfirmDialog";
+import { useI18n } from "@/i18n/index";
+import type { IndexStats } from "@/lib/types";
+import { getIndexStats, startRebuildIndex, clearIndex } from "@/lib/tauri";
+import { toast, toastError, toastInfo } from "@/stores/toast";
+import { errorMessage } from "@/lib/errors";
+import { formatFileSize } from "@/lib/formatters";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 export function IndexSettings(props: { onIndexChanged: () => void }) {
   const { t } = useI18n();

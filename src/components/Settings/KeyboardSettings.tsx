@@ -1,5 +1,5 @@
-import { useI18n } from "../../i18n/index";
-import { isMac } from "../../lib/platform";
+import { useI18n } from "@/i18n/index";
+import { isMac } from "@/lib/platform";
 
 export function KeyboardSettings() {
   const { t } = useI18n();

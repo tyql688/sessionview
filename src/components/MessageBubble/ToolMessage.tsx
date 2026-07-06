@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect } from "react";
-import type { Message } from "../../lib/types";
-import { useI18n } from "../../i18n/index";
-import { readToolResultText } from "../../lib/tauri";
-import { buildToolLineDiff, type ToolDiffLine } from "../../lib/diff";
+import type { Message } from "@/lib/types";
+import { useI18n } from "@/i18n/index";
+import { readToolResultText } from "@/lib/tauri";
+import { buildToolLineDiff, type ToolDiffLine } from "@/lib/diff";
 import {
   formatToolInput,
   formatToolResultMetadata,
@@ -10,12 +10,12 @@ import {
   toolDisplayName,
   toolIcon,
   toolSummary,
-} from "../../lib/tools";
+} from "@/lib/tools";
 import {
   extractPersistedOutputPaths,
   loadPersistedOutput,
   substitutePersistedOutputs,
-} from "../../lib/persisted-output";
+} from "@/lib/persisted-output";
 import {
   SUBAGENT_FILE_PROVIDERS,
   extractAgentChildIds,
@@ -25,15 +25,15 @@ import {
   extractAgentNickname,
   isAgentToolMessage,
   parseToolJsonObject,
-} from "../../lib/subagent";
-import { parseContent } from "../../lib/message-content";
-import { SubagentInline } from "./SubagentInline";
+} from "@/lib/subagent";
+import { parseContent } from "@/lib/message-content";
+import { SubagentInline } from "@/components/MessageBubble/SubagentInline";
 import {
   ImagePreview,
   LocalImage,
   RemoteImage,
   isLocalPath,
-} from "./ImagePreview";
+} from "@/components/MessageBubble/ImagePreview";
 
 /** Dispatch a custom event to open a subagent session by description, nickname, or agent ID. */
 function openSubagent(

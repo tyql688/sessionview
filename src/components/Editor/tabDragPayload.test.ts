@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseTabDragPayload, serializeTabDragPayload } from "./tabDragPayload";
+import { parseTabDragPayload, serializeTabDragPayload } from "@/components/Editor/tabDragPayload";
 
 describe("tab drag payload", () => {
   it("round-trips a tab drag payload", () => {

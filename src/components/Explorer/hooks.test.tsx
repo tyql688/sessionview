@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { TreeNode } from "../../lib/types";
+import type { TreeNode } from "@/lib/types";
 
-vi.mock("../../lib/tauri", () => ({
+vi.mock("@/lib/tauri", () => ({
   detectTerminal: vi.fn().mockResolvedValue("terminal"),
 }));
 
@@ -9,8 +9,8 @@ import {
   addBlockedFolder,
   getBlockedFolders,
   removeBlockedFolder,
-} from "../../stores/settings";
-import { filterBlockedFolders, groupTreeByDirectory } from "./hooks";
+} from "@/stores/settings";
+import { filterBlockedFolders, groupTreeByDirectory } from "@/components/Explorer/hooks";
 
 function clearBlockedFolders() {
   for (const folder of [...getBlockedFolders()]) {

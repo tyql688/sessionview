@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import { errorMessage } from "./errors";
-import { toastError } from "../stores/toast";
+import { errorMessage } from "@/lib/errors";
+import { toastError } from "@/stores/toast";
 import type {
   BatchResult,
   SessionDetail,
@@ -16,11 +16,11 @@ import type {
   UsageStats,
   ActivityCalendar,
   Message,
-} from "./types";
+} from "@/lib/types";
 
 /// Sentinel returned by the backend when a load was cancelled mid-flight.
 /// Frontend treats this as silent — no toast, no error UI.
-export const LOAD_CANCELED_SENTINEL = "__cc_session_load_canceled__";
+const LOAD_CANCELED_SENTINEL = "__cc_session_load_canceled__";
 
 export function isLoadCanceledError(err: unknown): boolean {
   if (err == null) return false;
@@ -202,7 +202,7 @@ type CommandArgs<Name extends keyof BackendCommandMap> =
 type CommandResultFor<Name extends keyof BackendCommandMap> =
   BackendCommandMap[Name]["result"];
 
-export function invokeCommand<Name extends keyof BackendCommandMap>(
+function invokeCommand<Name extends keyof BackendCommandMap>(
   name: Name,
   ...args: CommandArgs<Name> extends undefined ? [] : [CommandArgs<Name>]
 ): Promise<CommandResultFor<Name>> {
@@ -235,10 +235,6 @@ export async function getSessionDetail(
   sessionId: string,
 ): Promise<SessionDetail> {
   return invokeCommand("get_session_detail", { sessionId });
-}
-
-export async function getSessionMeta(sessionId: string): Promise<SessionMeta> {
-  return invokeCommand("get_session_meta", { sessionId });
 }
 
 /// Fetch session metadata plus the initial message window in one IPC.

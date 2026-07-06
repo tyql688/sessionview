@@ -1,4 +1,4 @@
-import type { Message, ToolMetadata } from "./types";
+import type { Message, ToolMetadata } from "@/lib/types";
 
 /** Providers where subagents are stored as separate session files (can be opened). */
 export const SUBAGENT_FILE_PROVIDERS = new Set([

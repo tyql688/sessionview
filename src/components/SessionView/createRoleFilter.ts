@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import type { MessageRole } from "../../lib/types";
-import type { ProcessedEntry } from "./hooks";
+import type { MessageRole } from "@/lib/types";
+import type { ProcessedEntry } from "@/components/SessionView/hooks";
 
 export interface CreateRoleFilterResult {
   /** Currently hidden roles. */

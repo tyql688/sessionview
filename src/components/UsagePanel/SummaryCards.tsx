@@ -1,5 +1,9 @@
-import { useI18n } from "../../i18n/index";
-import { fmtCost, fmtTrend, trendClass } from "./formatters";
+import { useI18n } from "@/i18n/index";
+import {
+  fmtCost,
+  fmtTrend,
+  trendClass,
+} from "@/components/UsagePanel/formatters";
 
 export interface SummaryStatItem {
   label: string;

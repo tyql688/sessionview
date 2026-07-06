@@ -1,7 +1,7 @@
 import { fireEvent, render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { TitleBar } from "./TitleBar";
+import { TitleBar } from "@/App/TitleBar";
 
 function requireElement<T extends Element>(element: T | null, name: string): T {
   if (!element) throw new Error(`Missing ${name}`);

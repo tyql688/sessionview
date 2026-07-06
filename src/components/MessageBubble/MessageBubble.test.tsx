@@ -1,17 +1,17 @@
 import { render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Message } from "../../lib/types";
+import type { Message } from "@/lib/types";
 
 // Message bodies render through the Streamdown-based Markdown component;
 // mock it so tests assert what text reaches the renderer without pulling the
 // full markdown pipeline (shiki, mermaid) into happy-dom.
 const markdownMock = vi.fn((_props: { text: string }) => null);
-vi.mock("../../features/session/timeline/Markdown", () => ({
+vi.mock("@/features/session/timeline/Markdown", () => ({
   Markdown: (props: { text: string }) => markdownMock(props),
 }));
 
-import { MessageBubble } from "./index";
+import { MessageBubble } from "@/components/MessageBubble/index";
 
 function message(overrides: Partial<Message>): Message {
   return {

@@ -1,4 +1,4 @@
-import type { ActivityDay } from "./types";
+import type { ActivityDay } from "@/lib/types";
 
 /** Which per-day metric drives the calendar's count + cell intensity. */
 export type HeatmapMetric = "sessions" | "turns" | "tokens" | "cost";

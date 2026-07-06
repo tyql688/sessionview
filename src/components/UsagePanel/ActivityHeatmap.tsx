@@ -1,11 +1,7 @@
 import { type CSSProperties, useState } from "react";
-import { useI18n } from "../../i18n/index";
-import type {
-  HeatmapCell,
-  HeatmapGrid,
-  HeatmapMetric,
-} from "../../lib/heatmap";
-import { fmtCost, fmtTokens } from "./formatters";
+import { useI18n } from "@/i18n/index";
+import type { HeatmapCell, HeatmapGrid, HeatmapMetric } from "@/lib/heatmap";
+import { fmtCost, fmtTokens } from "@/components/UsagePanel/formatters";
 
 const METRICS: HeatmapMetric[] = ["tokens", "cost"];
 const WEEKDAY_ROWS = [0, 1, 2, 3, 4, 5, 6];

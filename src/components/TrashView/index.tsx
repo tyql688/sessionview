@@ -1,9 +1,9 @@
-import type { TreeNode } from "../../lib/types";
-import { ProviderDot } from "../icons";
-import { useI18n } from "../../i18n/index";
-import { formatAbsoluteTime } from "../../lib/formatters";
-import { ConfirmDialog } from "../ConfirmDialog";
-import { useTrashState } from "./hooks";
+import type { TreeNode } from "@/lib/types";
+import { ProviderDot } from "@/components/icons";
+import { useI18n } from "@/i18n/index";
+import { formatAbsoluteTime } from "@/lib/formatters";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useTrashState } from "@/components/TrashView/hooks";
 
 export function TrashView(props: { onRefreshTree: () => void }) {
   const { t } = useI18n();

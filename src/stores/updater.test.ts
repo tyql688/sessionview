@@ -15,7 +15,7 @@ describe("updater store", () => {
   });
 
   it("starts in idle phase", async () => {
-    const { getUpdaterPhase: phase } = await import("./updater");
+    const { getUpdaterPhase: phase } = await import("@/stores/updater");
     expect(phase()).toBe("idle");
   });
 
@@ -30,7 +30,7 @@ describe("updater store", () => {
       checkForUpdate,
       getUpdaterPhase: phase,
       getAvailableVersion: availableVersion,
-    } = await import("./updater");
+    } = await import("@/stores/updater");
     await checkForUpdate();
 
     expect(phase()).toBe("available");
@@ -43,7 +43,7 @@ describe("updater store", () => {
     vi.mocked(check).mockResolvedValue(null);
 
     const { checkForUpdate, getUpdaterPhase: phase } =
-      await import("./updater");
+      await import("@/stores/updater");
     await checkForUpdate();
 
     expect(phase()).toBe("upToDate");
@@ -61,7 +61,7 @@ describe("updater store", () => {
       checkForUpdate,
       getUpdaterPhase: phase,
       getUpdaterError: errorDetail,
-    } = await import("./updater");
+    } = await import("@/stores/updater");
     await checkForUpdate();
 
     expect(phase()).toBe("error");
@@ -78,7 +78,7 @@ describe("updater store", () => {
     // First call: error → schedules reset to idle in 3s
     vi.mocked(check).mockRejectedValueOnce(new Error("timeout"));
     const { checkForUpdate, getUpdaterPhase: phase } =
-      await import("./updater");
+      await import("@/stores/updater");
     await checkForUpdate();
     expect(phase()).toBe("error");
 
@@ -114,7 +114,7 @@ describe("updater store", () => {
       downloadAndInstall,
       getUpdaterPhase: phase,
       getUpdaterError: errorDetail,
-    } = await import("./updater");
+    } = await import("@/stores/updater");
     await checkForUpdate();
     expect(phase()).toBe("available");
 

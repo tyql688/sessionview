@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { useI18n } from "../i18n/index";
+import { useI18n } from "@/i18n/index";
 
 export function InputDialog(props: {
   open: boolean;

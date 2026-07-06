@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProviderSnapshot } from "../lib/types";
+import type { ProviderSnapshot } from "@/lib/types";
 
 const getProviderSnapshots = vi.fn<() => Promise<ProviderSnapshot[]>>();
 
-vi.mock("../lib/tauri", () => ({
+vi.mock("@/lib/tauri", () => ({
   getProviderSnapshots,
 }));
 
 async function loadStore() {
-  return import("./providerSnapshots");
+  return import("@/stores/providerSnapshots");
 }
 
 describe("providerSnapshots store", () => {

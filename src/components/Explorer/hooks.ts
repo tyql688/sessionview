@@ -1,5 +1,5 @@
-import type { TreeNode, SessionRef, Provider } from "../../lib/types";
-import { getBlockedFolders, isPathBlocked } from "../../stores/settings";
+import type { TreeNode, SessionRef, Provider } from "@/lib/types";
+import { getBlockedFolders, isPathBlocked } from "@/stores/settings";
 
 /** Filter out projects whose path matches a blocked folder. */
 export function filterBlockedFolders(tree: TreeNode[]): TreeNode[] {

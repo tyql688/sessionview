@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
-import { useI18n } from "../i18n/index";
-import { GeneralSettings } from "./Settings/GeneralSettings";
-import { DataSourceSettings } from "./Settings/DataSourceSettings";
-import { IndexSettings } from "./Settings/IndexSettings";
-import { KeyboardSettings } from "./Settings/KeyboardSettings";
-import { AboutSettings } from "./Settings/AboutSettings";
+import { useI18n } from "@/i18n/index";
+import { GeneralSettings } from "@/components/Settings/GeneralSettings";
+import { DataSourceSettings } from "@/components/Settings/DataSourceSettings";
+import { IndexSettings } from "@/components/Settings/IndexSettings";
+import { KeyboardSettings } from "@/components/Settings/KeyboardSettings";
+import { AboutSettings } from "@/components/Settings/AboutSettings";
 import {
   listProviderSnapshots,
   refreshProviderSnapshots,
-} from "../stores/providerSnapshots";
+} from "@/stores/providerSnapshots";
 
 type SettingsCategory =
   | "general"

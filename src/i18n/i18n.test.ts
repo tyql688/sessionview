@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import en from "./en.json";
-import enSource from "./en.json?raw";
-import zh from "./zh.json";
-import zhSource from "./zh.json?raw";
+import en from "@/i18n/en.json";
+import enSource from "@/i18n/en.json?raw";
+import zh from "@/i18n/zh.json";
+import zhSource from "@/i18n/zh.json?raw";
 
 function parseString(source: string, index: number): [string, number] {
   let value = "";

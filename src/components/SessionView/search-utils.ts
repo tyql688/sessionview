@@ -1,12 +1,12 @@
-import type { ProcessedEntry } from "./hooks";
+import type { ProcessedEntry } from "@/components/SessionView/hooks";
 
 export const SESSION_SEARCH_DEBOUNCE_MS = 180;
 
-export function normalizeSessionSearch(term: string): string {
+function normalizeSessionSearch(term: string): string {
   return term.trim().toLocaleLowerCase();
 }
 
-export function entryMatchesSearch(
+function entryMatchesSearch(
   entry: ProcessedEntry,
   normalizedTerm: string,
 ): boolean {
@@ -45,7 +45,7 @@ export function findFirstMatchingEntryIndex(
 const HIGHLIGHT_NAME = "session-search";
 const ACTIVE_HIGHLIGHT_NAME = "session-search-active";
 
-export function supportsHighlightApi(): boolean {
+function supportsHighlightApi(): boolean {
   return typeof CSS !== "undefined" && "highlights" in CSS;
 }
 
@@ -113,12 +113,6 @@ export function applySearchHighlight(
   } else {
     CSS.highlights.delete(ACTIVE_HIGHLIGHT_NAME);
   }
-}
-
-export function clearSearchHighlight(): void {
-  if (!supportsHighlightApi()) return;
-  CSS.highlights.delete(HIGHLIGHT_NAME);
-  CSS.highlights.delete(ACTIVE_HIGHLIGHT_NAME);
 }
 
 /** Scroll a range's nearest element into view. */

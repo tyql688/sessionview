@@ -1,10 +1,10 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Message, SessionMeta } from "../../lib/types";
-import { SESSION_COMMAND_EVENTS } from "../../lib/session-command-events";
-import { processMessages } from "./hooks";
-import { findFirstMatchingEntryIndex } from "./search-utils";
+import type { Message, SessionMeta } from "@/lib/types";
+import { SESSION_COMMAND_EVENTS } from "@/lib/session-command-events";
+import { processMessages } from "@/components/SessionView/hooks";
+import { findFirstMatchingEntryIndex } from "@/components/SessionView/search-utils";
 
 // Minimal synthetic session payloads. The backend is fully mocked: `invoke`
 // dispatches on the Tauri command name so the session-load effect resolves
@@ -113,7 +113,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(async () => () => {}),
 }));
 
-import { SessionView } from "./index";
+import { SessionView } from "@/components/SessionView/index";
 
 beforeAll(() => {
   // happy-dom lacks these browser-only APIs that child components touch.

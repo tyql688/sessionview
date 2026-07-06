@@ -9,8 +9,8 @@ import {
   shortenHomePath,
   toLocalISODate,
   formatTreeTime,
-} from "./formatters";
-import { getLocale, i18next } from "../i18n/index";
+} from "@/lib/formatters";
+import { getLocale, i18next } from "@/i18n/index";
 
 describe("parseTimestamp", () => {
   it("parses epoch seconds and converts to ms", () => {

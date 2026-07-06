@@ -5,7 +5,7 @@ import type {
   Message,
   MessageRole,
   TokenTotals,
-} from "../../lib/types";
+} from "@/lib/types";
 import {
   getSessionOpenWindow,
   getSessionTurnOutline,
@@ -14,31 +14,34 @@ import {
   resumeSession,
   isLoadCanceledError,
   type SessionTurnOutlineEntry,
-} from "../../lib/tauri";
-import { useI18n } from "../../i18n/index";
-import { MessageBubble } from "../MessageBubble";
-import { MergedToolRow } from "../MergedToolRow";
-import { ConfirmDialog } from "../ConfirmDialog";
-import { ExportDialog } from "../ExportDialog";
-import { useTerminalApp } from "../../stores/settings";
-import { toast, toastError } from "../../stores/toast";
-import { errorMessage } from "../../lib/errors";
-import { isSearchableRole, processMessages } from "./hooks";
-import { SessionToolbar } from "./SessionToolbar";
-import { SessionSearch } from "./SessionSearch";
-import { TimelineMinimap } from "./TimelineMinimap";
-import { useLiveWatch } from "./useLiveWatch";
-import { useFavoriteSync } from "./useFavoriteSync";
-import { useAutoLoad } from "./useAutoLoad";
-import { useSessionCommandEvents } from "./useSessionCommandEvents";
-import { useRoleFilter } from "./createRoleFilter";
-import { useSessionSearch } from "./createSessionSearch";
+} from "@/lib/tauri";
+import { useI18n } from "@/i18n/index";
+import { MessageBubble } from "@/components/MessageBubble";
+import { MergedToolRow } from "@/components/MergedToolRow";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ExportDialog } from "@/components/ExportDialog";
+import { useTerminalApp } from "@/stores/settings";
+import { toast, toastError } from "@/stores/toast";
+import { errorMessage } from "@/lib/errors";
+import {
+  isSearchableRole,
+  processMessages,
+} from "@/components/SessionView/hooks";
+import { SessionToolbar } from "@/components/SessionView/SessionToolbar";
+import { SessionSearch } from "@/components/SessionView/SessionSearch";
+import { TimelineMinimap } from "@/components/SessionView/TimelineMinimap";
+import { useLiveWatch } from "@/components/SessionView/useLiveWatch";
+import { useFavoriteSync } from "@/components/SessionView/useFavoriteSync";
+import { useAutoLoad } from "@/components/SessionView/useAutoLoad";
+import { useSessionCommandEvents } from "@/components/SessionView/useSessionCommandEvents";
+import { useRoleFilter } from "@/components/SessionView/createRoleFilter";
+import { useSessionSearch } from "@/components/SessionView/createSessionSearch";
 import {
   useSessionPagination,
   BATCH_SIZE,
   LOAD_MORE_THRESHOLD,
   INITIAL_TAIL,
-} from "./createSessionPagination";
+} from "@/components/SessionView/createSessionPagination";
 
 export function SessionView(props: {
   session: SessionRef;

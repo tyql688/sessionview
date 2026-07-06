@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { SessionTurnOutlineEntry } from "../../lib/tauri";
+import type { SessionTurnOutlineEntry } from "@/lib/tauri";
 
 const MIN_TURNS_TO_SHOW = 2;
 const SCROLL_REST_MS = 180;

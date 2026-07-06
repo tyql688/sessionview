@@ -1,7 +1,7 @@
 import i18next from "i18next";
 import { initReactI18next, useTranslation } from "react-i18next";
-import en from "./en.json";
-import zh from "./zh.json";
+import en from "@/i18n/en.json";
+import zh from "@/i18n/zh.json";
 
 const dictionaries = { en, zh };
 type Locale = keyof typeof dictionaries;

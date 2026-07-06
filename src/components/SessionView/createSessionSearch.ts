@@ -3,14 +3,14 @@ import type { Dispatch, SetStateAction } from "react";
 import {
   setPendingSessionSearch,
   usePendingSessionSearch,
-} from "../../stores/search";
+} from "@/stores/search";
 import {
   applySearchHighlight,
   collectSearchRanges,
   SESSION_SEARCH_DEBOUNCE_MS,
   scrollRangeIntoView,
-} from "./search-utils";
-import type { ProcessedEntry } from "./hooks";
+} from "@/components/SessionView/search-utils";
+import type { ProcessedEntry } from "@/components/SessionView/hooks";
 
 export interface CreateSessionSearchOptions {
   /** Role-filtered entries the search runs against. */

@@ -1,11 +1,11 @@
 import { useEffect } from "react";
-import { listenBackendEvent, type UnlistenFn } from "../../lib/backend-events";
+import { listenBackendEvent, type UnlistenFn } from "@/lib/backend-events";
 import {
   getProviderWatchConfig,
   loadProviderWatchSnapshots,
-} from "../../lib/provider-watch";
-import { useProviderSnapshotVersion } from "../../stores/providerSnapshots";
-import type { Provider } from "../../lib/types";
+} from "@/lib/provider-watch";
+import { useProviderSnapshotVersion } from "@/stores/providerSnapshots";
+import type { Provider } from "@/lib/types";
 
 export interface UseLiveWatchOptions {
   watching: boolean;

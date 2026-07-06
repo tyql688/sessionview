@@ -3,13 +3,10 @@ import {
   invokeWithFallback,
   isFavorite,
   toggleFavorite as invokeToggleFavorite,
-} from "../../lib/tauri";
-import { useI18n } from "../../i18n/index";
-import { toast, toastError } from "../../stores/toast";
-import {
-  bumpFavoriteVersion,
-  useFavoriteVersion,
-} from "../../stores/favorites";
+} from "@/lib/tauri";
+import { useI18n } from "@/i18n/index";
+import { toast, toastError } from "@/stores/toast";
+import { bumpFavoriteVersion, useFavoriteVersion } from "@/stores/favorites";
 
 export interface UseFavoriteSyncResult {
   starred: boolean | null;

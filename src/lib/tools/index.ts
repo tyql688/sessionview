@@ -1,10 +1,9 @@
-export type { ToolDetail } from "./types";
+export type { ToolDetail } from "@/lib/tools/types";
 export {
-  formatMcpLabel,
   parseMcpToolName,
   toolDisplayName,
   toolIcon,
   toolSummary,
-} from "./names";
-export { formatToolInput } from "./input";
-export { formatToolResultMetadata } from "./result";
+} from "@/lib/tools/names";
+export { formatToolInput } from "@/lib/tools/input";
+export { formatToolResultMetadata } from "@/lib/tools/result";

@@ -4,8 +4,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useI18n } from "../i18n/index";
-import { isMac } from "../lib/platform";
+import { useI18n } from "@/i18n/index";
+import { isMac } from "@/lib/platform";
 
 const mod = isMac ? "⌘" : "Ctrl+";
 const shift = isMac ? "⇧" : "Shift+";

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { Message } from "../../lib/types";
-import type { ProcessedEntry } from "./hooks";
-import { findFirstMatchingEntryIndex } from "./search-utils";
+import type { Message } from "@/lib/types";
+import type { ProcessedEntry } from "@/components/SessionView/hooks";
+import { findFirstMatchingEntryIndex } from "@/components/SessionView/search-utils";
 
 function message(content: string): Message {
   return {

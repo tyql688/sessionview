@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
 import { useState } from "react";
-import { ActivityHeatmap } from "./ActivityHeatmap";
-import { buildHeatmapGrid, type HeatmapMetric } from "../../lib/heatmap";
-import type { ActivityDay } from "../../lib/types";
+import { ActivityHeatmap } from "@/components/UsagePanel/ActivityHeatmap";
+import { buildHeatmapGrid, type HeatmapMetric } from "@/lib/heatmap";
+import type { ActivityDay } from "@/lib/types";
 
 function day(date: string, sessions: number): ActivityDay {
   return {

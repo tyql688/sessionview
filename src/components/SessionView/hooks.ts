@@ -1,6 +1,6 @@
-import type { Message, MessageRole } from "../../lib/types";
-import { parseTimestamp, formatTimeOnly } from "../../lib/formatters";
-import { isAgentToolMessage } from "../../lib/subagent";
+import type { Message, MessageRole } from "@/lib/types";
+import { parseTimestamp, formatTimeOnly } from "@/lib/formatters";
+import { isAgentToolMessage } from "@/lib/subagent";
 
 /// Lowercased haystack used by in-session search. Computed once when the
 /// entry is built so per-keystroke search walks

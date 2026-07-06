@@ -1,6 +1,6 @@
-import { useI18n } from "../../i18n/index";
-import type { ModelCost } from "../../lib/types";
-import { fmtCost, fmtTokens } from "./formatters";
+import { useI18n } from "@/i18n/index";
+import type { ModelCost } from "@/lib/types";
+import { fmtCost, fmtTokens } from "@/components/UsagePanel/formatters";
 
 export interface TopModelsProps {
   topModels: ModelCost[];

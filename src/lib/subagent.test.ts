@@ -11,8 +11,8 @@ import {
   isAgentToolMessage,
   matchesSubagentSession,
   parseToolJsonObject,
-} from "./subagent";
-import type { Message, ToolMetadata } from "./types";
+} from "@/lib/subagent";
+import type { Message, ToolMetadata } from "@/lib/types";
 
 const baseMessage: Message = {
   role: "tool",

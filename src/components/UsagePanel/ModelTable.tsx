@@ -1,8 +1,12 @@
 import { useMemo } from "react";
-import { useI18n } from "../../i18n/index";
-import type { ModelCost } from "../../lib/types";
-import type { UsageSortState } from "../../lib/usage";
-import { fmtCost, fmtTokens, sortIcon } from "./formatters";
+import { useI18n } from "@/i18n/index";
+import type { ModelCost } from "@/lib/types";
+import type { UsageSortState } from "@/lib/usage";
+import {
+  fmtCost,
+  fmtTokens,
+  sortIcon,
+} from "@/components/UsagePanel/formatters";
 
 export interface ModelTableProps {
   sortedModels: ModelCost[];

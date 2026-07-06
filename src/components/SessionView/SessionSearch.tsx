@@ -1,11 +1,11 @@
 import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useRef, useState } from "react";
-import { useI18n } from "../../i18n/index";
+import { useI18n } from "@/i18n/index";
 import {
   applySearchHighlight,
   collectSearchRanges,
   scrollRangeIntoView,
-} from "./search-utils";
+} from "@/components/SessionView/search-utils";
 
 export interface SessionSearchProps {
   sessionSearch: string;

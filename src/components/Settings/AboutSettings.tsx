@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useI18n } from "../../i18n/index";
-import { errorMessage } from "../../lib/errors";
-import { invokeWithToast } from "../../lib/tauri";
+import { useI18n } from "@/i18n/index";
+import { errorMessage } from "@/lib/errors";
+import { invokeWithToast } from "@/lib/tauri";
 import {
   useUpdaterPhase,
   useAvailableVersion,
   useUpdaterError,
   checkForUpdate,
   downloadAndInstall,
-} from "../../stores/updater";
+} from "@/stores/updater";
 
 export function AboutSettings() {
   const { t } = useI18n();

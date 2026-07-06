@@ -13,7 +13,7 @@ describe("external links", () => {
   });
 
   it("opens http urls through the Tauri opener plugin", async () => {
-    const { openExternalUrl } = await import("./external-links");
+    const { openExternalUrl } = await import("@/lib/external-links");
 
     await openExternalUrl("https://example.com/docs?q=1#top");
 
@@ -23,7 +23,7 @@ describe("external links", () => {
   });
 
   it("rejects relative urls before invoking opener", async () => {
-    const { openExternalUrl } = await import("./external-links");
+    const { openExternalUrl } = await import("@/lib/external-links");
 
     await expect(openExternalUrl("/local/path")).rejects.toThrow(
       "Invalid external URL",
@@ -32,7 +32,7 @@ describe("external links", () => {
   });
 
   it("rejects unsupported protocols", async () => {
-    const { openExternalUrl } = await import("./external-links");
+    const { openExternalUrl } = await import("@/lib/external-links");
 
     await expect(openExternalUrl("javascript:alert(1)")).rejects.toThrow(
       "Unsupported external URL protocol",

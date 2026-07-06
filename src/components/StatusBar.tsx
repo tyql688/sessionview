@@ -1,15 +1,15 @@
 import { useEffect } from "react";
-import { useI18n } from "../i18n/index";
-import type { Locale } from "../i18n/index";
-import { useTheme, setTheme, applyTheme, getTheme } from "../stores/theme";
-import type { Theme } from "../stores/theme";
+import { useI18n } from "@/i18n/index";
+import type { Locale } from "@/i18n/index";
+import { useTheme, setTheme, applyTheme, getTheme } from "@/stores/theme";
+import type { Theme } from "@/stores/theme";
 import {
   useUpdaterPhase,
   useAvailableVersion,
   downloadAndInstall,
-} from "../stores/updater";
-import { fmtTokens } from "../lib/formatters";
-import type { TodayTokens } from "../lib/tauri";
+} from "@/stores/updater";
+import { fmtTokens } from "@/lib/formatters";
+import type { TodayTokens } from "@/lib/tauri";
 
 export function StatusBar(props: {
   sessionCount: number;

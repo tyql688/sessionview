@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useI18n } from "../../i18n/index";
-import { startRefreshUsage, refreshPricingCatalog } from "../../lib/tauri";
+import { useI18n } from "@/i18n/index";
+import { startRefreshUsage, refreshPricingCatalog } from "@/lib/tauri";
 import {
   useRangeDays,
   setRangeDays,
@@ -23,24 +23,24 @@ import {
   setProjectSort,
   useSessionSort,
   setSessionSort,
-} from "../../stores/usageView";
-import { ConfirmDialog } from "../ConfirmDialog";
-import { toast, toastError, toastInfo } from "../../stores/toast";
-import { buildHoveredDaySummary } from "../../lib/usage";
-import { makeFmtChartValue } from "./formatters";
-import { Toolbar } from "./Toolbar";
-import { SummaryCards } from "./SummaryCards";
-import { ActivityHeatmap } from "./ActivityHeatmap";
-import { Chart } from "./Chart";
-import { TopModels } from "./TopModels";
-import { ModelTable } from "./ModelTable";
-import { ProjectTable } from "./ProjectTable";
-import { SessionTable } from "./SessionTable";
+} from "@/stores/usageView";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { toast, toastError, toastInfo } from "@/stores/toast";
+import { buildHoveredDaySummary } from "@/lib/usage";
+import { makeFmtChartValue } from "@/components/UsagePanel/formatters";
+import { Toolbar } from "@/components/UsagePanel/Toolbar";
+import { SummaryCards } from "@/components/UsagePanel/SummaryCards";
+import { ActivityHeatmap } from "@/components/UsagePanel/ActivityHeatmap";
+import { Chart } from "@/components/UsagePanel/Chart";
+import { TopModels } from "@/components/UsagePanel/TopModels";
+import { ModelTable } from "@/components/UsagePanel/ModelTable";
+import { ProjectTable } from "@/components/UsagePanel/ProjectTable";
+import { SessionTable } from "@/components/UsagePanel/SessionTable";
 import {
   useProviderSelection,
   useUsageResources,
   useUsageDerived,
-} from "./hooks";
+} from "@/components/UsagePanel/hooks";
 
 export function UsagePanel() {
   const { t } = useI18n();

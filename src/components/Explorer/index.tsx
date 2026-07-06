@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
-import type { SessionRef, TreeNode } from "../../lib/types";
+import type { SessionRef, TreeNode } from "@/lib/types";
 import {
   getResumeCommand,
   resumeSession,
@@ -9,9 +9,9 @@ import {
   toggleFavorite,
   renameSession,
   invokeWithFallback,
-} from "../../lib/tauri";
+} from "@/lib/tauri";
 import { save } from "@tauri-apps/plugin-dialog";
-import { useI18n } from "../../i18n/index";
+import { useI18n } from "@/i18n/index";
 import {
   useTerminalApp,
   useShowOrphans,
@@ -19,30 +19,30 @@ import {
   useExplorerGrouping,
   setExplorerGrouping,
   addBlockedFolder,
-} from "../../stores/settings";
-import { ContextMenu } from "../ContextMenu";
-import { InputDialog } from "../InputDialog";
-import { TreeNodeComponent, collectSessionNodes } from "../TreeNode";
+} from "@/stores/settings";
+import { ContextMenu } from "@/components/ContextMenu";
+import { InputDialog } from "@/components/InputDialog";
+import { TreeNodeComponent, collectSessionNodes } from "@/components/TreeNode";
 import {
   toggleSelected,
   clearSelection,
   selectionCount,
   useSelectionCount,
   useSelectionStore,
-} from "../../stores/selection";
-import { toast, toastError } from "../../stores/toast";
-import { errorMessage } from "../../lib/errors";
+} from "@/stores/selection";
+import { toast, toastError } from "@/stores/toast";
+import { errorMessage } from "@/lib/errors";
 import {
   filterBlockedFolders,
   filterOrphanSubagents,
   groupTreeByDirectory,
   buildSessionRef,
-} from "./hooks";
+} from "@/components/Explorer/hooks";
 import {
   buildSessionMenuItems,
   buildSelectionMenuItems,
   buildNodeMenuItems,
-} from "./ContextMenus";
+} from "@/components/Explorer/ContextMenus";
 
 function ExplorerSkeleton() {
   return (

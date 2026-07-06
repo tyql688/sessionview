@@ -7,8 +7,8 @@ import {
   toolDisplayName,
   toolIcon,
   toolSummary,
-} from "./index";
-import type { Message } from "../types";
+} from "@/lib/tools/index";
+import type { Message } from "@/lib/types";
 
 const baseMessage: Message = {
   role: "tool",

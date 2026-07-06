@@ -1,8 +1,8 @@
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { beforeAll, describe, expect, it } from "vitest";
-import { collectSearchRanges } from "./search-utils";
-import { SessionSearch } from "./SessionSearch";
+import { collectSearchRanges } from "@/components/SessionView/search-utils";
+import { SessionSearch } from "@/components/SessionView/SessionSearch";
 
 // happy-dom doesn't implement scrollIntoView; navigateSearchMatch calls it.
 beforeAll(() => {

@@ -1,10 +1,10 @@
-import { useI18n } from "../../i18n/index";
+import { useI18n } from "@/i18n/index";
 import type {
   ChartMetric,
   HoveredDaySummary,
   UsageDailyChartData,
-} from "../../lib/usage";
-import type { ProviderChipInfo } from "./Toolbar";
+} from "@/lib/usage";
+import type { ProviderChipInfo } from "@/components/UsagePanel/Toolbar";
 
 export interface ChartProps {
   dailyChartData: UsageDailyChartData;

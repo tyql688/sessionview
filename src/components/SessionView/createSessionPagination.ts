@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { flushSync } from "react-dom";
-import { getSessionMessagesWindow, isLoadCanceledError } from "../../lib/tauri";
-import type { Message, SessionMeta, TokenTotals } from "../../lib/types";
-import { findFirstMatchingEntryIndex } from "./search-utils";
-import type { ProcessedEntry } from "./hooks";
+import { getSessionMessagesWindow, isLoadCanceledError } from "@/lib/tauri";
+import type { Message, SessionMeta, TokenTotals } from "@/lib/types";
+import { findFirstMatchingEntryIndex } from "@/components/SessionView/search-utils";
+import type { ProcessedEntry } from "@/components/SessionView/hooks";
 
 export const BATCH_SIZE = 80;
 export const LOAD_MORE_THRESHOLD = 1;
-export const MINIMAP_JUMP_BATCH = 1200;
 export const INITIAL_TAIL = 300;
 const TAIL_BATCH = 600;
 

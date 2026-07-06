@@ -1,7 +1,7 @@
 import { create } from "zustand";
-import { errorMessage } from "../lib/errors";
-import { detectTerminal } from "../lib/tauri";
-import type { Provider } from "../lib/types";
+import { errorMessage } from "@/lib/errors";
+import { detectTerminal } from "@/lib/tauri";
+import type { Provider } from "@/lib/types";
 
 export type TerminalApp =
   | "terminal"
@@ -147,7 +147,7 @@ interface SettingsState {
   blockedFoldersError: string | null;
 }
 
-export const useSettingsStore = create<SettingsState>(() => ({
+const useSettingsStore = create<SettingsState>(() => ({
   terminalApp: storedTerminal || "terminal",
   disabledProviders: initialDisabledProviders.value,
   disabledProvidersError: initialDisabledProviders.error,
@@ -226,9 +226,6 @@ export function isPathBlocked(path: string): boolean {
 }
 
 // Imperative getters for non-reactive logic (filtering, tree building).
-export const getDisabledProviders = () =>
-  useSettingsStore.getState().disabledProviders;
-export const getShowOrphans = () => useSettingsStore.getState().showOrphans;
 export const getBlockedFolders = () =>
   useSettingsStore.getState().blockedFolders;
 

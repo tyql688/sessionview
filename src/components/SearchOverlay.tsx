@@ -1,6 +1,6 @@
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
-import type { SessionRef } from "../lib/types";
+import type { SessionRef } from "@/lib/types";
 import {
   useSearchQuery,
   useSearchResults,
@@ -9,9 +9,9 @@ import {
   clearSearch,
   parseSearchQuery,
   setPendingSessionSearch,
-} from "../stores/search";
-import { useI18n } from "../i18n/index";
-import { ProviderIcon } from "./icons";
+} from "@/stores/search";
+import { useI18n } from "@/i18n/index";
+import { ProviderIcon } from "@/components/icons";
 
 function sanitizeSnippet(html: string): string {
   const escaped = html

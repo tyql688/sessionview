@@ -1,8 +1,8 @@
 import {
   fmtTokens as fmtTokensShared,
   shortenHomePath,
-} from "../../lib/formatters";
-import type { ChartMetric, UsageSortState } from "../../lib/usage";
+} from "@/lib/formatters";
+import type { ChartMetric, UsageSortState } from "@/lib/usage";
 
 export const SHORT_PROVIDER_LABELS: Record<string, string> = {
   claude: "Claude",

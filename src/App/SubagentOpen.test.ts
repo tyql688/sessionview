@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type { SessionRef } from "../lib/types";
+import type { SessionRef } from "@/lib/types";
 import {
   candidateParentSessionIds,
   openSubagent,
   openSubagentDetailFromEvent,
-} from "./SubagentOpen";
+} from "@/App/SubagentOpen";
 
 function session(overrides: Partial<SessionRef>): SessionRef {
   return {

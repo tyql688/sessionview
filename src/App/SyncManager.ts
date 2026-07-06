@@ -1,4 +1,4 @@
-import type { TreeNode } from "../lib/types";
+import type { TreeNode } from "@/lib/types";
 import {
   reindex,
   syncSources,
@@ -8,13 +8,13 @@ import {
   getPricingCatalogStatus,
   refreshPricingCatalog,
   clearUsageStats,
-} from "../lib/tauri";
+} from "@/lib/tauri";
 import {
   getPollWatchProviders,
   loadProviderWatchSnapshots,
-} from "../lib/provider-watch";
-import { i18next } from "../i18n/index";
-import { toastError, toastInfo } from "../stores/toast";
+} from "@/lib/provider-watch";
+import { i18next } from "@/i18n/index";
+import { toastError, toastInfo } from "@/stores/toast";
 
 export interface SyncCallbacks {
   setTree: (tree: TreeNode[]) => void;

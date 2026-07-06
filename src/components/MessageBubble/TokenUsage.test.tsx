@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
-import type { TokenUsage } from "../../lib/types";
-import { TokenUsageDisplay, CopyMessageButton } from "./TokenUsage";
+import type { TokenUsage } from "@/lib/types";
+import { TokenUsageDisplay, CopyMessageButton } from "@/components/MessageBubble/TokenUsage";
 
 function makeUsage(overrides: Partial<TokenUsage> = {}): TokenUsage {
   return {

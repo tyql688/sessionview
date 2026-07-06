@@ -9,11 +9,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import type { SessionMeta } from "../lib/types";
-import { exportSession } from "../lib/tauri";
-import { useI18n } from "../i18n/index";
-import { toast, toastError } from "../stores/toast";
-import { errorMessage } from "../lib/errors";
+import type { SessionMeta } from "@/lib/types";
+import { exportSession } from "@/lib/tauri";
+import { useI18n } from "@/i18n/index";
+import { toast, toastError } from "@/stores/toast";
+import { errorMessage } from "@/lib/errors";
 
 type ExportFormat = "json" | "markdown" | "html";
 

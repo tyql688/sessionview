@@ -1,6 +1,6 @@
-import type { Message, ToolMetadata } from "../types";
-import { shortenHomePath } from "../formatters";
-import { firstString } from "./types";
+import type { Message, ToolMetadata } from "@/lib/types";
+import { shortenHomePath } from "@/lib/formatters";
+import { firstString } from "@/lib/tools/types";
 
 const TOOL_ICONS: Record<string, string> = {
   Read: "📄",
@@ -57,7 +57,7 @@ export function parseMcpToolName(
   return { server: parts[0], tool, display: tool.replace(/_/g, " ") };
 }
 
-export function formatMcpLabel(name: string): string {
+function formatMcpLabel(name: string): string {
   const mcp = parseMcpToolName(name);
   return mcp ? mcp.display : name;
 }

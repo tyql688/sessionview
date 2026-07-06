@@ -1,4 +1,4 @@
-import type { TreeNode } from "./types";
+import type { TreeNode } from "@/lib/types";
 
 /** Collect all session-leaf IDs from a tree node recursively. */
 export function collectSessionIds(node: TreeNode): string[] {
