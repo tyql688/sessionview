@@ -78,34 +78,30 @@ function ExternalLinkModal({ isOpen, onClose, url }: LinkSafetyModalProps) {
 
   return (
     <Dialog open={isOpen} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="flex max-w-md flex-col gap-4">
-        <div className="space-y-2">
-          <DialogTitle className="flex items-center gap-2">
-            <ExternalLink className="size-4" aria-hidden="true" />
-            {t("markdown.openExternalLink")}
-          </DialogTitle>
-          <DialogDescription>
-            {t("markdown.externalLinkWarning")}
-          </DialogDescription>
-        </div>
-        <pre className="max-h-32 overflow-auto rounded-lg bg-surface-code p-3 font-mono text-sm whitespace-pre-wrap break-all">
+      <DialogContent className="max-w-sm gap-3" showCloseButton={false}>
+        <DialogTitle>{t("markdown.openExternalLink")}</DialogTitle>
+        <DialogDescription className="-mt-1">
+          {t("markdown.externalLinkWarning")}
+        </DialogDescription>
+        <div className="max-h-24 overflow-auto rounded-md border border-border-subtle bg-surface-code px-2.5 py-2 font-mono text-xs break-all text-text-secondary">
           {url}
-        </pre>
-        <div className="grid grid-cols-2 gap-2">
+        </div>
+        <div className="flex items-center justify-end gap-2">
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
+            size="sm"
             onClick={() => void copyLink()}
           >
             {copied ? (
-              <Check className="size-4" aria-hidden="true" />
+              <Check className="size-3.5" aria-hidden="true" />
             ) : (
-              <Copy className="size-4" aria-hidden="true" />
+              <Copy className="size-3.5" aria-hidden="true" />
             )}
             {copied ? t("markdown.copied") : t("markdown.copyLink")}
           </Button>
-          <Button type="button" onClick={openLink}>
-            <ExternalLink className="size-4" aria-hidden="true" />
+          <Button type="button" size="sm" onClick={openLink}>
+            <ExternalLink className="size-3.5" aria-hidden="true" />
             {t("markdown.openLink")}
           </Button>
         </div>
@@ -145,15 +141,26 @@ export const Markdown = memo(function Markdown({
   const translations = useStreamdownTranslations();
   const resolvedTheme = useResolvedTheme();
   // Mermaid rasterizes its own colors — it must be told the concrete theme.
-  const mermaidOptions = useMemo(
-    () => ({
+  // useMaxWidth (its default) shrinks diagrams to fit the column, leaving
+  // them squat and unreadable; natural size + a scrollable container reads
+  // far better inside a bubble.
+  const mermaidOptions = useMemo(() => {
+    const natural = { useMaxWidth: false };
+    return {
       config: {
         theme:
           resolvedTheme === "dark" ? ("dark" as const) : ("default" as const),
+        flowchart: natural,
+        sequence: natural,
+        gantt: natural,
+        er: natural,
+        journey: natural,
+        state: natural,
+        class: natural,
+        pie: natural,
       },
-    }),
-    [resolvedTheme],
-  );
+    };
+  }, [resolvedTheme]);
   return (
     <div className="timeline-markdown min-w-0 text-sm leading-relaxed text-text-primary">
       <Streamdown

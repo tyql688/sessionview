@@ -269,3 +269,12 @@
   inset: auto 8px 8px auto;
   flex-direction: row;
 }
+
+/* Mermaid canvas: natural-size diagram, centered, scrolls when wider than
+ * the bubble. Give short diagrams a little presence. */
+.timeline-markdown [data-streamdown="mermaid"] {
+  display: flex;
+  justify-content: safe center;
+  overflow-x: auto;
+  padding: 12px 8px;
+}
