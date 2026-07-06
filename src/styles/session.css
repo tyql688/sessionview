@@ -231,10 +231,6 @@
 .session-entry {
   display: flex;
   flex-direction: column;
-  /* Timeline reading column: centered, comfortable line length. */
-  width: 100%;
-  max-width: 48rem;
-  margin-inline: auto;
 }
 
 /* In-session search highlighting (CSS Custom Highlight API — ranges are
