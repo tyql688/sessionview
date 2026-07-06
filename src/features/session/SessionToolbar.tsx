@@ -1,3 +1,6 @@
+import { Download, Radio, Star, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type { SessionMeta, Message } from "@/lib/types";
 import { useI18n } from "@/i18n/index";
 import {
@@ -65,18 +68,27 @@ export function SessionToolbar(props: {
           </div>
           <div className="breadcrumb-title">{props.meta.title}</div>
         </div>
-        <div className="session-actions">
-          <button
-            className={`session-action-btn session-action-btn-icon${props.watching ? " watching" : ""}`}
+        <div className="session-actions flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            size="icon-sm"
             onClick={props.onToggleWatch}
             title={
               props.watching ? t("session.watchStop") : t("session.watchStart")
             }
           >
-            {props.watching ? "\u25C9" : "\u25CE"}
-          </button>
-          <button
-            className={`session-action-btn session-action-btn-icon${props.starred === true ? " starred" : ""}`}
+            <Radio
+              className={cn(
+                "size-4",
+                props.watching && "animate-pulse text-success",
+              )}
+              aria-hidden="true"
+            />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            disabled={props.starred === null}
             onClick={props.onToggleFavorite}
             title={
               props.starred === null
@@ -86,35 +98,27 @@ export function SessionToolbar(props: {
                   : t("session.favoriteAdd")
             }
           >
-            {props.starred === null
-              ? "..."
-              : props.starred
-                ? "\u2605"
-                : "\u2606"}
-          </button>
+            <Star
+              className={cn(
+                "size-4",
+                props.starred && "fill-warning text-warning",
+              )}
+              aria-hidden="true"
+            />
+          </Button>
           {!(props.meta.is_sidechain && props.meta.provider === "kimi") && (
-            <button
-              className="session-action-btn primary"
-              onClick={props.onResume}
-              title={t("session.resume")}
-            >
+            <Button size="sm" onClick={props.onResume}>
               {t("session.resume")}
-            </button>
+            </Button>
           )}
-          <button
-            className="session-action-btn"
-            onClick={props.onExport}
-            title={t("session.export")}
-          >
+          <Button variant="outline" size="sm" onClick={props.onExport}>
+            <Download className="size-3.5" aria-hidden="true" />
             {t("session.export")}
-          </button>
-          <button
-            className="session-action-btn session-action-btn-danger"
-            onClick={props.onDelete}
-            title={t("session.delete")}
-          >
+          </Button>
+          <Button variant="destructive" size="sm" onClick={props.onDelete}>
+            <Trash2 className="size-3.5" aria-hidden="true" />
             {t("session.delete")}
-          </button>
+          </Button>
         </div>
       </div>
 

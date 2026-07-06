@@ -1,3 +1,11 @@
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { useI18n } from "@/i18n/index";
 import type { Locale } from "@/i18n/index";
 import { useTheme, setTheme } from "@/stores/theme";
@@ -11,31 +19,40 @@ import {
 import type { TerminalApp } from "@/stores/settings";
 import { isMac, isWindows } from "@/lib/platform";
 
-const validThemes: Theme[] = ["light", "dark", "system"];
-const validTerminals: TerminalApp[] = isMac
-  ? ["terminal", "iterm2", "ghostty", "kitty", "warp", "wezterm", "alacritty"]
+const TERMINAL_OPTIONS: { value: TerminalApp; label: string }[] = isMac
+  ? [
+      { value: "terminal", label: "Terminal.app" },
+      { value: "iterm2", label: "iTerm2" },
+      { value: "ghostty", label: "Ghostty" },
+      { value: "kitty", label: "Kitty" },
+      { value: "warp", label: "Warp" },
+      { value: "wezterm", label: "WezTerm" },
+      { value: "alacritty", label: "Alacritty" },
+    ]
   : isWindows
-    ? ["windows-terminal", "powershell", "cmd"]
-    : ["alacritty", "kitty", "wezterm", "gnome-terminal", "konsole", "xterm"];
+    ? [
+        { value: "windows-terminal", label: "Windows Terminal" },
+        { value: "powershell", label: "PowerShell" },
+        { value: "cmd", label: "Command Prompt" },
+      ]
+    : [
+        { value: "alacritty", label: "Alacritty" },
+        { value: "kitty", label: "Kitty" },
+        { value: "wezterm", label: "WezTerm" },
+        { value: "gnome-terminal", label: "GNOME Terminal" },
+        { value: "konsole", label: "Konsole" },
+        { value: "xterm", label: "xterm" },
+      ];
 
-function handleThemeChange(value: string) {
-  if (validThemes.includes(value as Theme)) setTheme(value as Theme);
-}
-
-function handleTerminalChange(value: string) {
-  if (validTerminals.includes(value as TerminalApp))
-    setTerminalApp(value as TerminalApp);
-}
+const THEME_VALUES: Theme[] = ["light", "dark", "system"];
+const LOCALE_VALUES: Locale[] = ["en", "zh"];
+const TERMINAL_VALUES = TERMINAL_OPTIONS.map((option) => option.value);
 
 export function GeneralSettings() {
   const { t, locale, setLocale } = useI18n();
   const theme = useTheme();
   const terminalApp = useTerminalApp();
   const showOrphans = useShowOrphans();
-
-  function handleLanguageChange(value: string) {
-    setLocale(value as Locale);
-  }
 
   return (
     <div className="settings-section">
@@ -45,29 +62,43 @@ export function GeneralSettings() {
         <div>
           <div className="settings-label">{t("settings.theme")}</div>
         </div>
-        <select
-          className="settings-select"
+        <Select
           value={theme}
-          onChange={(e) => handleThemeChange(e.currentTarget.value)}
+          onValueChange={(value) => {
+            if (THEME_VALUES.includes(value as Theme)) setTheme(value as Theme);
+          }}
         >
-          <option value="light">{t("settings.themeLight")}</option>
-          <option value="dark">{t("settings.themeDark")}</option>
-          <option value="system">{t("settings.themeSystem")}</option>
-        </select>
+          <SelectTrigger size="sm" className="w-40">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="light">{t("settings.themeLight")}</SelectItem>
+            <SelectItem value="dark">{t("settings.themeDark")}</SelectItem>
+            <SelectItem value="system">{t("settings.themeSystem")}</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="settings-row">
         <div>
           <div className="settings-label">{t("settings.language")}</div>
         </div>
-        <select
-          className="settings-select"
+        <Select
           value={locale}
-          onChange={(e) => handleLanguageChange(e.currentTarget.value)}
+          onValueChange={(value) => {
+            if (LOCALE_VALUES.includes(value as Locale)) {
+              void setLocale(value as Locale);
+            }
+          }}
         >
-          <option value="en">{t("settings.languageEnglish")}</option>
-          <option value="zh">{t("settings.languageChinese")}</option>
-        </select>
+          <SelectTrigger size="sm" className="w-40">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="en">{t("settings.languageEnglish")}</SelectItem>
+            <SelectItem value="zh">{t("settings.languageChinese")}</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="settings-row">
@@ -75,38 +106,25 @@ export function GeneralSettings() {
           <div className="settings-label">{t("settings.terminal")}</div>
           <div className="settings-desc">{t("settings.terminalDesc")}</div>
         </div>
-        <select
-          className="settings-select"
+        <Select
           value={terminalApp}
-          onChange={(e) => handleTerminalChange(e.currentTarget.value)}
+          onValueChange={(value) => {
+            if (TERMINAL_VALUES.includes(value as TerminalApp)) {
+              setTerminalApp(value as TerminalApp);
+            }
+          }}
         >
-          {isMac ? (
-            <>
-              <option value="terminal">Terminal.app</option>
-              <option value="iterm2">iTerm2</option>
-              <option value="ghostty">Ghostty</option>
-              <option value="kitty">Kitty</option>
-              <option value="warp">Warp</option>
-              <option value="wezterm">WezTerm</option>
-              <option value="alacritty">Alacritty</option>
-            </>
-          ) : isWindows ? (
-            <>
-              <option value="windows-terminal">Windows Terminal</option>
-              <option value="powershell">PowerShell</option>
-              <option value="cmd">Command Prompt</option>
-            </>
-          ) : (
-            <>
-              <option value="alacritty">Alacritty</option>
-              <option value="kitty">Kitty</option>
-              <option value="wezterm">WezTerm</option>
-              <option value="gnome-terminal">GNOME Terminal</option>
-              <option value="konsole">Konsole</option>
-              <option value="xterm">xterm</option>
-            </>
-          )}
-        </select>
+          <SelectTrigger size="sm" className="w-40">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {TERMINAL_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="settings-row">
@@ -114,11 +132,9 @@ export function GeneralSettings() {
           <div className="settings-label">{t("settings.showOrphans")}</div>
           <div className="settings-desc">{t("settings.showOrphansDesc")}</div>
         </div>
-        <input
-          type="checkbox"
-          className="settings-checkbox"
+        <Switch
           checked={showOrphans}
-          onChange={(e) => setShowOrphans(e.currentTarget.checked)}
+          onCheckedChange={(checked) => setShowOrphans(checked)}
         />
       </div>
     </div>
