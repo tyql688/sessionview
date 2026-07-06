@@ -22,6 +22,7 @@
     "format:check": "biome check src/"
   },
   "dependencies": {
+    "@lobehub/icons": "^5.10.1",
     "@tanstack/react-virtual": "^3.14.5",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-dialog": "^2.6.0",
