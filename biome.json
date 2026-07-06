@@ -6,7 +6,27 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.css"]
+    "includes": [
+      "src/**/*.ts",
+      "src/**/*.tsx",
+      "src/**/*.css",
+      "!**/*.test.ts",
+      "!**/*.test.tsx",
+      "!src/components/**",
+      "!src/App/**",
+      "!src/index.tsx",
+      "!src/stores/editorGroups.ts",
+      "!src/stores/favorites.ts",
+      "!src/stores/providerSnapshots.ts",
+      "!src/stores/search.ts",
+      "!src/stores/selection.ts",
+      "!src/stores/settings.ts",
+      "!src/stores/theme.ts",
+      "!src/stores/updater.ts",
+      "!src/stores/usageView.ts",
+      "!src/lib/provider-watch.ts",
+      "!src/lib/tree-builders.ts"
+    ]
   },
   "formatter": {
     "enabled": true,

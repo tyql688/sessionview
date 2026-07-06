@@ -1,5 +1,5 @@
-import { createSignal } from "solid-js";
-import * as i18n from "@solid-primitives/i18n";
+import i18next from "i18next";
+import { initReactI18next, useTranslation } from "react-i18next";
 import en from "./en.json";
 import zh from "./zh.json";
 
@@ -7,24 +7,42 @@ const dictionaries = { en, zh };
 type Locale = keyof typeof dictionaries;
 
 function detectLocale(): Locale {
-  const lang = navigator.language.toLowerCase();
-  if (lang.startsWith("zh")) return "zh";
-  return "en";
+  return navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
 }
 
-const [locale, setLocale] = createSignal<Locale>(detectLocale());
+// Initialize once at module load.
+i18next.use(initReactI18next).init({
+  resources: {
+    en: { translation: dictionaries.en },
+    zh: { translation: dictionaries.zh },
+  },
+  lng: detectLocale(),
+  fallbackLng: "en",
+  interpolation: {
+    escapeValue: false,
+    // en.json / zh.json use single-brace placeholders ({count}), not the
+    // i18next default double-brace ({{count}}).
+    prefix: "{",
+    suffix: "}",
+  },
+  returnNull: false,
+});
 
-type FlatDict = ReturnType<typeof i18n.flatten<typeof en>>;
-type TranslationKey = keyof FlatDict;
+// Imperative current-locale read for non-React callers (e.g. lib/formatters.ts).
+// i18next is a global singleton; normalize its language tag to our Locale union.
+export function getLocale(): Locale {
+  return i18next.language?.toLowerCase().startsWith("zh") ? "zh" : "en";
+}
 
 export function useI18n() {
-  const dict = () => i18n.flatten(dictionaries[locale()]);
-  const translator = i18n.translator(dict);
-  // Allow dynamic string keys without `as any` at call sites
-  const t = (key: TranslationKey | (string & {})): string =>
-    String(translator(key as TranslationKey) ?? key);
-  return { t, locale, setLocale };
+  const { t, i18n } = useTranslation();
+  return {
+    t: (key: string, options?: Record<string, unknown>): string =>
+      t(key, options ?? {}),
+    locale: i18n.language as Locale,
+    setLocale: (next: Locale) => i18n.changeLanguage(next),
+  };
 }
 
-export { locale, setLocale };
+export { i18next };
 export type { Locale };

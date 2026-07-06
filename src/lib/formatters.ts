@@ -1,4 +1,4 @@
-import { locale } from "../i18n/index";
+import { getLocale } from "../i18n/index";
 
 export function parseTimestamp(ts: string | null): number | null {
   if (!ts) return null;
@@ -89,7 +89,7 @@ export function fmtWan(n: number): string {
 
 /** Token formatter following the UI language: 万/亿 for zh, K/M/B/T otherwise. */
 export function fmtTokens(n: number): string {
-  return locale() === "zh" ? fmtWan(n) : fmtK(n);
+  return getLocale() === "zh" ? fmtWan(n) : fmtK(n);
 }
 
 export function formatFileSize(bytes: number): string {

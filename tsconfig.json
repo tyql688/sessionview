@@ -6,8 +6,7 @@
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "noEmit": true,
-    "jsx": "preserve",
-    "jsxImportSource": "solid-js",
+    "jsx": "react-jsx",
     "isolatedModules": true,
     "skipLibCheck": true,
     "types": ["katex"],
@@ -15,5 +14,24 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "//": "MIGRATION (migrate/react): exclude not-yet-ported Solid source until its phase ports it. Shrink this list as phases land; empty by Phase 10. See MIGRATION.md.",
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "src/components",
+    "src/App",
+    "src/index.tsx",
+    "src/stores/editorGroups.ts",
+    "src/stores/favorites.ts",
+    "src/stores/providerSnapshots.ts",
+    "src/stores/search.ts",
+    "src/stores/selection.ts",
+    "src/stores/settings.ts",
+    "src/stores/theme.ts",
+    "src/stores/updater.ts",
+    "src/stores/usageView.ts",
+    "src/lib/provider-watch.ts",
+    "src/lib/tree-builders.ts"
+  ]
 }
