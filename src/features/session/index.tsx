@@ -15,6 +15,7 @@ import {
   isLoadCanceledError,
   type SessionTurnOutlineEntry,
 } from "@/lib/tauri";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useI18n } from "@/i18n/index";
 import { MessageBubble } from "@/features/session/MessageBubble";
 import { MergedToolRow } from "@/features/session/MergedToolRow";
@@ -363,25 +364,50 @@ export function SessionView(props: {
       />
 
       {/* Filter toolbar — only show roles that have messages */}
-      <div className="filter-toolbar">
-        {(["user", "assistant", "tool", "system"] as MessageRole[])
-          .filter((r) => (roleCounts[r] || 0) > 0)
-          .map((role) => (
-            <button
-              key={role}
-              className={`filter-btn${hiddenRoles.has(role) ? "" : " active"}`}
-              onClick={() => toggleRole(role)}
-            >
-              {role === "user"
-                ? t("session.filterUser")
-                : role === "assistant"
-                  ? t("session.filterAssistant")
-                  : role === "tool"
-                    ? t("session.filterTool")
-                    : t("session.filterSystem")}{" "}
-              ({roleCounts[role]})
-            </button>
-          ))}
+      <div className="flex items-center gap-1 border-b border-border-subtle px-5 py-1.5">
+        <ToggleGroup
+          multiple
+          size="sm"
+          value={(
+            ["user", "assistant", "tool", "system"] as MessageRole[]
+          ).filter(
+            (role) => (roleCounts[role] || 0) > 0 && !hiddenRoles.has(role),
+          )}
+          onValueChange={(next) => {
+            for (const role of [
+              "user",
+              "assistant",
+              "tool",
+              "system",
+            ] as MessageRole[]) {
+              if ((roleCounts[role] || 0) === 0) continue;
+              const visible = !hiddenRoles.has(role);
+              const wanted = next.includes(role);
+              if (visible !== wanted) toggleRole(role);
+            }
+          }}
+        >
+          {(["user", "assistant", "tool", "system"] as MessageRole[])
+            .filter((role) => (roleCounts[role] || 0) > 0)
+            .map((role) => (
+              <ToggleGroupItem
+                key={role}
+                value={role}
+                className="gap-1.5 text-muted-foreground data-pressed:bg-brand-soft data-pressed:text-brand"
+              >
+                {role === "user"
+                  ? t("session.filterUser")
+                  : role === "assistant"
+                    ? t("session.filterAssistant")
+                    : role === "tool"
+                      ? t("session.filterTool")
+                      : t("session.filterSystem")}
+                <span className="text-xs opacity-60 tabular-nums">
+                  {roleCounts[role]}
+                </span>
+              </ToggleGroupItem>
+            ))}
+        </ToggleGroup>
       </div>
 
       {/* In-session search bar */}

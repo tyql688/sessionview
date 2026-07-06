@@ -67,17 +67,6 @@
   white-space: nowrap;
 }
 
-@keyframes pulse-watch {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
-}
-
-/* Session action danger button */
 /* Session Info Bar */
 .session-info {
   display: flex;
@@ -371,33 +360,6 @@
   opacity: 0.8;
 }
 
-/* Message filter toolbar */
-.filter-toolbar {
-  display: flex;
-  gap: 4px;
-  padding: 4px 20px;
-  border-bottom: 0.5px solid var(--border-subtle);
-  flex-shrink: 0;
-}
-.filter-btn {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  border: 0.5px solid var(--border);
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.filter-btn.active {
-  background: var(--accent-light);
-  color: var(--accent);
-  border-color: var(--accent);
-}
-.filter-btn:hover {
-  background: var(--bg-tab-hover);
-}
-
 /* In-session search bar */
 .session-search-bar {
   display: flex;
@@ -440,17 +402,4 @@
 }
 .session-search-nav:hover {
   background: var(--bg-tab-hover);
-}
-
-/* Search highlighting */
-mark.search-highlight {
-  background: rgba(255, 220, 0, 0.35);
-  color: inherit;
-  border-radius: 2px;
-  padding: 1px 0;
-}
-mark.search-active {
-  background: rgba(255, 160, 0, 0.6);
-  outline: 2px solid var(--accent);
-  border-radius: 2px;
 }
