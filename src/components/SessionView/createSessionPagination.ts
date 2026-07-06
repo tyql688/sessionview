@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { flushSync } from "react-dom";
-import type { TimelineEntry } from "../../features/session/timeline/types";
 import { getSessionMessagesWindow, isLoadCanceledError } from "../../lib/tauri";
 import type { Message, SessionMeta, TokenTotals } from "../../lib/types";
 import { findFirstMatchingEntryIndex } from "./search-utils";
+import type { ProcessedEntry } from "./hooks";
 
 export const BATCH_SIZE = 80;
 export const LOAD_MORE_THRESHOLD = 1;
@@ -16,7 +16,7 @@ export interface CreateSessionPaginationOptions {
   /** Current session id (guards stale async results). */
   sessionId: string;
   /** Role-filtered entries the render window slices over. */
-  filteredEntries: TimelineEntry[];
+  filteredEntries: ProcessedEntry[];
   /** Loaded messages (read by `hasMore`). */
   messages: Message[];
   /** Absolute session index of messages[0] — owned by the component because
@@ -38,7 +38,7 @@ export interface CreateSessionPaginationResult {
   setVisibleCount: Dispatch<SetStateAction<number>>;
   totalMessages: number;
   setTotalMessages: Dispatch<SetStateAction<number>>;
-  visibleEntries: TimelineEntry[];
+  visibleEntries: ProcessedEntry[];
   hasMore: boolean;
   loadOlderEntries: () => void;
   resolveCompleteSearchMatch: (term: string) => Promise<number | null>;
@@ -167,9 +167,10 @@ export function useSessionPagination(
       }
     }
 
-    const entryIndex = filteredEntriesRef.current.findIndex(
-      (entry) => entry.messageIndex === messageIndex,
-    );
+    const entryIndex = filteredEntriesRef.current.findIndex((entry) => {
+      if (entry.type !== "message") return false;
+      return entry.messageIndex === messageIndex;
+    });
     if (entryIndex < 0) return false;
     revealEntry(entryIndex);
     return true;

@@ -1,4 +1,4 @@
-import type { TimelineEntry } from "../../features/session/timeline/types";
+import type { ProcessedEntry } from "./hooks";
 
 export const SESSION_SEARCH_DEBOUNCE_MS = 180;
 
@@ -7,7 +7,7 @@ export function normalizeSessionSearch(term: string): string {
 }
 
 export function entryMatchesSearch(
-  entry: TimelineEntry,
+  entry: ProcessedEntry,
   normalizedTerm: string,
 ): boolean {
   if (!normalizedTerm) return false;
@@ -18,7 +18,7 @@ export function entryMatchesSearch(
 }
 
 export function findFirstMatchingEntryIndex(
-  entries: TimelineEntry[],
+  entries: ProcessedEntry[],
   term: string,
 ): number {
   const normalizedTerm = normalizeSessionSearch(term);

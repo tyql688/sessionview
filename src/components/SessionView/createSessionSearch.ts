@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type { TimelineEntry } from "../../features/session/timeline/types";
 import {
   setPendingSessionSearch,
   usePendingSessionSearch,
@@ -11,10 +10,11 @@ import {
   SESSION_SEARCH_DEBOUNCE_MS,
   scrollRangeIntoView,
 } from "./search-utils";
+import type { ProcessedEntry } from "./hooks";
 
 export interface CreateSessionSearchOptions {
   /** Role-filtered entries the search runs against. */
-  filteredEntries: TimelineEntry[];
+  filteredEntries: ProcessedEntry[];
   /** Lazy ref getter — the messages container may not exist yet. */
   getMessagesRef: () => HTMLDivElement | undefined;
   /** Whether the session is still loading (gates the pending-search effect). */

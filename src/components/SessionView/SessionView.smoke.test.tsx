@@ -3,8 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Message, SessionMeta } from "../../lib/types";
 import { SESSION_COMMAND_EVENTS } from "../../lib/session-command-events";
-import { normalizeMessages } from "../../features/session/timeline/normalize";
-import { toEntries } from "../../features/session/timeline/types";
+import { processMessages } from "./hooks";
 import { findFirstMatchingEntryIndex } from "./search-utils";
 
 // Minimal synthetic session payloads. The backend is fully mocked: `invoke`
@@ -292,7 +291,7 @@ describe("SessionView smoke", () => {
     );
     expect(
       findFirstMatchingEntryIndex(
-        toEntries(normalizeMessages(manyMessages, { windowStart: 0 }).items),
+        processMessages(manyMessages, 0),
         "target after search",
       ),
     ).toBe(10);

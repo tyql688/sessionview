@@ -1,29 +1,26 @@
 import { describe, expect, it } from "vitest";
-import type {
-  TimelineEntry,
-  TimelineItem,
-} from "../../features/session/timeline/types";
+import type { Message } from "../../lib/types";
+import type { ProcessedEntry } from "./hooks";
 import { findFirstMatchingEntryIndex } from "./search-utils";
 
-function assistantItem(index: number, markdown: string): TimelineItem {
+function message(content: string): Message {
   return {
-    kind: "assistantText",
-    index,
-    markdown,
-    images: [],
-    ts: null,
-    usage: null,
-    model: null,
-    command: null,
+    role: "assistant",
+    content,
+    timestamp: null,
+    tool_name: null,
+    tool_input: null,
+    token_usage: null,
   };
 }
 
-function entry(index: number, content: string): TimelineEntry {
+function entry(index: number, content: string): ProcessedEntry {
   return {
-    key: `item-${index}`,
+    key: `msg-${index}`,
+    type: "message",
+    msg: message(content),
     messageIndex: index,
     searchHaystack: content.toLocaleLowerCase(),
-    item: assistantItem(index, content),
   };
 }
 
