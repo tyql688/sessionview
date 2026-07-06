@@ -14,7 +14,6 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { useI18n } from "../../i18n/index";
 import {
   useTerminalApp,
-  useTimeGrouping,
   useShowOrphans,
   useBlockedFolders,
   addBlockedFolder,
@@ -33,7 +32,6 @@ import { toast, toastError } from "../../stores/toast";
 import { errorMessage } from "../../lib/errors";
 import {
   filterBlockedFolders,
-  applyTimeGrouping,
   filterOrphanSubagents,
   buildSessionRef,
 } from "./hooks";
@@ -80,7 +78,6 @@ export function Explorer(props: {
 }) {
   const { t } = useI18n();
   const showOrphans = useShowOrphans();
-  const timeGrouping = useTimeGrouping();
   const blockedFolders = useBlockedFolders();
   const terminalApp = useTerminalApp();
   const selCount = useSelectionCount();
@@ -88,11 +85,11 @@ export function Explorer(props: {
   const displayTree = useMemo(() => {
     let tree = filterBlockedFolders(props.tree);
     if (!showOrphans) tree = filterOrphanSubagents(tree);
-    return timeGrouping ? applyTimeGrouping(tree, t) : tree;
+    return tree;
     // `blockedFolders` drives filterBlockedFolders' internal getBlockedFolders(),
     // so it's a real dep even though not textually referenced here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.tree, showOrphans, timeGrouping, blockedFolders, t]);
+  }, [props.tree, showOrphans, blockedFolders]);
 
   // O(1) session ID → project path lookup, rebuilt when props.tree changes
   const sessionProjectPathMap = useMemo(() => {

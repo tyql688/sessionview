@@ -8,6 +8,7 @@ import {
   formatTimestamp,
   shortenHomePath,
   toLocalISODate,
+  formatTreeTime,
 } from "./formatters";
 import { getLocale, i18next } from "../i18n/index";
 
@@ -131,5 +132,24 @@ describe("shortenHomePath", () => {
     expect(
       shortenHomePath("*** Update File: /Users/alice/project/src/main.ts"),
     ).toBe("*** Update File: ~/project/src/main.ts");
+  });
+});
+
+describe("formatTreeTime", () => {
+  const now = new Date("2026-07-06T20:00:00");
+
+  it("shows clock time for today", () => {
+    const epoch = new Date("2026-07-06T09:05:00").getTime() / 1000;
+    expect(formatTreeTime(epoch, now)).toBe("09:05");
+  });
+
+  it("shows month/day within the current year", () => {
+    const epoch = new Date("2026-03-15T09:05:00").getTime() / 1000;
+    expect(formatTreeTime(epoch, now)).toBe("3/15");
+  });
+
+  it("shows a short year for older sessions", () => {
+    const epoch = new Date("2025-12-31T09:05:00").getTime() / 1000;
+    expect(formatTreeTime(epoch, now)).toBe("25/12/31");
   });
 });

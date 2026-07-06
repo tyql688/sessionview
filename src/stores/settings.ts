@@ -131,7 +131,6 @@ interface SettingsState {
   terminalApp: TerminalApp;
   disabledProviders: Provider[];
   disabledProvidersError: string | null;
-  timeGrouping: boolean;
   showOrphans: boolean;
   blockedFolders: string[];
   blockedFoldersError: string | null;
@@ -141,7 +140,6 @@ export const useSettingsStore = create<SettingsState>(() => ({
   terminalApp: storedTerminal || "terminal",
   disabledProviders: initialDisabledProviders.value,
   disabledProvidersError: initialDisabledProviders.error,
-  timeGrouping: readStorage("cc-session-time-grouping") !== "false",
   showOrphans: readStorage("cc-session-show-orphans") !== "false",
   blockedFolders: initialBlockedFolders.value,
   blockedFoldersError: initialBlockedFolders.error,
@@ -174,11 +172,6 @@ export function toggleProvider(id: Provider) {
     disabledProvidersError: null,
   });
   writeStorage("cc-session-disabled-providers", JSON.stringify(next));
-}
-
-export function setTimeGrouping(v: boolean) {
-  useSettingsStore.setState({ timeGrouping: v });
-  writeStorage("cc-session-time-grouping", String(v));
 }
 
 export function setShowOrphans(v: boolean) {
@@ -219,7 +212,6 @@ export function isPathBlocked(path: string): boolean {
 export const getDisabledProviders = () =>
   useSettingsStore.getState().disabledProviders;
 export const getShowOrphans = () => useSettingsStore.getState().showOrphans;
-export const getTimeGrouping = () => useSettingsStore.getState().timeGrouping;
 export const getBlockedFolders = () =>
   useSettingsStore.getState().blockedFolders;
 
@@ -229,7 +221,6 @@ export const useDisabledProviders = () =>
   useSettingsStore((s) => s.disabledProviders);
 export const useDisabledProvidersError = () =>
   useSettingsStore((s) => s.disabledProvidersError);
-export const useTimeGrouping = () => useSettingsStore((s) => s.timeGrouping);
 export const useShowOrphans = () => useSettingsStore((s) => s.showOrphans);
 export const useBlockedFolders = () =>
   useSettingsStore((s) => s.blockedFolders);

@@ -46,6 +46,26 @@ export function formatTimestamp(epoch: number, locale?: string): string {
   return d.toLocaleString();
 }
 
+/** Compact timestamp for narrow list rows: `HH:MM` today, `M/D` within the
+ * current year, `YY/M/D` otherwise. Callers skip rendering when there is no
+ * timestamp — this never fabricates one. */
+export function formatTreeTime(epoch: number, now: Date = new Date()): string {
+  const d = new Date(epoch * 1000);
+  if (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  ) {
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    return `${hh}:${mm}`;
+  }
+  if (d.getFullYear() === now.getFullYear()) {
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  }
+  return `${String(d.getFullYear()).slice(2)}/${d.getMonth() + 1}/${d.getDate()}`;
+}
+
 export function formatAbsoluteTime(epoch: number): string {
   if (!epoch) return "\u2014";
   return new Date(epoch * 1000).toLocaleString();

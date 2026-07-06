@@ -226,6 +226,13 @@
   font-weight: 600;
 }
 
+.tree-node-time {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
 .tree-node-count {
   font-size: 10px;
   color: var(--text-tertiary);

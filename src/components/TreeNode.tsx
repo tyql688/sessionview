@@ -1,4 +1,5 @@
 import type React from "react";
+import { formatTreeTime } from "../lib/formatters";
 import type { TreeNode } from "../lib/types";
 import { useI18n } from "../i18n/index";
 import { isSelected, toggleSelected } from "../stores/selection";
@@ -266,6 +267,11 @@ export function TreeNodeComponent(props: {
             title={t("common.subagentSession")}
           >
             ⤷
+          </span>
+        )}
+        {isSession() && props.node.updated_at !== undefined && (
+          <span className="tree-node-time">
+            {formatTreeTime(props.node.updated_at)}
           </span>
         )}
         {props.node.count > 0 && !isLeaf() && (

@@ -5,8 +5,6 @@ import type { Theme } from "../../stores/theme";
 import {
   useTerminalApp,
   setTerminalApp,
-  useTimeGrouping,
-  setTimeGrouping,
   useShowOrphans,
   setShowOrphans,
 } from "../../stores/settings";
@@ -33,7 +31,6 @@ export function GeneralSettings() {
   const { t, locale, setLocale } = useI18n();
   const theme = useTheme();
   const terminalApp = useTerminalApp();
-  const timeGrouping = useTimeGrouping();
   const showOrphans = useShowOrphans();
 
   function handleLanguageChange(value: string) {
@@ -110,19 +107,6 @@ export function GeneralSettings() {
             </>
           )}
         </select>
-      </div>
-
-      <div className="settings-row">
-        <div>
-          <div className="settings-label">{t("settings.timeGrouping")}</div>
-          <div className="settings-desc">{t("settings.timeGroupingDesc")}</div>
-        </div>
-        <input
-          type="checkbox"
-          className="settings-checkbox"
-          checked={timeGrouping}
-          onChange={(e) => setTimeGrouping(e.currentTarget.checked)}
-        />
       </div>
 
       <div className="settings-row">
