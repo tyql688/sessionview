@@ -1,5 +1,12 @@
 # Solid → React migration (`migrate/react`)
 
+> **STATUS: COMPLETE.** All 10 phases done. `grep -r solid-js src` is empty;
+> `src-tauri` (Rust) untouched; full gate green — tsc 0, biome, eslint, 292
+> vitest tests (unit + components) pass; production build + `tauri dev` boot
+> verified (React mounts, shell renders, IPC round-trips). Stack: React 19 +
+> React Compiler + zustand + react-i18next + @tanstack/react-virtual (available)
+> + @lobehub/icons. This doc is retained as the migration record.
+
 Big-bang framework migration on a dedicated branch. `master` (Solid) stays the
 shippable release **and the behavioral oracle** — to check original behavior,
 read `git show master:src/<path>`.
