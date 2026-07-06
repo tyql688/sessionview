@@ -1,6 +1,13 @@
 # CC Session
 
-Desktop app for browsing AI coding sessions. Tauri 2.0 + Solid.js + Rust + SQLite FTS5.
+Desktop app for browsing AI coding sessions. Tauri 2.0 + React 19 + Rust + SQLite FTS5.
+
+Frontend state lives in **zustand** stores (`src/stores/*`); each store exposes
+reactive hooks (`useX()`) for components plus imperative getters/actions
+(`getState()`) for non-React callers (`lib/*`). i18n is **react-i18next**
+(`useI18n()` → `{ t, locale, setLocale }`). Provider brand icons come from
+`@lobehub/icons` (`.Color` variants; Pi + cc-mirror keep custom SVG). Build:
+Vite + `@vitejs/plugin-react` + **React Compiler** (auto-memoization).
 
 ## Commands
 
@@ -18,7 +25,7 @@ npm run format:check          # Prettier check
 ## Project Layout
 
 ```
-src/                       # Solid.js frontend (components, stores, i18n, lib, styles)
+src/                       # React frontend (components, stores, i18n, lib, styles)
 src-tauri/src/
   providers/               # claude/, codex/, antigravity/, kimi/, opencode/, cursor/, cc_mirror.rs
   commands/                # sessions.rs, settings.rs, trash.rs, terminal.rs, usage.rs, search.rs, file_access.rs
@@ -80,7 +87,7 @@ Key functions:
 - **Double-click on preview tab** → `pinTab()` — pins it
 - **Search/Favorites/Subagent open** → `openSession()` — always pinned
 - Each group has at most one `previewTabId`; replacement removes old preview tab from array
-- SessionView is wrapped in `<Show when={session().id} keyed>` to force remount on preview replacement (prevents stale local state: filters, search, watch, favorite)
+- SessionView is given `key={session.id}` to force remount on preview replacement (prevents stale local state: filters, search, watch, favorite)
 
 ### Tab Overflow
 
@@ -146,8 +153,8 @@ Resume: Claude `--resume`, Codex `resume`, Antigravity `agy --conversation <id>`
 - **Subagents**: `parent_id` links children; "Open" button for providers with separate files (Claude, Codex, Kimi, CC-Mirror, Antigravity). Antigravity links children via UUID scan over parent transcript content (`db/sync.rs::find_uuids`). Pi child sessions resolve `parentSession` file paths by reading the parent JSONL header id.
 - **Provider snapshots**: backend derives provider label/color/order/watch strategy/path info; frontend consumes via `providerSnapshots` store
 - **Trash**: `TrashMeta.parent_id` cascades restore/delete; `is_session_dir()` prevents shared dir deletion
-- **Immutable state**: All Solid.js store updates use spread (`{ ...prev, field: newValue }`). Never mutate in place.
-- **Solid.js reactivity**: Use `Index` (not `For`) for tab panes to preserve component instances across reorders. Use `<Show when={id} keyed>` when component must remount on identity change.
+- **Immutable state**: All zustand store updates use spread (`set((s) => ({ ...s, field: newValue }))`). Never mutate in place.
+- **React reactivity**: `.map()` with stable keys (item id, not index) for tab/pane collections so instances survive reorders. Use `key={id}` when a component must remount on identity change (e.g. `key={session.id}` for `SessionView`).
 
 ## Pitfalls
 
@@ -196,12 +203,13 @@ Code review (human or agent) **rejects** anything that violates the rules below.
 - **Strict mode** is non-negotiable. No `any`, no `as unknown as T`, no `// @ts-ignore`. If a type is genuinely unknown at a boundary, model it as `unknown` and narrow.
 - **No `console.log`** in committed code. Use the toast store for user-visible errors, `console.warn`/`console.error` only at Tauri-IPC boundaries.
 - **No empty `catch {}`**. Always log + decide (rethrow, fallback, or surface). `?? defaultValue` is fine for genuine defaults; forbidden when it hides a failed read.
-- **Immutability**: all Solid.js store updates use spread (`{ ...prev, field: newValue }`). Never mutate in place. Same for editor groups, settings, provider snapshots.
-- **Solid.js reactivity rules**:
-  - Use `<Index>` (not `<For>`) for tab/pane collections you want to keep instances stable across reorders.
-  - Use `<Show when={x} keyed>` when a component must remount on identity change (e.g. `<Show when={session().id} keyed>` for `SessionView`).
-  - Wrap derived values in `createMemo` only when downstream consumers actually run more than once per change; otherwise it's overhead.
-  - Read accessors `()` inside JSX/effects, not at component top-level — top-level reads run once and capture a stale value.
+- **Immutability**: all zustand store updates use spread (`set((s) => ({ ...s, field: newValue }))`). Never mutate in place. Same for editor groups, settings, provider snapshots.
+- **React reactivity rules**:
+  - `.map()` with a stable `key` (item id, not array index) for tab/pane collections you want to keep stable across reorders.
+  - `key={id}` when a component must remount on identity change (e.g. `key={session.id}` for `SessionView`).
+  - `useMemo` only when the computation is genuinely expensive or its identity is a downstream dep; React Compiler auto-memoizes the rest — don't hand-memoize reflexively.
+  - Hooks (`useState`/`useMemo`/`useEffect`/`useX` store hooks/`useI18n`) at the top level of the component only — never in loops, conditions, or `.map` callbacks.
+  - Store reactive reads via `useX()` hooks; imperative reads in event handlers/effects via `getX()`/`getState()`.
 - **Props**: explicit `interface Props { … }`; no inline `{ x }: { x: string }` for anything with more than one field.
 
 ### Testing
