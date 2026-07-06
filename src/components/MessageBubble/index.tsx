@@ -1,5 +1,4 @@
-import { useState, useMemo } from "react";
-import { Markdown } from "../../features/session/timeline/Markdown";
+import { lazy, Suspense, useState, useMemo } from "react";
 import type { Message, Provider } from "../../lib/types";
 import { ProviderIcon, UserIcon } from "../icons";
 import { useI18n } from "../../i18n/index";
@@ -17,6 +16,16 @@ import {
 import { ThinkingBlock } from "./ThinkingBlock";
 import { CopyMessageButton, TokenUsageDisplay } from "./TokenUsage";
 import { ToolMessage } from "./ToolMessage";
+
+// The markdown engine (streamdown + shiki/katex/mermaid plugins) is by far
+// the heaviest frontend dependency — load it on demand so the app shell and
+// explorer render without it. The fallback shows the raw text, so the brief
+// first-load gap still reads.
+const Markdown = lazy(() =>
+  import("../../features/session/timeline/Markdown").then((module) => ({
+    default: module.Markdown,
+  })),
+);
 
 const SYSTEM_SUBTYPE_CONFIG: Record<
   string,
@@ -198,7 +207,13 @@ export function MessageBubble(props: {
               <div
                 className={`msg-bubble msg-bubble-${props.message.role}${isCommandMessage() ? " msg-bubble-command" : ""}`}
               >
-                <Markdown text={displayMarkdown} />
+                <Suspense
+                  fallback={
+                    <div className="whitespace-pre-wrap">{displayMarkdown}</div>
+                  }
+                >
+                  <Markdown text={displayMarkdown} />
+                </Suspense>
                 {images.length > 0 && (
                   <div className="msg-image-strip">
                     {images.map((image, i) =>

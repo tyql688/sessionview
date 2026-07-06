@@ -1,4 +1,4 @@
-import { Component, useEffect, useRef, useState } from "react";
+import { Component, lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { listenBackendEvent, type UnlistenFn } from "../lib/backend-events";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -7,12 +7,28 @@ import { Explorer } from "../components/Explorer";
 import { EditorGroupsContainer } from "../components/Editor/EditorGroupsContainer";
 import { StatusBar } from "../components/StatusBar";
 import { SearchOverlay } from "../components/SearchOverlay";
-import { SettingsPanel } from "../components/SettingsPanel";
-import { TrashView } from "../components/TrashView";
 
-import { FavoritesView } from "../components/FavoritesView";
-import { BlockedView } from "../components/BlockedView";
-import { UsagePanel } from "../components/UsagePanel";
+// Side panels load on first open — none of them belong in the startup chunk
+// (the usage panel alone pulls the chart/heatmap stack).
+const SettingsPanel = lazy(() =>
+  import("../components/SettingsPanel").then((m) => ({
+    default: m.SettingsPanel,
+  })),
+);
+const TrashView = lazy(() =>
+  import("../components/TrashView").then((m) => ({ default: m.TrashView })),
+);
+const FavoritesView = lazy(() =>
+  import("../components/FavoritesView").then((m) => ({
+    default: m.FavoritesView,
+  })),
+);
+const BlockedView = lazy(() =>
+  import("../components/BlockedView").then((m) => ({ default: m.BlockedView })),
+);
+const UsagePanel = lazy(() =>
+  import("../components/UsagePanel").then((m) => ({ default: m.UsagePanel })),
+);
 import { KeyboardOverlay } from "../components/KeyboardOverlay";
 import { ToastContainer } from "../components/ToastContainer";
 import {
@@ -407,27 +423,29 @@ export default function App() {
               }}
             />
           )}
-          {activeView === "settings" && <SettingsPanel />}
-          {activeView === "trash" && (
-            <TrashView onRefreshTree={sync.refreshTree} />
-          )}
-          {activeView === "favorites" && (
-            <FavoritesView onOpenSession={openSession} />
-          )}
-          {activeView === "blocked" && (
-            <BlockedView onRefreshTree={sync.refreshTree} />
-          )}
-          {activeView === "usage" && (
-            <div
-              style={{
-                display: "flex",
-                flex: "1",
-                minWidth: "0",
-              }}
-            >
-              <UsagePanel />
-            </div>
-          )}
+          <Suspense fallback={null}>
+            {activeView === "settings" && <SettingsPanel />}
+            {activeView === "trash" && (
+              <TrashView onRefreshTree={sync.refreshTree} />
+            )}
+            {activeView === "favorites" && (
+              <FavoritesView onOpenSession={openSession} />
+            )}
+            {activeView === "blocked" && (
+              <BlockedView onRefreshTree={sync.refreshTree} />
+            )}
+            {activeView === "usage" && (
+              <div
+                style={{
+                  display: "flex",
+                  flex: "1",
+                  minWidth: "0",
+                }}
+              >
+                <UsagePanel />
+              </div>
+            )}
+          </Suspense>
           {showExplorer && (
             <EditorGroupsContainer
               onTabSelect={(groupId, tabId) => {

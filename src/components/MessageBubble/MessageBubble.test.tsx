@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Message } from "../../lib/types";
@@ -30,14 +30,15 @@ describe("MessageBubble", () => {
     markdownMock.mockClear();
   });
 
-  it("renders markdown for normal user messages", () => {
+  it("renders markdown for normal user messages", async () => {
     render(<MessageBubble message={message({ content: "**hello**" })} />);
 
-    expect(markdownMock).toHaveBeenCalledTimes(1);
+    // The Markdown module is lazy-loaded; the mock resolves a tick later.
+    await waitFor(() => expect(markdownMock).toHaveBeenCalledTimes(1));
     expect(markdownMock).toHaveBeenCalledWith({ text: "**hello**" });
   });
 
-  it("renders command input as a distinct user bubble", () => {
+  it("renders command input as a distinct user bubble", async () => {
     const { container } = render(
       <MessageBubble
         message={message({
@@ -48,10 +49,12 @@ describe("MessageBubble", () => {
     );
 
     expect(container.querySelector(".msg-bubble-command")).toBeTruthy();
-    expect(markdownMock).toHaveBeenCalledWith({ text: "/compact now" });
+    await waitFor(() =>
+      expect(markdownMock).toHaveBeenCalledWith({ text: "/compact now" }),
+    );
   });
 
-  it("renders command output as a distinct assistant bubble", () => {
+  it("renders command output as a distinct assistant bubble", async () => {
     const { container } = render(
       <MessageBubble
         message={message({
@@ -63,10 +66,12 @@ describe("MessageBubble", () => {
     );
 
     expect(container.querySelector(".msg-bubble-command")).toBeTruthy();
-    expect(markdownMock).toHaveBeenCalledWith({ text: "Reloaded skills" });
+    await waitFor(() =>
+      expect(markdownMock).toHaveBeenCalledWith({ text: "Reloaded skills" }),
+    );
   });
 
-  it("strips image placeholders out of the markdown text", () => {
+  it("strips image placeholders out of the markdown text", async () => {
     render(
       <MessageBubble
         message={message({
@@ -75,7 +80,9 @@ describe("MessageBubble", () => {
       />,
     );
 
-    expect(markdownMock).toHaveBeenCalledWith({ text: "look  here" });
+    await waitFor(() =>
+      expect(markdownMock).toHaveBeenCalledWith({ text: "look  here" }),
+    );
   });
 
   it("does not render markdown for tool messages", () => {
