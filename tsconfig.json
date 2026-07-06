@@ -16,19 +16,5 @@
   },
   "include": ["src"],
   "//": "MIGRATION (migrate/react): exclude not-yet-ported Solid source until its phase ports it. Shrink this list as phases land; empty by Phase 10. See MIGRATION.md.",
-  "exclude": [
-    "**/*.test.ts",
-    "**/*.test.tsx",
-    "src/components",
-    "src/App",
-    "src/index.tsx",
-    "src/stores/editorGroups.ts",
-    "src/stores/favorites.ts",
-    "src/stores/search.ts",
-    "src/stores/selection.ts",
-    "src/stores/settings.ts",
-    "src/stores/theme.ts",
-    "src/stores/updater.ts",
-    "src/stores/usageView.ts"
-  ]
+  "exclude": ["**/*.test.ts", "**/*.test.tsx", "src/components"]
 }

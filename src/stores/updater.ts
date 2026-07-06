@@ -1,5 +1,5 @@
-import { createSignal } from "solid-js";
 import type { Update } from "@tauri-apps/plugin-updater";
+import { create } from "zustand";
 
 export type UpdatePhase =
   | "idle"
@@ -10,17 +10,33 @@ export type UpdatePhase =
   | "installing"
   | "error";
 
-const [phase, setPhase] = createSignal<UpdatePhase>("idle");
-const [availableVersion, setAvailableVersion] = createSignal<string | null>(
-  null,
-);
-const [errorDetail, setErrorDetail] = createSignal<string | null>(null);
+interface UpdaterState {
+  phase: UpdatePhase;
+  availableVersion: string | null;
+  errorDetail: string | null;
+}
+
+export const useUpdaterStore = create<UpdaterState>(() => ({
+  phase: "idle",
+  availableVersion: null,
+  errorDetail: null,
+}));
 
 let pendingUpdate: Update | null = null;
 let isChecking = false;
 let resetTimer: ReturnType<typeof setTimeout> | null = null;
 
-export { phase, availableVersion, errorDetail };
+function setPhase(phase: UpdatePhase) {
+  useUpdaterStore.setState({ phase });
+}
+
+// Imperative getters (also used by the phase-machine guards below).
+export const getUpdaterPhase = (): UpdatePhase =>
+  useUpdaterStore.getState().phase;
+export const getAvailableVersion = (): string | null =>
+  useUpdaterStore.getState().availableVersion;
+export const getUpdaterError = (): string | null =>
+  useUpdaterStore.getState().errorDetail;
 
 /** Clear any pending phase-reset timer. */
 function clearResetTimer() {
@@ -40,7 +56,11 @@ function scheduleReset(target: UpdatePhase, ms: number) {
 }
 
 export async function checkForUpdate(): Promise<void> {
-  if (isChecking || phase() === "downloading" || phase() === "installing")
+  if (
+    isChecking ||
+    getUpdaterPhase() === "downloading" ||
+    getUpdaterPhase() === "installing"
+  )
     return;
   isChecking = true;
   clearResetTimer();
@@ -51,19 +71,19 @@ export async function checkForUpdate(): Promise<void> {
     const update = await check();
     if (update) {
       pendingUpdate = update;
-      setAvailableVersion(update.version);
-      setPhase("available");
+      useUpdaterStore.setState({
+        availableVersion: update.version,
+        phase: "available",
+      });
     } else {
       pendingUpdate = null;
-      setAvailableVersion(null);
-      setPhase("upToDate");
+      useUpdaterStore.setState({ availableVersion: null, phase: "upToDate" });
       scheduleReset("idle", 3000);
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[updater] check failed:", msg);
-    setErrorDetail(msg);
-    setPhase("error");
+    useUpdaterStore.setState({ errorDetail: msg, phase: "error" });
     scheduleReset("idle", 3000);
   } finally {
     isChecking = false;
@@ -71,7 +91,7 @@ export async function checkForUpdate(): Promise<void> {
 }
 
 export async function downloadAndInstall(): Promise<void> {
-  if (!pendingUpdate || phase() !== "available") return;
+  if (!pendingUpdate || getUpdaterPhase() !== "available") return;
   const update = pendingUpdate;
 
   clearResetTimer();
@@ -84,8 +104,20 @@ export async function downloadAndInstall(): Promise<void> {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[updater] install failed:", msg);
-    setErrorDetail(msg);
-    setPhase("error");
+    useUpdaterStore.setState({ errorDetail: msg, phase: "error" });
     scheduleReset("available", 3000);
   }
+}
+
+// Reactive hooks for components.
+export function useUpdaterPhase(): UpdatePhase {
+  return useUpdaterStore((state) => state.phase);
+}
+
+export function useAvailableVersion(): string | null {
+  return useUpdaterStore((state) => state.availableVersion);
+}
+
+export function useUpdaterError(): string | null {
+  return useUpdaterStore((state) => state.errorDetail);
 }

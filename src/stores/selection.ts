@@ -1,26 +1,44 @@
-import { createSignal } from "solid-js";
+import { create } from "zustand";
 
-const [selectedIds, setSelectedIds] = createSignal<Set<string>>(new Set());
+interface SelectionState {
+  selectedIds: Set<string>;
+}
+
+export const useSelectionStore = create<SelectionState>(() => ({
+  selectedIds: new Set<string>(),
+}));
 
 export function toggleSelected(id: string) {
-  setSelectedIds((prev) => {
-    const next = new Set(prev);
+  useSelectionStore.setState((state) => {
+    const next = new Set(state.selectedIds);
     if (next.has(id)) next.delete(id);
     else next.add(id);
-    return next;
+    return { selectedIds: next };
   });
 }
 
 export function clearSelection() {
-  setSelectedIds(new Set<string>());
+  useSelectionStore.setState({ selectedIds: new Set<string>() });
 }
 
+// Imperative reads for event handlers (non-reactive).
 export function isSelected(id: string): boolean {
-  return selectedIds().has(id);
+  return useSelectionStore.getState().selectedIds.has(id);
 }
 
 export function selectionCount(): number {
-  return selectedIds().size;
+  return useSelectionStore.getState().selectedIds.size;
 }
 
-export { selectedIds };
+// Reactive hooks for components.
+export function useSelectedIds(): Set<string> {
+  return useSelectionStore((state) => state.selectedIds);
+}
+
+export function useIsSelected(id: string): boolean {
+  return useSelectionStore((state) => state.selectedIds.has(id));
+}
+
+export function useSelectionCount(): number {
+  return useSelectionStore((state) => state.selectedIds.size);
+}

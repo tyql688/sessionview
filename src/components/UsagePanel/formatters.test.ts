@@ -9,17 +9,21 @@ import {
   sortIcon,
   makeFmtChartValue,
 } from "./formatters";
-import { locale, setLocale } from "../../i18n/index";
+import { getLocale, i18next } from "../../i18n/index";
 
 // fmtTokens follows the UI language; pin it so assertions don't depend on the
 // machine's navigator.language.
-const initialLocale = locale();
-beforeEach(() => setLocale("en"));
-afterAll(() => setLocale(initialLocale));
+const initialLocale = getLocale();
+beforeEach(async () => {
+  await i18next.changeLanguage("en");
+});
+afterAll(async () => {
+  await i18next.changeLanguage(initialLocale);
+});
 
 describe("fmtTokens", () => {
-  it("uses 万/亿 scale when the UI language is Chinese", () => {
-    setLocale("zh");
+  it("uses 万/亿 scale when the UI language is Chinese", async () => {
+    await i18next.changeLanguage("zh");
     expect(fmtTokens(15_000)).toBe("1.5万");
     expect(fmtTokens(340_000_000)).toBe("3.4亿");
   });

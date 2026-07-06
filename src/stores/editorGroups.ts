@@ -1,4 +1,4 @@
-import { createSignal } from "solid-js";
+import { create } from "zustand";
 import type { SessionRef } from "../lib/types";
 
 export interface EditorGroup {
@@ -22,17 +22,48 @@ function makeGroup(tabs: SessionRef[] = [], flexBasis = 100): EditorGroup {
   };
 }
 
-const [groups, setGroups] = createSignal<EditorGroup[]>([makeGroup()]);
-const [activeGroupId, setActiveGroupId] = createSignal<string>(groups()[0].id);
+interface EditorGroupsState {
+  groups: EditorGroup[];
+  activeGroupId: string;
+}
+
+const initialGroup = makeGroup();
+
+export const useEditorGroupsStore = create<EditorGroupsState>(() => ({
+  groups: [initialGroup],
+  activeGroupId: initialGroup.id,
+}));
+
+// ---------- internal imperative state access ----------
+
+function getGroups(): EditorGroup[] {
+  return useEditorGroupsStore.getState().groups;
+}
+
+function getActiveGroupId(): string {
+  return useEditorGroupsStore.getState().activeGroupId;
+}
+
+function setGroups(
+  update: EditorGroup[] | ((prev: EditorGroup[]) => EditorGroup[]),
+) {
+  useEditorGroupsStore.setState((state) => ({
+    groups: typeof update === "function" ? update(state.groups) : update,
+  }));
+}
+
+function setActiveGroupId(id: string) {
+  useEditorGroupsStore.setState({ activeGroupId: id });
+}
 
 // ---------- helpers ----------
 
 function findGroupBySession(sessionId: string): EditorGroup | undefined {
-  return groups().find((g) => g.tabs.some((t) => t.id === sessionId));
+  return getGroups().find((g) => g.tabs.some((t) => t.id === sessionId));
 }
 
 function activeGroup(): EditorGroup | undefined {
-  return groups().find((g) => g.id === activeGroupId());
+  return getGroups().find((g) => g.id === getActiveGroupId());
 }
 
 function updateGroup(groupId: string, fn: (g: EditorGroup) => EditorGroup) {
@@ -43,8 +74,7 @@ function updateGroup(groupId: string, fn: (g: EditorGroup) => EditorGroup) {
  * Remove a tab from its source group, returning a new group with the tab
  * gone, `activeTabId` recomputed (falls back to the last remaining tab, or
  * null when none remain), and `previewTabId` cleared when the detached tab
- * was the preview. Pure: does not mutate `group`. Callers layer any
- * flexBasis change on top of the returned group.
+ * was the preview. Pure: does not mutate `group`.
  */
 function detachTab(group: EditorGroup, sessionId: string): EditorGroup {
   const tabs = group.tabs.filter((t) => t.id !== sessionId);
@@ -65,7 +95,7 @@ function removeGroupIfEmpty(groupId: string) {
     const g = prev.find((x) => x.id === groupId);
     if (g && g.tabs.length === 0) {
       const filtered = prev.filter((x) => x.id !== groupId);
-      if (activeGroupId() === groupId) {
+      if (getActiveGroupId() === groupId) {
         setActiveGroupId(filtered[filtered.length - 1].id);
       }
       // Redistribute removed group's width to survivors
@@ -101,7 +131,7 @@ function openSession(session: SessionRef) {
     }));
     return;
   }
-  const gId = activeGroupId();
+  const gId = getActiveGroupId();
   updateGroup(gId, (g) => ({
     ...g,
     tabs: [...g.tabs, session],
@@ -118,7 +148,7 @@ function openPreview(session: SessionRef) {
     updateGroup(existing.id, (g) => ({ ...g, activeTabId: session.id }));
     return;
   }
-  const gId = activeGroupId();
+  const gId = getActiveGroupId();
   updateGroup(gId, (prev) => ({
     ...prev,
     tabs: [
@@ -206,12 +236,12 @@ function splitToRight(sessionId: string) {
   const sourceGroup = findGroupBySession(sessionId);
   if (!sourceGroup) return;
   // guard: sole tab in last group → no-op
-  if (sourceGroup.tabs.length <= 1 && groups().length <= 1) return;
+  if (sourceGroup.tabs.length <= 1 && getGroups().length <= 1) return;
 
   const session = sourceGroup.tabs.find((t) => t.id === sessionId)!;
 
-  const sourceIdx = groups().findIndex((g) => g.id === sourceGroup.id);
-  const rightNeighbor = groups()[sourceIdx + 1];
+  const sourceIdx = getGroups().findIndex((g) => g.id === sourceGroup.id);
+  const rightNeighbor = getGroups()[sourceIdx + 1];
 
   if (rightNeighbor) {
     // move to existing right group
@@ -222,7 +252,7 @@ function splitToRight(sessionId: string) {
       activeTabId: session.id,
     }));
     setActiveGroupId(rightNeighbor.id);
-  } else if (groups().length < MAX_GROUPS) {
+  } else if (getGroups().length < MAX_GROUPS) {
     // create new group, split source width 50/50
     const halfBasis = sourceGroup.flexBasis / 2;
     updateGroup(sourceGroup.id, (g) => ({
@@ -238,8 +268,8 @@ function splitToRight(sessionId: string) {
     setActiveGroupId(newGroup.id);
   } else {
     // at max groups, move to rightmost
-    const rightmost = groups()[groups().length - 1];
-    if (rightmost.id === sourceGroup.id) return; // already rightmost, no split target
+    const rightmost = getGroups()[getGroups().length - 1];
+    if (rightmost.id === sourceGroup.id) return; // already rightmost
     updateGroup(sourceGroup.id, (g) => detachTab(g, sessionId));
     updateGroup(rightmost.id, (g) => ({
       ...g,
@@ -292,11 +322,11 @@ function moveTabToGroup(
 }
 
 function createGroupFromDrop(sessionId: string): void {
-  if (groups().length >= MAX_GROUPS) return;
+  if (getGroups().length >= MAX_GROUPS) return;
   const sourceGroup = findGroupBySession(sessionId);
   if (!sourceGroup) return;
   // guard: sole tab in sole group → no-op (same as splitToRight)
-  if (sourceGroup.tabs.length <= 1 && groups().length <= 1) return;
+  if (sourceGroup.tabs.length <= 1 && getGroups().length <= 1) return;
   const session = sourceGroup.tabs.find((t) => t.id === sessionId)!;
 
   const halfBasis = sourceGroup.flexBasis / 2;
@@ -312,16 +342,16 @@ function createGroupFromDrop(sessionId: string): void {
 }
 
 function focusGroup(groupId: string) {
-  if (groups().some((g) => g.id === groupId)) {
+  if (getGroups().some((g) => g.id === groupId)) {
     setActiveGroupId(groupId);
   }
 }
 
 function focusAdjacentGroup(direction: "left" | "right") {
-  const idx = groups().findIndex((g) => g.id === activeGroupId());
+  const idx = getGroups().findIndex((g) => g.id === getActiveGroupId());
   if (idx === -1) return;
   const nextIdx = direction === "right" ? idx + 1 : idx - 1;
-  const target = groups()[nextIdx];
+  const target = getGroups()[nextIdx];
   if (target) setActiveGroupId(target.id);
 }
 
@@ -364,10 +394,17 @@ function _reset() {
   setActiveGroupId(g.id);
 }
 
+// Reactive hooks for components.
+export const useGroups = () => useEditorGroupsStore((s) => s.groups);
+export const useActiveGroupId = () =>
+  useEditorGroupsStore((s) => s.activeGroupId);
+export const useActiveGroup = () =>
+  useEditorGroupsStore((s) => s.groups.find((g) => g.id === s.activeGroupId));
+
 export {
   MAX_GROUPS,
-  groups,
-  activeGroupId,
+  getGroups,
+  getActiveGroupId,
   activeGroup,
   findGroupBySession,
   openSession,

@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type { SessionRef } from "../lib/types";
 import {
-  groups,
-  activeGroupId,
+  getGroups as groups,
+  getActiveGroupId as activeGroupId,
   openSession,
   openPreview,
   pinTab,

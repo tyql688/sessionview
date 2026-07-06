@@ -1,24 +1,33 @@
-import { createSignal } from "solid-js";
+import { create } from "zustand";
 import { searchSessions } from "../lib/tauri";
-import type { SearchResult, SearchFilters } from "../lib/types";
+import type { SearchFilters, SearchResult } from "../lib/types";
 import { toastError } from "./toast";
 
-const [query, setQuery] = createSignal("");
-const [results, setResults] = createSignal<SearchResult[]>([]);
-const [isSearching, setIsSearching] = createSignal(false);
-
-// Pending in-session search: set by global SearchOverlay when opening a session
-// so the SessionView can auto-apply the query and scroll to the first match.
-// Cleared by SessionView after consuming.
-const [pendingSessionSearch, setPendingSessionSearch] = createSignal<{
+// Pending in-session search: set by the global search overlay when opening a
+// session so SessionView can auto-apply the query and scroll to the first match.
+interface PendingSessionSearch {
   sessionId: string;
   query: string;
-} | null>(null);
+}
+
+interface SearchState {
+  query: string;
+  results: SearchResult[];
+  isSearching: boolean;
+  pendingSessionSearch: PendingSessionSearch | null;
+}
+
+export const useSearchStore = create<SearchState>(() => ({
+  query: "",
+  results: [],
+  isSearching: false,
+  pendingSessionSearch: null,
+}));
 
 let debounceTimer: ReturnType<typeof setTimeout>;
 let searchVersion = 0;
 
-function parseSearchQuery(raw: string): SearchFilters {
+export function parseSearchQuery(raw: string): SearchFilters {
   let remaining = raw;
   let after: number | undefined;
   let before: number | undefined;
@@ -61,53 +70,64 @@ function parseSearchQuery(raw: string): SearchFilters {
   };
 }
 
-function search(q: string) {
-  setQuery(q);
+export function search(q: string) {
+  useSearchStore.setState({ query: q });
   clearTimeout(debounceTimer);
   if (!q.trim()) {
     // Empty query — clear results explicitly so the panel doesn't keep
     // showing matches from an abandoned query.
-    setResults([]);
-    setIsSearching(false);
+    useSearchStore.setState({ results: [], isSearching: false });
     return;
   }
   // Keep previous results visible during the debounce window so the panel
-  // doesn't flash empty between keystrokes; `searchVersion` already
-  // discards stale responses when they land out of order.
-  setIsSearching(true);
+  // doesn't flash empty between keystrokes; `searchVersion` already discards
+  // stale responses when they land out of order.
+  useSearchStore.setState({ isSearching: true });
   const version = ++searchVersion;
   debounceTimer = setTimeout(async () => {
     try {
       const filters = parseSearchQuery(q);
       const r = await searchSessions(filters);
       if (version !== searchVersion) return; // stale response, discard
-      setResults(r);
+      useSearchStore.setState({ results: r });
     } catch (e) {
       if (version !== searchVersion) return;
       toastError(String(e));
-      setResults([]);
+      useSearchStore.setState({ results: [] });
     } finally {
       if (version === searchVersion) {
-        setIsSearching(false);
+        useSearchStore.setState({ isSearching: false });
       }
     }
   }, 300);
 }
 
-function clearSearch() {
-  setQuery("");
-  setResults([]);
-  setIsSearching(false);
+export function clearSearch() {
+  useSearchStore.setState({ query: "", results: [], isSearching: false });
   clearTimeout(debounceTimer);
 }
 
-export {
-  query,
-  results,
-  isSearching,
-  search,
-  clearSearch,
-  parseSearchQuery,
-  pendingSessionSearch,
-  setPendingSessionSearch,
-};
+export function setPendingSessionSearch(value: PendingSessionSearch | null) {
+  useSearchStore.setState({ pendingSessionSearch: value });
+}
+
+export function getPendingSessionSearch(): PendingSessionSearch | null {
+  return useSearchStore.getState().pendingSessionSearch;
+}
+
+// Reactive hooks for components.
+export function useSearchQuery(): string {
+  return useSearchStore((state) => state.query);
+}
+
+export function useSearchResults(): SearchResult[] {
+  return useSearchStore((state) => state.results);
+}
+
+export function useIsSearching(): boolean {
+  return useSearchStore((state) => state.isSearching);
+}
+
+export function usePendingSessionSearch(): PendingSessionSearch | null {
+  return useSearchStore((state) => state.pendingSessionSearch);
+}

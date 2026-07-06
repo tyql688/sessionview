@@ -1,4 +1,4 @@
-import { createSignal } from "solid-js";
+import { create } from "zustand";
 
 export type Theme = "light" | "dark" | "system";
 
@@ -32,13 +32,6 @@ function writeStoredTheme(theme: Theme): void {
   }
 }
 
-function getInitialTheme(): Theme {
-  // In non-DOM environments (vitest under node) `localStorage` and
-  // `document` are not defined. The module is imported transitively
-  // by components included in tests, so we must degrade safely.
-  return readStoredTheme();
-}
-
 /** Resolve the OS color scheme; defaults to light when unavailable (tests/SSR). */
 function resolveSystemTheme(): "light" | "dark" {
   if (
@@ -57,31 +50,41 @@ export function applyTheme(theme: Theme) {
     return;
   }
   // Always set an explicit light/dark attribute, resolving "system" via the OS
-  // so the app shell follows OS dark mode. (It used to removeAttribute for
-  // "system", falling back to the light :root defaults, which left a dark-mode
-  // OS rendering a fully light app while Mermaid diagrams rendered dark.)
+  // so the app shell follows OS dark mode.
   const resolved = theme === "system" ? resolveSystemTheme() : theme;
   document.documentElement.setAttribute("data-theme", resolved);
   writeStoredTheme(theme);
 }
 
-const [theme, setThemeSignal] = createSignal<Theme>(getInitialTheme());
+interface ThemeState {
+  theme: Theme;
+}
+
+export const useThemeStore = create<ThemeState>(() => ({
+  theme: readStoredTheme(),
+}));
 
 export function setTheme(t: Theme) {
-  setThemeSignal(t);
+  useThemeStore.setState({ theme: t });
   applyTheme(t);
 }
 
-// Re-apply on OS theme change while we're tracking it ("system" mode), so a
-// live light<->dark switch in the OS is reflected without a restart.
+export function getTheme(): Theme {
+  return useThemeStore.getState().theme;
+}
+
+export function useTheme(): Theme {
+  return useThemeStore((state) => state.theme);
+}
+
+// Re-apply on OS theme change while tracking it ("system" mode), so a live
+// light<->dark switch in the OS is reflected without a restart.
 if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
   window
     .matchMedia("(prefers-color-scheme: dark)")
     .addEventListener("change", () => {
-      if (theme() === "system") {
+      if (useThemeStore.getState().theme === "system") {
         applyTheme("system");
       }
     });
 }
-
-export { theme };

@@ -1,7 +1,7 @@
-import { createSignal } from "solid-js";
-import type { Provider } from "../lib/types";
+import { create } from "zustand";
 import { errorMessage } from "../lib/errors";
 import { detectTerminal } from "../lib/tauri";
+import type { Provider } from "../lib/types";
 
 export type TerminalApp =
   | "terminal"
@@ -26,6 +26,22 @@ const VALID_PROVIDERS: Provider[] = [
   "kimi",
   "cursor",
   "cc-mirror",
+];
+
+const VALID_TERMINALS: TerminalApp[] = [
+  "terminal",
+  "iterm2",
+  "ghostty",
+  "kitty",
+  "warp",
+  "wezterm",
+  "alacritty",
+  "windows-terminal",
+  "powershell",
+  "cmd",
+  "gnome-terminal",
+  "konsole",
+  "xterm",
 ];
 
 function readStorage(key: string): string | null {
@@ -95,32 +111,43 @@ function parseStoredStringArray<T extends string>(
 }
 
 const storedTerminal = readStorage("cc-session-terminal") as TerminalApp | null;
-
-const [terminalApp, setTerminalAppSignal] = createSignal<TerminalApp>(
-  storedTerminal || "terminal",
+const initialDisabledProviders = parseStoredStringArray<Provider>(
+  "cc-session-disabled-providers",
+  "disabled providers setting",
+  (value): value is Provider => VALID_PROVIDERS.includes(value as Provider),
+);
+const initialBlockedFolders = parseStoredStringArray<string>(
+  "cc-session-blocked-folders",
+  "blocked folders setting",
+  (value): value is string => value.length > 0,
 );
 
-// Auto-detect terminal on first launch
+interface SettingsState {
+  terminalApp: TerminalApp;
+  disabledProviders: Provider[];
+  disabledProvidersError: string | null;
+  timeGrouping: boolean;
+  showOrphans: boolean;
+  blockedFolders: string[];
+  blockedFoldersError: string | null;
+}
+
+export const useSettingsStore = create<SettingsState>(() => ({
+  terminalApp: storedTerminal || "terminal",
+  disabledProviders: initialDisabledProviders.value,
+  disabledProvidersError: initialDisabledProviders.error,
+  timeGrouping: readStorage("cc-session-time-grouping") !== "false",
+  showOrphans: readStorage("cc-session-show-orphans") !== "false",
+  blockedFolders: initialBlockedFolders.value,
+  blockedFoldersError: initialBlockedFolders.error,
+}));
+
+// Auto-detect terminal on first launch.
 if (!storedTerminal) {
   detectTerminal()
     .then((detected) => {
-      const valid: TerminalApp[] = [
-        "terminal",
-        "iterm2",
-        "ghostty",
-        "kitty",
-        "warp",
-        "wezterm",
-        "alacritty",
-        "windows-terminal",
-        "powershell",
-        "cmd",
-        "gnome-terminal",
-        "konsole",
-        "xterm",
-      ];
-      if (valid.includes(detected as TerminalApp)) {
-        setTerminalAppSignal(detected as TerminalApp);
+      if (VALID_TERMINALS.includes(detected as TerminalApp)) {
+        useSettingsStore.setState({ terminalApp: detected as TerminalApp });
         writeStorage("cc-session-terminal", detected);
       }
     })
@@ -130,100 +157,76 @@ if (!storedTerminal) {
 }
 
 export function setTerminalApp(t: TerminalApp) {
-  setTerminalAppSignal(t);
+  useSettingsStore.setState({ terminalApp: t });
   writeStorage("cc-session-terminal", t);
 }
 
-export { terminalApp };
-
-// Provider toggle: store disabled providers in localStorage
-const initialDisabledProviders = parseStoredStringArray<Provider>(
-  "cc-session-disabled-providers",
-  "disabled providers setting",
-  (value): value is Provider => VALID_PROVIDERS.includes(value as Provider),
-);
-
-const [disabledProviders, setDisabledProvidersSignal] = createSignal<
-  Provider[]
->(initialDisabledProviders.value);
-const [disabledProvidersError, setDisabledProvidersError] = createSignal<
-  string | null
->(initialDisabledProviders.error);
-
 export function toggleProvider(id: Provider) {
-  setDisabledProvidersSignal((prev) => {
-    const next = prev.includes(id)
-      ? prev.filter((p) => p !== id)
-      : [...prev, id];
-    setDisabledProvidersError(null);
-    writeStorage("cc-session-disabled-providers", JSON.stringify(next));
-    return next;
+  const prev = useSettingsStore.getState().disabledProviders;
+  const next = prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id];
+  useSettingsStore.setState({
+    disabledProviders: next,
+    disabledProvidersError: null,
   });
+  writeStorage("cc-session-disabled-providers", JSON.stringify(next));
 }
 
-export { disabledProviders, disabledProvidersError };
-
-// Time grouping toggle
-const [timeGrouping, setTimeGroupingSignal] = createSignal<boolean>(
-  readStorage("cc-session-time-grouping") !== "false",
-);
-
 export function setTimeGrouping(v: boolean) {
-  setTimeGroupingSignal(v);
+  useSettingsStore.setState({ timeGrouping: v });
   writeStorage("cc-session-time-grouping", String(v));
 }
 
-export { timeGrouping };
-
-// Show subagents toggle (default on)
-const [showOrphans, setShowOrphansSignal] = createSignal<boolean>(
-  readStorage("cc-session-show-orphans") !== "false",
-);
-
 export function setShowOrphans(v: boolean) {
-  setShowOrphansSignal(v);
+  useSettingsStore.setState({ showOrphans: v });
   writeStorage("cc-session-show-orphans", String(v));
 }
 
-export { showOrphans };
-
-// Blocked folders: sessions from these project paths are hidden
-const initialBlockedFolders = parseStoredStringArray<string>(
-  "cc-session-blocked-folders",
-  "blocked folders setting",
-  (value): value is string => value.length > 0,
-);
-
-const [blockedFolders, setBlockedFoldersSignal] = createSignal<string[]>(
-  initialBlockedFolders.value,
-);
-const [blockedFoldersError, setBlockedFoldersError] = createSignal<
-  string | null
->(initialBlockedFolders.error);
-
 export function addBlockedFolder(path: string) {
-  setBlockedFoldersSignal((prev) => {
-    if (prev.includes(path)) return prev;
-    const next = [...prev, path];
-    setBlockedFoldersError(null);
-    writeStorage("cc-session-blocked-folders", JSON.stringify(next));
-    return next;
+  const prev = useSettingsStore.getState().blockedFolders;
+  if (prev.includes(path)) return;
+  const next = [...prev, path];
+  useSettingsStore.setState({
+    blockedFolders: next,
+    blockedFoldersError: null,
   });
+  writeStorage("cc-session-blocked-folders", JSON.stringify(next));
 }
 
 export function removeBlockedFolder(path: string) {
-  setBlockedFoldersSignal((prev) => {
-    const next = prev.filter((p) => p !== path);
-    setBlockedFoldersError(null);
-    writeStorage("cc-session-blocked-folders", JSON.stringify(next));
-    return next;
+  const prev = useSettingsStore.getState().blockedFolders;
+  const next = prev.filter((p) => p !== path);
+  useSettingsStore.setState({
+    blockedFolders: next,
+    blockedFoldersError: null,
   });
+  writeStorage("cc-session-blocked-folders", JSON.stringify(next));
 }
 
 export function isPathBlocked(path: string): boolean {
-  return blockedFolders().some(
-    (blocked) => path === blocked || path.startsWith(`${blocked}/`),
-  );
+  return useSettingsStore
+    .getState()
+    .blockedFolders.some(
+      (blocked) => path === blocked || path.startsWith(`${blocked}/`),
+    );
 }
 
-export { blockedFolders, blockedFoldersError };
+// Imperative getters for non-reactive logic (filtering, tree building).
+export const getDisabledProviders = () =>
+  useSettingsStore.getState().disabledProviders;
+export const getShowOrphans = () => useSettingsStore.getState().showOrphans;
+export const getTimeGrouping = () => useSettingsStore.getState().timeGrouping;
+export const getBlockedFolders = () =>
+  useSettingsStore.getState().blockedFolders;
+
+// Reactive hooks for components.
+export const useTerminalApp = () => useSettingsStore((s) => s.terminalApp);
+export const useDisabledProviders = () =>
+  useSettingsStore((s) => s.disabledProviders);
+export const useDisabledProvidersError = () =>
+  useSettingsStore((s) => s.disabledProvidersError);
+export const useTimeGrouping = () => useSettingsStore((s) => s.timeGrouping);
+export const useShowOrphans = () => useSettingsStore((s) => s.showOrphans);
+export const useBlockedFolders = () =>
+  useSettingsStore((s) => s.blockedFolders);
+export const useBlockedFoldersError = () =>
+  useSettingsStore((s) => s.blockedFoldersError);

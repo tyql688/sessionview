@@ -15,7 +15,7 @@ describe("updater store", () => {
   });
 
   it("starts in idle phase", async () => {
-    const { phase } = await import("./updater");
+    const { getUpdaterPhase: phase } = await import("./updater");
     expect(phase()).toBe("idle");
   });
 
@@ -26,9 +26,11 @@ describe("updater store", () => {
       downloadAndInstall: vi.fn(),
     } as unknown as Awaited<ReturnType<typeof check>>);
 
-    const { checkForUpdate, phase, availableVersion } = await import(
-      "./updater"
-    );
+    const {
+      checkForUpdate,
+      getUpdaterPhase: phase,
+      getAvailableVersion: availableVersion,
+    } = await import("./updater");
     await checkForUpdate();
 
     expect(phase()).toBe("available");
@@ -40,7 +42,8 @@ describe("updater store", () => {
     const { check } = await import("@tauri-apps/plugin-updater");
     vi.mocked(check).mockResolvedValue(null);
 
-    const { checkForUpdate, phase } = await import("./updater");
+    const { checkForUpdate, getUpdaterPhase: phase } =
+      await import("./updater");
     await checkForUpdate();
 
     expect(phase()).toBe("upToDate");
@@ -54,7 +57,11 @@ describe("updater store", () => {
     const { check } = await import("@tauri-apps/plugin-updater");
     vi.mocked(check).mockRejectedValue(new Error("network error"));
 
-    const { checkForUpdate, phase, errorDetail } = await import("./updater");
+    const {
+      checkForUpdate,
+      getUpdaterPhase: phase,
+      getUpdaterError: errorDetail,
+    } = await import("./updater");
     await checkForUpdate();
 
     expect(phase()).toBe("error");
@@ -70,7 +77,8 @@ describe("updater store", () => {
 
     // First call: error → schedules reset to idle in 3s
     vi.mocked(check).mockRejectedValueOnce(new Error("timeout"));
-    const { checkForUpdate, phase } = await import("./updater");
+    const { checkForUpdate, getUpdaterPhase: phase } =
+      await import("./updater");
     await checkForUpdate();
     expect(phase()).toBe("error");
 
@@ -101,8 +109,12 @@ describe("updater store", () => {
       mockUpdate as unknown as Awaited<ReturnType<typeof check>>,
     );
 
-    const { checkForUpdate, downloadAndInstall, phase, errorDetail } =
-      await import("./updater");
+    const {
+      checkForUpdate,
+      downloadAndInstall,
+      getUpdaterPhase: phase,
+      getUpdaterError: errorDetail,
+    } = await import("./updater");
     await checkForUpdate();
     expect(phase()).toBe("available");
 
