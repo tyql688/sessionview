@@ -19,6 +19,10 @@ export interface CreateSessionPaginationOptions {
   filteredEntries: ProcessedEntry[];
   /** Loaded messages (read by `hasMore`). */
   messages: Message[];
+  /** Absolute session index of messages[0] — owned by the component because
+   * `processMessages` needs it before this hook can run. */
+  windowStart: number;
+  setWindowStart: Dispatch<SetStateAction<number>>;
   /** Lazy ref getter — the messages container may not exist yet. */
   getMessagesRef: () => HTMLDivElement | undefined;
   setMessages: Dispatch<SetStateAction<Message[]>>;
@@ -32,8 +36,6 @@ export interface CreateSessionPaginationOptions {
 export interface CreateSessionPaginationResult {
   visibleCount: number;
   setVisibleCount: Dispatch<SetStateAction<number>>;
-  windowStart: number;
-  setWindowStart: Dispatch<SetStateAction<number>>;
   totalMessages: number;
   setTotalMessages: Dispatch<SetStateAction<number>>;
   visibleEntries: ProcessedEntry[];
@@ -77,9 +79,9 @@ export function useSessionPagination(
     return all.slice(start).reverse();
   }, [opts.filteredEntries, visibleCount]);
   // Streaming pagination state — declared before `hasMore` since it's
-  // read inside that memo.
+  // read inside that memo. `windowStart` lives in the component (see opts).
   const [totalMessages, setTotalMessages] = useState(0);
-  const [windowStart, setWindowStart] = useState(0);
+  const { windowStart, setWindowStart } = opts;
 
   // We have more to render if either the in-memory window has unrendered
   // entries OR the backend still holds older messages we haven't fetched.
@@ -325,8 +327,6 @@ export function useSessionPagination(
   return {
     visibleCount,
     setVisibleCount,
-    windowStart,
-    setWindowStart,
     totalMessages,
     setTotalMessages,
     visibleEntries,

@@ -296,7 +296,7 @@ describe("SessionView smoke", () => {
     );
     expect(
       findFirstMatchingEntryIndex(
-        processMessages(manyMessages),
+        processMessages(manyMessages, 0),
         "target after search",
       ),
     ).toBe(10);

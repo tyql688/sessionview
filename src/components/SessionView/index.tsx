@@ -50,7 +50,13 @@ export function SessionView(props: {
   const terminalApp = useTerminalApp();
   const [messages, setMessages] = useState<Message[]>([]);
   const [outline, setOutline] = useState<SessionTurnOutlineEntry[]>([]);
-  const processedEntries = useMemo(() => processMessages(messages), [messages]);
+  // Absolute session index of messages[0]. Owned here (not by the pagination
+  // hook) because processMessages needs it to emit absolute message indices.
+  const [windowStart, setWindowStart] = useState(0);
+  const processedEntries = useMemo(
+    () => processMessages(messages, windowStart),
+    [messages, windowStart],
+  );
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -110,7 +116,6 @@ export function SessionView(props: {
   // visibleEntries/hasMore memos, and the scroll-driven older-page fetch.
   const {
     setVisibleCount,
-    setWindowStart,
     setTotalMessages,
     visibleEntries,
     hasMore,
@@ -123,6 +128,8 @@ export function SessionView(props: {
     sessionId: props.session.id,
     filteredEntries,
     messages,
+    windowStart,
+    setWindowStart,
     getMessagesRef: () => messagesRef.current ?? undefined,
     setMessages,
     setMeta,

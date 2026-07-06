@@ -31,15 +31,39 @@ describe("SessionView message processing", () => {
     };
 
     expect(isRenderableMessage(usageOnly)).toBe(false);
-    expect(processMessages([usageOnly, visibleAssistant])).toEqual([
+    expect(processMessages([usageOnly, visibleAssistant], 0)).toEqual([
       {
-        key: "msg-0-assistant-2026-04-11T02:25:17.000Z",
+        key: "msg-1-assistant-2026-04-11T02:25:17.000Z",
         type: "message",
         msg: visibleAssistant,
         messageIndex: 1,
         searchHaystack: "visible reply",
       },
     ]);
+  });
+
+  // Regression: entries must carry ABSOLUTE session indices. When the loaded
+  // window starts mid-session (tail-first load), window-relative indices
+  // desynced data-turn anchors and minimap jumps from the outline's absolute
+  // message_index values.
+  it("offsets message indices and keys by the window start", () => {
+    const first: Message = {
+      ...baseMessage,
+      content: "old reply",
+      timestamp: "2026-04-11T02:25:17.000Z",
+    };
+    const second: Message = {
+      ...baseMessage,
+      role: "user",
+      content: "next question",
+      timestamp: "2026-04-11T02:25:18.000Z",
+    };
+
+    const entries = processMessages([first, second], 700);
+    expect(
+      entries.map((e) => (e.type === "message" ? e.messageIndex : null)),
+    ).toEqual([700, 701]);
+    expect(entries[0]?.key).toBe("msg-700-assistant-2026-04-11T02:25:17.000Z");
   });
 
   it("keeps agent tool messages out of collapsed tool groups", () => {
@@ -82,37 +106,37 @@ describe("SessionView message processing", () => {
       timestamp: "2026-04-11T02:25:19.000Z",
     };
 
-    expect(processMessages([readTool, agentTool, swarmTool, bashTool])).toEqual(
-      [
-        {
-          key: "msg-0-tool-2026-04-11T02:25:17.000Z",
-          type: "message",
-          msg: readTool,
-          messageIndex: 0,
-          searchHaystack: "",
-        },
-        {
-          key: "msg-1-tool-2026-04-11T02:25:18.000Z",
-          type: "message",
-          msg: agentTool,
-          messageIndex: 1,
-          searchHaystack: "",
-        },
-        {
-          key: "msg-2-tool-2026-04-11T02:25:18.500Z",
-          type: "message",
-          msg: swarmTool,
-          messageIndex: 2,
-          searchHaystack: "",
-        },
-        {
-          key: "msg-3-tool-2026-04-11T02:25:19.000Z",
-          type: "message",
-          msg: bashTool,
-          messageIndex: 3,
-          searchHaystack: "",
-        },
-      ],
-    );
+    expect(
+      processMessages([readTool, agentTool, swarmTool, bashTool], 0),
+    ).toEqual([
+      {
+        key: "msg-0-tool-2026-04-11T02:25:17.000Z",
+        type: "message",
+        msg: readTool,
+        messageIndex: 0,
+        searchHaystack: "",
+      },
+      {
+        key: "msg-1-tool-2026-04-11T02:25:18.000Z",
+        type: "message",
+        msg: agentTool,
+        messageIndex: 1,
+        searchHaystack: "",
+      },
+      {
+        key: "msg-2-tool-2026-04-11T02:25:18.500Z",
+        type: "message",
+        msg: swarmTool,
+        messageIndex: 2,
+        searchHaystack: "",
+      },
+      {
+        key: "msg-3-tool-2026-04-11T02:25:19.000Z",
+        type: "message",
+        msg: bashTool,
+        messageIndex: 3,
+        searchHaystack: "",
+      },
+    ]);
   });
 });

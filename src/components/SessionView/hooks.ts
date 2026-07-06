@@ -54,10 +54,20 @@ export function isRenderableMessage(msg: Message): boolean {
   return msg.content.trim().length > 0;
 }
 
-export function processMessages(msgs: Message[]): ProcessedEntry[] {
+/**
+ * `windowStart` is the absolute session index of `msgs[0]` — messages arrive
+ * as a window into the full session, but outline ordinals, `data-turn`
+ * anchors, and `revealMessageIndex` all speak absolute indices. Emitting
+ * window-relative indices here silently broke turn anchors and minimap jumps
+ * for any session larger than the initial tail.
+ */
+export function processMessages(
+  msgs: Message[],
+  windowStart: number,
+): ProcessedEntry[] {
   const entries: ProcessedEntry[] = [];
   const renderableMsgs = msgs
-    .map((msg, messageIndex) => ({ msg, messageIndex }))
+    .map((msg, i) => ({ msg, messageIndex: windowStart + i }))
     .filter(({ msg }) => isRenderableMessage(msg));
   let i = 0;
 
@@ -82,7 +92,9 @@ export function processMessages(msgs: Message[]): ProcessedEntry[] {
           .map((m) => m.tool_name)
           .filter((n): n is string => !!n && n.trim().length > 0);
         entries.push({
-          key: `tools-${i}-${toolGroup[0].timestamp ?? "none"}`,
+          // Keys are built on absolute indices so prepending an older page
+          // never re-keys (and remounts) the already-rendered rows.
+          key: `tools-${toolIndices[0]}-${toolGroup[0].timestamp ?? "none"}`,
           type: "merged-tools",
           tools: toolNames,
           messages: toolGroup,
@@ -92,7 +104,7 @@ export function processMessages(msgs: Message[]): ProcessedEntry[] {
         });
       } else {
         entries.push({
-          key: `msg-${i}-${msg.role}-${msg.timestamp ?? "none"}`,
+          key: `msg-${messageIndex}-${msg.role}-${msg.timestamp ?? "none"}`,
           type: "message",
           msg,
           messageIndex,
@@ -117,7 +129,7 @@ export function processMessages(msgs: Message[]): ProcessedEntry[] {
       const TIME_GAP_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
       if (prevTs && curTs && curTs - prevTs > TIME_GAP_THRESHOLD_MS) {
         entries.push({
-          key: `sep-${i}-${curTs}`,
+          key: `sep-${messageIndex}-${curTs}`,
           type: "time-sep",
           time: formatTimeOnly(curTs),
           searchHaystack: "",
@@ -126,7 +138,7 @@ export function processMessages(msgs: Message[]): ProcessedEntry[] {
     }
 
     entries.push({
-      key: `msg-${i}-${msg.role}-${msg.timestamp ?? "none"}`,
+      key: `msg-${messageIndex}-${msg.role}-${msg.timestamp ?? "none"}`,
       type: "message",
       msg,
       messageIndex,
