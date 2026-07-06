@@ -25,7 +25,7 @@ npm run format:check          # Prettier check
 ## Project Layout
 
 ```
-src/                       # React frontend (components, stores, i18n, lib, styles)
+src/                       # React frontend (app shell, features, shared components, stores, i18n, lib, styles)
 src-tauri/src/
   providers/               # claude/, codex/, antigravity/, kimi/, opencode/, cursor/, cc_mirror.rs
   commands/                # sessions.rs, settings.rs, trash.rs, terminal.rs, usage.rs, search.rs, file_access.rs
@@ -35,9 +35,11 @@ src-tauri/src/
   provider.rs + provider/  # SessionProvider machinery: traits.rs, plan.rs, state.rs, tokens.rs, catalog.rs, trash.rs
   tool_metadata.rs + tool_metadata/  # names.rs, summary.rs, result.rs, build.rs
   indexer.rs  watcher.rs  models.rs  provider_utils.rs  trash_state.rs  pricing.rs
-src/components/           # feature dirs (Editor/, SessionView/, Explorer/, UsagePanel/, MessageBubble/, TrashView/, Settings/) + small flat components, icons.tsx
-src/stores/               # editorGroups, settings, search, selection, providerSnapshots, updater, favorites, toast, theme, usageView
-src/lib/                  # tauri.ts (IPC), tools/, formatters, tree-builders, heatmap, diff, subagent, image-cache, provider-watch
+src/app/                  # shell: App, TitleBar, ActivityBar, StatusBar, keyboard/sync/subagent wiring
+src/features/             # editor/ session/ (incl. MessageBubble + timeline/Markdown) explorer/ search/ usage/ settings/ favorites/ trash/ updater/ — each owns its components, hooks, and store slices
+src/components/           # shared primitives only: ui/ (Base UI via shadcn), dialogs, ContextMenu, ToastContainer, icons.tsx
+src/stores/               # truly global slices: settings, theme, toast, providerSnapshots
+src/lib/                  # pure utilities: tauri.ts (IPC), tools/, formatters, tree-builders, diff, subagent, image-cache, provider-watch, message-content
 src/styles/               # variables.css (theme tokens) + per-feature files (layout, editor, explorer, session, tools, code, messages, modals, search, trash, settings, feedback, images, utilities, usage); cascade order lives in index.css
 ```
 
