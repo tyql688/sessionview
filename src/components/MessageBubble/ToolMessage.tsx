@@ -1,11 +1,4 @@
-import {
-  createSignal,
-  createMemo,
-  createEffect,
-  onCleanup,
-  Show,
-  For,
-} from "solid-js";
+import { useState, useMemo, useEffect } from "react";
 import type { Message } from "../../lib/types";
 import { readToolResultText } from "../../lib/tauri";
 import { buildToolLineDiff, type ToolDiffLine } from "../../lib/diff";
@@ -80,38 +73,37 @@ function subagentButtonLabel(
 
 function DiffRows(props: { lines: ToolDiffLine[] }) {
   return (
-    <div class="msg-tool-line-diff">
-      <For each={props.lines}>
-        {(line) => (
-          <div class={`msg-tool-diff-line ${line.type}`}>
-            <span class="msg-tool-diff-gutter msg-tool-diff-gutter-old">
-              {line.oldLine ?? ""}
-            </span>
-            <span class="msg-tool-diff-gutter msg-tool-diff-gutter-new">
-              {line.newLine ?? ""}
-            </span>
-            <span class="msg-tool-diff-marker">
-              {line.type === "add"
-                ? "+"
-                : line.type === "remove"
-                  ? "-"
-                  : line.type === "skip"
-                    ? "⋯"
-                    : " "}
-            </span>
-            <span class="msg-tool-diff-code">{line.text || " "}</span>
-          </div>
-        )}
-      </For>
+    <div className="msg-tool-line-diff">
+      {props.lines.map((line, i) => (
+        <div className={`msg-tool-diff-line ${line.type}`} key={i}>
+          <span className="msg-tool-diff-gutter msg-tool-diff-gutter-old">
+            {line.oldLine ?? ""}
+          </span>
+          <span className="msg-tool-diff-gutter msg-tool-diff-gutter-new">
+            {line.newLine ?? ""}
+          </span>
+          <span className="msg-tool-diff-marker">
+            {line.type === "add"
+              ? "+"
+              : line.type === "remove"
+                ? "-"
+                : line.type === "skip"
+                  ? "⋯"
+                  : " "}
+          </span>
+          <span className="msg-tool-diff-code">{line.text || " "}</span>
+        </div>
+      ))}
     </div>
   );
 }
 
 function LineDiff(props: { oldText: string; newText: string }) {
-  const lines = createMemo(() =>
-    buildToolLineDiff(props.oldText, props.newText),
+  const lines = useMemo(
+    () => buildToolLineDiff(props.oldText, props.newText),
+    [props.oldText, props.newText],
   );
-  return <DiffRows lines={lines()} />;
+  return <DiffRows lines={lines} />;
 }
 
 export function ToolMessage(props: {
@@ -119,16 +111,14 @@ export function ToolMessage(props: {
   provider?: string;
   parentSessionId?: string;
 }) {
-  const [expanded, setExpanded] = createSignal(false);
-  const [previewImage, setPreviewImage] = createSignal<{
+  const [expanded, setExpanded] = useState(false);
+  const [previewImage, setPreviewImage] = useState<{
     src: string;
     source?: string;
   } | null>(null);
-  const [fullResult, setFullResult] = createSignal<string | null>(null);
-  const [fullResultError, setFullResultError] = createSignal<string | null>(
-    null,
-  );
-  const [loadingFullResult, setLoadingFullResult] = createSignal(false);
+  const [fullResult, setFullResult] = useState<string | null>(null);
+  const [fullResultError, setFullResultError] = useState<string | null>(null);
+  const [loadingFullResult, setLoadingFullResult] = useState(false);
 
   const hasInput = () =>
     !!props.message.tool_input && props.message.tool_input.trim().length > 0;
@@ -137,28 +127,19 @@ export function ToolMessage(props: {
   const hasName = () =>
     !!props.message.tool_name && props.message.tool_name.trim().length > 0;
 
-  if (!hasName()) return null;
-
   // <persisted-output> tag blocks are no longer resolved at parse time
   // (see src-tauri/src/providers/claude/mod.rs comment) so we resolve
   // them here on first render. Cache hits are synchronous; first-time
   // reads briefly show the raw tag block, then swap in the file
   // content once `loadPersistedOutput` completes.
-  const [resolvedReplacements, setResolvedReplacements] = createSignal<
+  const [resolvedReplacements, setResolvedReplacements] = useState<
     Map<string, string>
   >(new Map());
-  createEffect(() => {
+  useEffect(() => {
     const content = props.message.content || "";
     const paths = extractPersistedOutputPaths(content);
     if (paths.length === 0) return;
     let cancelled = false;
-    // Solid does not treat the return value of `createEffect` as a
-    // cleanup; we must register one via `onCleanup` so that re-runs
-    // (e.g., props.message.content change) and unmount drop the
-    // pending setSignal call.
-    onCleanup(() => {
-      cancelled = true;
-    });
     void Promise.all(
       paths.map((path) =>
         loadPersistedOutput(path)
@@ -178,29 +159,36 @@ export function ToolMessage(props: {
         return next;
       });
     });
-  });
-  const resolvedContent = createMemo(() => {
+    return () => {
+      cancelled = true;
+    };
+  }, [props.message.content]);
+  const resolvedContent = useMemo(() => {
     const raw = props.message.content || "";
-    const replacements = resolvedReplacements();
+    const replacements = resolvedReplacements;
     return replacements.size === 0
       ? raw
       : substitutePersistedOutputs(raw, replacements);
-  });
+  }, [props.message.content, resolvedReplacements]);
 
   const name = () => props.message.tool_name || "";
   const metadata = () => props.message.tool_metadata;
   const mcp = () => metadata()?.mcp ?? parseMcpToolName(name());
   const icon = () => toolIcon(name(), metadata());
   const displayName = () => toolDisplayName(name(), metadata());
-  const summary = createMemo(() => toolSummary(props.message));
-  const formatted = createMemo(() => formatToolInput(props.message));
-  const resultMetadata = createMemo(() =>
-    formatToolResultMetadata(props.message.tool_metadata),
+  const summary = useMemo(() => toolSummary(props.message), [props.message]);
+  const formatted = useMemo(
+    () => formatToolInput(props.message),
+    [props.message],
   );
-  const persistedOutputPath = () => resultMetadata()?.persistedOutputPath;
+  const resultMetadata = useMemo(
+    () => formatToolResultMetadata(props.message.tool_metadata),
+    [props.message.tool_metadata],
+  );
+  const persistedOutputPath = () => resultMetadata?.persistedOutputPath;
   const resultHasDiff = () =>
-    !!resultMetadata()?.diff || !!resultMetadata()?.patchDiff;
-  const showInputDetail = () => !!formatted() && !resultHasDiff();
+    !!resultMetadata?.diff || !!resultMetadata?.patchDiff;
+  const showInputDetail = () => !!formatted && !resultHasDiff();
   const isAgent = () => isAgentToolMessage(props.message);
   /** Parsed tool_input/tool_output JSON, memoized so each downstream
    *  extractor reuses the same JSON.parse call. Most tool outputs are
@@ -208,57 +196,74 @@ export function ToolMessage(props: {
    *  shape before calling JSON.parse — otherwise every non-JSON output
    *  spams `SyntaxError: JSON Parse error` into the console. Only a
    *  malformed JSON-looking payload is worth a warn. */
-  const toolInputObj = createMemo<Record<string, unknown> | undefined>(() =>
-    parseToolJsonObject(props.message.tool_input, "tool_input"),
+  const toolInputObj = useMemo<Record<string, unknown> | undefined>(
+    () => parseToolJsonObject(props.message.tool_input, "tool_input"),
+    [props.message.tool_input],
   );
-  const toolOutputObj = createMemo<Record<string, unknown> | undefined>(() =>
-    parseToolJsonObject(props.message.content, "tool output"),
+  const toolOutputObj = useMemo<Record<string, unknown> | undefined>(
+    () => parseToolJsonObject(props.message.content, "tool output"),
+    [props.message.content],
   );
   // Subagent extraction lives in lib/subagent.ts (pure, provider-specific);
   // these memos are thin wrappers gated on the Agent tool name.
-  const agentNickname = createMemo(() =>
-    isAgent() ? extractAgentNickname(toolOutputObj()) : undefined,
+  const agentNickname = useMemo(
+    () => (isAgent() ? extractAgentNickname(toolOutputObj) : undefined),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [props.message, toolOutputObj],
   );
-  const agentDescription = createMemo(() =>
-    isAgent() ? extractAgentDescription(toolInputObj()) : undefined,
+  const agentDescription = useMemo(
+    () => (isAgent() ? extractAgentDescription(toolInputObj) : undefined),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [props.message, toolInputObj],
   );
-  const agentId = createMemo(() =>
-    isAgent()
-      ? extractAgentId(
-          props.message.content,
-          props.message.tool_metadata,
-          toolInputObj(),
-        )
-      : undefined,
+  const agentId = useMemo(
+    () =>
+      isAgent()
+        ? extractAgentId(
+            props.message.content,
+            props.message.tool_metadata,
+            toolInputObj,
+          )
+        : undefined,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [props.message, toolInputObj],
   );
-  const agentChildIds = createMemo<string[] | undefined>(() =>
-    isAgent() ? extractAgentChildIds(props.message.tool_metadata) : undefined,
+  const agentChildIds = useMemo<string[] | undefined>(
+    () =>
+      isAgent() ? extractAgentChildIds(props.message.tool_metadata) : undefined,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [props.message],
   );
-  const agentChildPrompts = createMemo<string[]>(() =>
-    isAgent() ? extractAgentChildPrompts(props.message.tool_metadata) : [],
+  const agentChildPrompts = useMemo<string[]>(
+    () =>
+      isAgent() ? extractAgentChildPrompts(props.message.tool_metadata) : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [props.message],
   );
-  const agentPromptTargets = createMemo<string[]>(() => {
+  const agentPromptTargets = useMemo<string[]>(() => {
     if (
       !isAgent() ||
       props.provider !== "antigravity" ||
       metadata()?.raw_name !== "invoke_subagent" ||
-      agentChildIds()
+      agentChildIds
     ) {
       return [];
     }
-    return agentChildPrompts().filter((prompt) => prompt.trim().length > 0);
-  });
-  const canOpenSingleAgent = createMemo(() => {
+    return agentChildPrompts.filter((prompt) => prompt.trim().length > 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.message, props.provider, agentChildIds, agentChildPrompts]);
+  const canOpenSingleAgent = useMemo(() => {
     if (!isAgent()) return false;
     if (props.provider === "antigravity") {
       return metadata()?.raw_name === "invoke_subagent";
     }
     return true;
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.message, props.provider]);
 
   async function loadFullResult() {
     const path = persistedOutputPath();
-    if (!path || loadingFullResult()) return;
+    if (!path || loadingFullResult) return;
 
     setLoadingFullResult(true);
     setFullResultError(null);
@@ -273,214 +278,194 @@ export function ToolMessage(props: {
 
   const suppressRawOutput = () => {
     const policy = props.message.tool_metadata?.presentation?.rawOutputPolicy;
-    if (policy === "suppress_terminal") return !!resultMetadata();
+    if (policy === "suppress_terminal") return !!resultMetadata;
     if (policy === "suppress_patch_when_diff_present") {
-      return !!resultMetadata() && resultHasDiff();
+      return !!resultMetadata && resultHasDiff();
     }
     if (policy === "keep") return false;
 
     const kind = props.message.tool_metadata?.result_kind;
     return (
-      !!resultMetadata() &&
+      !!resultMetadata &&
       (kind === "terminal_output" || (kind === "file_patch" && resultHasDiff()))
     );
   };
-  const showRawOutput = () => expanded() && hasOutput() && !suppressRawOutput();
-  const outputSegments = createMemo(() =>
-    showRawOutput() ? parseContent(resolvedContent()) : [],
+  const showRawOutput = () => expanded && hasOutput() && !suppressRawOutput();
+  const outputSegments = useMemo(
+    () => (showRawOutput() ? parseContent(resolvedContent) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      expanded,
+      props.message.content,
+      props.message.tool_metadata,
+      resultMetadata,
+      resolvedContent,
+    ],
   );
 
+  if (!hasName()) return null;
+
   return (
-    <div class={`msg-tool${expanded() ? " expanded" : ""}`}>
-      <div class="msg-tool-header" onClick={() => setExpanded(!expanded())}>
-        <span class="msg-tool-icon">{icon()}</span>
-        <span class="msg-tool-name">{displayName()}</span>
-        <Show when={mcp()}>
-          <span class="msg-tool-server">{mcp()!.server}</span>
-        </Show>
-        <Show when={summary()}>
-          <span class="msg-tool-summary">{summary()}</span>
-        </Show>
-        <Show
-          when={
-            isAgent() &&
-            SUBAGENT_FILE_PROVIDERS.has(props.provider ?? "") &&
-            (
-              agentChildIds() ??
-              (agentPromptTargets().length > 0
-                ? agentPromptTargets()
-                : undefined) ??
-              (canOpenSingleAgent() &&
-              (agentNickname() || agentId() || agentDescription())
-                ? [null]
-                : [])
-            ).length > 0
-          }
-        >
-          <Show
-            when={agentChildIds()}
-            fallback={
-              <Show
-                when={agentPromptTargets().length > 0}
-                fallback={
-                  <button
-                    class="msg-tool-subagent-link"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openSubagent(
-                        agentDescription() ?? summary(),
-                        agentNickname(),
-                        agentId(),
-                        props.parentSessionId,
-                      );
-                    }}
-                    title="Open subagent session"
-                  >
-                    ↗ Open
-                  </button>
-                }
-              >
-                <For each={agentPromptTargets()}>
-                  {(prompt, i) => {
-                    const label = () =>
-                      subagentButtonLabel(
-                        prompt,
-                        undefined,
-                        i(),
-                        agentPromptTargets().length,
-                      );
-                    return (
-                      <button
-                        class="msg-tool-subagent-link"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openSubagent(
-                            prompt,
-                            undefined,
-                            undefined,
-                            props.parentSessionId,
-                          );
-                        }}
-                        title={prompt}
-                      >
-                        {label()}
-                      </button>
+    <div className={`msg-tool${expanded ? " expanded" : ""}`}>
+      <div className="msg-tool-header" onClick={() => setExpanded(!expanded)}>
+        <span className="msg-tool-icon">{icon()}</span>
+        <span className="msg-tool-name">{displayName()}</span>
+        {mcp() && <span className="msg-tool-server">{mcp()!.server}</span>}
+        {summary && <span className="msg-tool-summary">{summary}</span>}
+        {isAgent() &&
+          SUBAGENT_FILE_PROVIDERS.has(props.provider ?? "") &&
+          (
+            agentChildIds ??
+            (agentPromptTargets.length > 0 ? agentPromptTargets : undefined) ??
+            (canOpenSingleAgent &&
+            (agentNickname || agentId || agentDescription)
+              ? [null]
+              : [])
+          ).length > 0 &&
+          (agentChildIds ? (
+            agentChildIds.map((childId, i) => {
+              const prompt = agentChildPrompts[i] ?? "";
+              const label = subagentButtonLabel(
+                prompt,
+                childId,
+                i,
+                (agentChildIds ?? []).length,
+              );
+              return (
+                <button
+                  className="msg-tool-subagent-link"
+                  key={childId}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openSubagent(
+                      prompt || agentDescription || summary,
+                      undefined,
+                      childId,
+                      props.parentSessionId,
                     );
                   }}
-                </For>
-              </Show>
-            }
-          >
-            <For each={agentChildIds()!}>
-              {(childId, i) => {
-                const prompt = () => agentChildPrompts()[i()] ?? "";
-                const label = () => {
-                  const ids = agentChildIds() ?? [];
-                  return subagentButtonLabel(
-                    prompt(),
-                    childId,
-                    i(),
-                    ids.length,
-                  );
-                };
-                return (
-                  <button
-                    class="msg-tool-subagent-link"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openSubagent(
-                        prompt() || agentDescription() || summary(),
-                        undefined,
-                        childId,
-                        props.parentSessionId,
-                      );
-                    }}
-                    title={prompt() ? prompt() : `Open subagent ${childId}`}
-                  >
-                    {label()}
-                  </button>
+                  title={prompt ? prompt : `Open subagent ${childId}`}
+                >
+                  {label}
+                </button>
+              );
+            })
+          ) : agentPromptTargets.length > 0 ? (
+            agentPromptTargets.map((prompt, i) => {
+              const label = subagentButtonLabel(
+                prompt,
+                undefined,
+                i,
+                agentPromptTargets.length,
+              );
+              return (
+                <button
+                  className="msg-tool-subagent-link"
+                  key={i}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openSubagent(
+                      prompt,
+                      undefined,
+                      undefined,
+                      props.parentSessionId,
+                    );
+                  }}
+                  title={prompt}
+                >
+                  {label}
+                </button>
+              );
+            })
+          ) : (
+            <button
+              className="msg-tool-subagent-link"
+              onClick={(e) => {
+                e.stopPropagation();
+                openSubagent(
+                  agentDescription ?? summary,
+                  agentNickname,
+                  agentId,
+                  props.parentSessionId,
                 );
               }}
-            </For>
-          </Show>
-        </Show>
-        <Show when={hasInput() || hasOutput() || resultMetadata()}>
-          <span class="tool-expand-indicator">{expanded() ? "▾" : "▸"}</span>
-        </Show>
+              title="Open subagent session"
+            >
+              ↗ Open
+            </button>
+          ))}
+        {(hasInput() || hasOutput() || resultMetadata) && (
+          <span className="tool-expand-indicator">{expanded ? "▾" : "▸"}</span>
+        )}
       </div>
-      <Show when={expanded()}>
-        <Show when={showInputDetail()}>
-          <div class="msg-tool-detail">
-            <For each={formatted()!.lines}>
-              {(line) => (
-                <div class="msg-tool-field">
-                  <span class="msg-tool-field-label">{line.label}</span>
-                  <pre class="msg-tool-field-value">{line.value}</pre>
+      {expanded && (
+        <>
+          {showInputDetail() && (
+            <div className="msg-tool-detail">
+              {formatted!.lines.map((line, i) => (
+                <div className="msg-tool-field" key={i}>
+                  <span className="msg-tool-field-label">{line.label}</span>
+                  <pre className="msg-tool-field-value">{line.value}</pre>
                 </div>
+              ))}
+              {formatted!.diff && (
+                <LineDiff
+                  oldText={formatted!.diff!.old}
+                  newText={formatted!.diff!.new}
+                />
               )}
-            </For>
-            <Show when={formatted()!.diff}>
-              <LineDiff
-                oldText={formatted()!.diff!.old}
-                newText={formatted()!.diff!.new}
-              />
-            </Show>
-            <Show when={formatted()!.patchDiff}>
-              <DiffRows lines={formatted()!.patchDiff!} />
-            </Show>
-          </div>
-        </Show>
-        <Show when={resultMetadata()}>
-          <div class="msg-tool-detail msg-tool-result-detail">
-            <For each={resultMetadata()!.lines}>
-              {(line) => (
-                <div class="msg-tool-field">
-                  <span class="msg-tool-field-label">{line.label}</span>
-                  <pre class="msg-tool-field-value">{line.value}</pre>
+              {formatted!.patchDiff && (
+                <DiffRows lines={formatted!.patchDiff!} />
+              )}
+            </div>
+          )}
+          {resultMetadata && (
+            <div className="msg-tool-detail msg-tool-result-detail">
+              {resultMetadata.lines.map((line, i) => (
+                <div className="msg-tool-field" key={i}>
+                  <span className="msg-tool-field-label">{line.label}</span>
+                  <pre className="msg-tool-field-value">{line.value}</pre>
                 </div>
+              ))}
+              {resultMetadata.diff && (
+                <LineDiff
+                  oldText={resultMetadata.diff.old}
+                  newText={resultMetadata.diff.new}
+                />
               )}
-            </For>
-            <Show when={resultMetadata()!.diff}>
-              <LineDiff
-                oldText={resultMetadata()!.diff!.old}
-                newText={resultMetadata()!.diff!.new}
-              />
-            </Show>
-            <Show when={resultMetadata()!.patchDiff}>
-              <DiffRows lines={resultMetadata()!.patchDiff!} />
-            </Show>
-            <Show when={persistedOutputPath()}>
-              <button
-                class="msg-tool-subagent-link"
-                disabled={loadingFullResult()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void loadFullResult();
-                }}
-                type="button"
-              >
-                {loadingFullResult() ? "Loading..." : "Load full result"}
-              </button>
-            </Show>
-            <Show when={fullResultError()}>
-              <pre class="msg-tool-input">{fullResultError()}</pre>
-            </Show>
-            <Show when={fullResult()}>
-              <pre class="msg-tool-input">{fullResult()}</pre>
-            </Show>
-          </div>
-        </Show>
-        <Show when={!showInputDetail() && !resultHasDiff() && hasInput()}>
-          <pre class="msg-tool-input">{props.message.tool_input!}</pre>
-        </Show>
-        <Show when={showRawOutput()}>
-          <div class="msg-tool-output">
-            <For each={outputSegments()}>
-              {(seg) => {
+              {resultMetadata.patchDiff && (
+                <DiffRows lines={resultMetadata.patchDiff} />
+              )}
+              {persistedOutputPath() && (
+                <button
+                  className="msg-tool-subagent-link"
+                  disabled={loadingFullResult}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void loadFullResult();
+                  }}
+                  type="button"
+                >
+                  {loadingFullResult ? "Loading..." : "Load full result"}
+                </button>
+              )}
+              {fullResultError && (
+                <pre className="msg-tool-input">{fullResultError}</pre>
+              )}
+              {fullResult && <pre className="msg-tool-input">{fullResult}</pre>}
+            </div>
+          )}
+          {!showInputDetail() && !resultHasDiff() && hasInput() && (
+            <pre className="msg-tool-input">{props.message.tool_input!}</pre>
+          )}
+          {showRawOutput() && (
+            <div className="msg-tool-output">
+              {outputSegments.map((seg, i) => {
                 if (seg.type === "image") {
                   if (isLocalPath(seg.content)) {
                     return (
                       <LocalImage
+                        key={i}
                         path={seg.content}
                         onPreview={(src, source) =>
                           setPreviewImage({ src, source })
@@ -490,6 +475,7 @@ export function ToolMessage(props: {
                   }
                   return (
                     <RemoteImage
+                      key={i}
                       src={seg.content}
                       onPreview={(src, source) =>
                         setPreviewImage({ src, source })
@@ -497,19 +483,19 @@ export function ToolMessage(props: {
                     />
                   );
                 }
-                return <pre>{seg.content}</pre>;
-              }}
-            </For>
-          </div>
-        </Show>
-      </Show>
-      <Show when={previewImage()}>
+                return <pre key={i}>{seg.content}</pre>;
+              })}
+            </div>
+          )}
+        </>
+      )}
+      {previewImage && (
         <ImagePreview
-          src={previewImage()!.src}
-          source={previewImage()!.source}
+          src={previewImage.src}
+          source={previewImage.source}
           onClose={() => setPreviewImage(null)}
         />
-      </Show>
+      )}
     </div>
   );
 }

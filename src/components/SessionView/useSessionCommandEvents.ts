@@ -1,12 +1,11 @@
-import { onCleanup, onMount } from "solid-js";
-import type { Accessor } from "solid-js";
+import { useEffect, useRef } from "react";
 import {
   SESSION_COMMAND_EVENTS,
   type SessionCommandEvent,
 } from "../../lib/session-command-events";
 
 export interface UseSessionCommandEventsOptions {
-  active: Accessor<boolean>;
+  active: boolean;
   onResume: () => void;
   onExport: () => void;
   onFavorite: () => void;
@@ -18,31 +17,51 @@ export interface UseSessionCommandEventsOptions {
 export function useSessionCommandEvents(
   opts: UseSessionCommandEventsOptions,
 ): void {
-  const runIfActive = (callback: () => void) => {
-    if (opts.active()) callback();
-  };
+  // Latest-value ref so the once-mounted document listeners read the current
+  // `active` flag + callbacks (Solid read `opts.*` fresh at event time).
+  const optsRef = useRef(opts);
+  optsRef.current = opts;
 
-  const handlers: Array<[SessionCommandEvent, EventListener]> = [
-    [SESSION_COMMAND_EVENTS.resume, () => runIfActive(opts.onResume)],
-    [SESSION_COMMAND_EVENTS.exportSession, () => runIfActive(opts.onExport)],
-    [SESSION_COMMAND_EVENTS.favorite, () => runIfActive(opts.onFavorite)],
-    [SESSION_COMMAND_EVENTS.watch, () => runIfActive(opts.onWatch)],
-    [SESSION_COMMAND_EVENTS.delete, () => runIfActive(opts.onDelete)],
-    [
-      SESSION_COMMAND_EVENTS.sessionSearch,
-      () => runIfActive(opts.onSessionSearch),
-    ],
-  ];
+  useEffect(() => {
+    const runIfActive = (callback: () => void) => {
+      if (optsRef.current.active) callback();
+    };
 
-  onMount(() => {
+    const handlers: Array<[SessionCommandEvent, EventListener]> = [
+      [
+        SESSION_COMMAND_EVENTS.resume,
+        () => runIfActive(optsRef.current.onResume),
+      ],
+      [
+        SESSION_COMMAND_EVENTS.exportSession,
+        () => runIfActive(optsRef.current.onExport),
+      ],
+      [
+        SESSION_COMMAND_EVENTS.favorite,
+        () => runIfActive(optsRef.current.onFavorite),
+      ],
+      [
+        SESSION_COMMAND_EVENTS.watch,
+        () => runIfActive(optsRef.current.onWatch),
+      ],
+      [
+        SESSION_COMMAND_EVENTS.delete,
+        () => runIfActive(optsRef.current.onDelete),
+      ],
+      [
+        SESSION_COMMAND_EVENTS.sessionSearch,
+        () => runIfActive(optsRef.current.onSessionSearch),
+      ],
+    ];
+
     for (const [eventName, handler] of handlers) {
       document.addEventListener(eventName, handler);
     }
-  });
 
-  onCleanup(() => {
-    for (const [eventName, handler] of handlers) {
-      document.removeEventListener(eventName, handler);
-    }
-  });
+    return () => {
+      for (const [eventName, handler] of handlers) {
+        document.removeEventListener(eventName, handler);
+      }
+    };
+  }, []);
 }

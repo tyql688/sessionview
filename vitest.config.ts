@@ -11,10 +11,6 @@ export default defineConfig({
           name: "unit",
           environment: "node",
           include: ["src/**/*.test.ts"],
-          // MIGRATION: un-ported logic tests that transitively import Solid
-          // rendering code. Removed as each phase ports the module. See
-          // MIGRATION.md.
-          exclude: ["src/components/MessageBubble/MarkdownRenderer.test.ts"],
         },
       },
       {

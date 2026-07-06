@@ -1,5 +1,4 @@
-import { createEffect, createSignal, on } from "solid-js";
-import type { Accessor } from "solid-js";
+import { useEffect, useState } from "react";
 import {
   invokeWithFallback,
   isFavorite,
@@ -7,10 +6,13 @@ import {
 } from "../../lib/tauri";
 import { useI18n } from "../../i18n/index";
 import { toast, toastError } from "../../stores/toast";
-import { bumpFavoriteVersion, favoriteVersion } from "../../stores/favorites";
+import {
+  bumpFavoriteVersion,
+  useFavoriteVersion,
+} from "../../stores/favorites";
 
 export interface UseFavoriteSyncResult {
-  starred: Accessor<boolean | null>;
+  starred: boolean | null;
   toggleFavorite: () => Promise<void>;
 }
 
@@ -20,30 +22,30 @@ export interface UseFavoriteSyncResult {
  * session). Returns a `toggleFavorite` handler that flips state, bumps the
  * version, and surfaces a toast.
  */
-export function useFavoriteSync(
-  sessionId: Accessor<string>,
-): UseFavoriteSyncResult {
+export function useFavoriteSync(sessionId: string): UseFavoriteSyncResult {
   const { t } = useI18n();
-  const [starred, setStarred] = createSignal<boolean | null>(null);
+  const [starred, setStarred] = useState<boolean | null>(null);
+  const favoriteVersion = useFavoriteVersion();
 
-  createEffect(
-    on(
-      () => favoriteVersion(),
-      async () => {
-        const id = sessionId();
-        const fav = await invokeWithFallback(
-          isFavorite(id),
-          starred(),
-          `refresh favorite state for session ${id}`,
-        );
-        setStarred(fav);
-      },
-    ),
-  );
+  useEffect(() => {
+    void (async () => {
+      const id = sessionId;
+      const fav = await invokeWithFallback(
+        isFavorite(id),
+        starred,
+        `refresh favorite state for session ${id}`,
+      );
+      setStarred(fav);
+    })();
+    // Mirrors Solid `on(() => favoriteVersion(), ...)`: re-check only when the
+    // version bumps. `sessionId`/`starred` are read but intentionally not deps
+    // (SessionView remounts on session id change).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [favoriteVersion]);
 
   const toggleFavorite = async () => {
     try {
-      const newState = await invokeToggleFavorite(sessionId());
+      const newState = await invokeToggleFavorite(sessionId);
       setStarred(newState);
       bumpFavoriteVersion();
       toast(t(newState ? "toast.favoriteAdded" : "toast.favoriteRemoved"));

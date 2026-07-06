@@ -1,5 +1,6 @@
-import { createMemo, createSignal } from "solid-js";
-import type { Accessor, Setter } from "solid-js";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
+import { flushSync } from "react-dom";
 import { getSessionMessagesWindow, isLoadCanceledError } from "../../lib/tauri";
 import type { Message, SessionMeta, TokenTotals } from "../../lib/types";
 import type { ProcessedEntry } from "./hooks";
@@ -13,15 +14,15 @@ const TAIL_BATCH = 600;
 
 export interface CreateSessionPaginationOptions {
   /** Current session id (guards stale async results). */
-  sessionId: Accessor<string>;
+  sessionId: string;
   /** Role-filtered entries the render window slices over. */
-  filteredEntries: Accessor<ProcessedEntry[]>;
+  filteredEntries: ProcessedEntry[];
   /** Loaded messages (read by `hasMore`). */
-  messages: Accessor<Message[]>;
+  messages: Message[];
   /** Lazy ref getter — the messages container may not exist yet. */
   getMessagesRef: () => HTMLDivElement | undefined;
-  setMessages: Setter<Message[]>;
-  setMeta: Setter<SessionMeta>;
+  setMessages: Dispatch<SetStateAction<Message[]>>;
+  setMeta: Dispatch<SetStateAction<SessionMeta>>;
   /** Apply fresh token totals onto a meta object. */
   withTokenTotals: (metaData: SessionMeta, totals: TokenTotals) => SessionMeta;
   /** Register the older-load debounce timer for cleanup by the component. */
@@ -29,14 +30,14 @@ export interface CreateSessionPaginationOptions {
 }
 
 export interface CreateSessionPaginationResult {
-  visibleCount: Accessor<number>;
-  setVisibleCount: Setter<number>;
-  windowStart: Accessor<number>;
-  setWindowStart: Setter<number>;
-  totalMessages: Accessor<number>;
-  setTotalMessages: Setter<number>;
-  visibleEntries: Accessor<ProcessedEntry[]>;
-  hasMore: Accessor<boolean>;
+  visibleCount: number;
+  setVisibleCount: Dispatch<SetStateAction<number>>;
+  windowStart: number;
+  setWindowStart: Dispatch<SetStateAction<number>>;
+  totalMessages: number;
+  setTotalMessages: Dispatch<SetStateAction<number>>;
+  visibleEntries: ProcessedEntry[];
+  hasMore: boolean;
   loadOlderEntries: () => void;
   resolveCompleteSearchMatch: (term: string) => Promise<number | null>;
   revealEntry: (entryIndex: number) => void;
@@ -54,74 +55,117 @@ export interface CreateSessionPaginationResult {
  * The `messages`/`meta` signals stay owned by the component (the initial load
  * and live-watch reload write them too); their setters + `withTokenTotals` are
  * threaded in so `loadOlderTail` can prepend without owning those signals.
+ *
+ * Now a React hook: call it at the top level of a component. The async
+ * callbacks below read the current `filteredEntries`/`sessionId`/window state
+ * through latest-value refs (React re-renders don't reach a closure created in
+ * an earlier render). The three prepend paths that read `filteredEntries`
+ * immediately after `setMessages` wrap the writes in `flushSync`, replacing
+ * Solid's synchronous memo recompute so the post-prepend lookup sees the newly
+ * loaded entries.
  */
-export function createSessionPagination(
+export function useSessionPagination(
   opts: CreateSessionPaginationOptions,
 ): CreateSessionPaginationResult {
-  const [visibleCount, setVisibleCount] = createSignal(BATCH_SIZE);
+  const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
 
   // Reversed for column-reverse layout: newest first in DOM = visually at bottom.
-  const visibleEntries = createMemo(() => {
-    const all = opts.filteredEntries();
-    const count = visibleCount();
+  const visibleEntries = useMemo(() => {
+    const all = opts.filteredEntries;
+    const count = visibleCount;
     const start = count >= all.length ? 0 : all.length - count;
     return all.slice(start).reverse();
-  });
+  }, [opts.filteredEntries, visibleCount]);
   // Streaming pagination state — declared before `hasMore` since it's
   // read inside that memo.
-  const [totalMessages, setTotalMessages] = createSignal(0);
-  const [windowStart, setWindowStart] = createSignal(0);
+  const [totalMessages, setTotalMessages] = useState(0);
+  const [windowStart, setWindowStart] = useState(0);
 
   // We have more to render if either the in-memory window has unrendered
   // entries OR the backend still holds older messages we haven't fetched.
-  const hasMore = createMemo(
+  const hasMore = useMemo(
     () =>
-      visibleCount() < opts.filteredEntries().length ||
-      (windowStart() > 0 && opts.messages().length < totalMessages()),
+      visibleCount < opts.filteredEntries.length ||
+      (windowStart > 0 && opts.messages.length < totalMessages),
+    [
+      visibleCount,
+      opts.filteredEntries,
+      windowStart,
+      opts.messages,
+      totalMessages,
+    ],
   );
 
-  let loadOlderDebounce: ReturnType<typeof setTimeout> | undefined;
-  let olderFetchInFlight = false;
-  opts.registerDebounce(() => clearTimeout(loadOlderDebounce));
+  // Latest-value refs so the async/scroll callbacks below read the current
+  // reactive values (matching Solid's accessor reads) even across awaits and
+  // re-renders, instead of a value captured when the closure was created.
+  const filteredEntriesRef = useRef(opts.filteredEntries);
+  filteredEntriesRef.current = opts.filteredEntries;
+  const sessionIdRef = useRef(opts.sessionId);
+  sessionIdRef.current = opts.sessionId;
+  const visibleCountRef = useRef(visibleCount);
+  visibleCountRef.current = visibleCount;
+  const windowStartRef = useRef(windowStart);
+  windowStartRef.current = windowStart;
+  const totalMessagesRef = useRef(totalMessages);
+  totalMessagesRef.current = totalMessages;
+  const hasMoreRef = useRef(hasMore);
+  hasMoreRef.current = hasMore;
+
+  const loadOlderDebounceRef = useRef<
+    ReturnType<typeof setTimeout> | undefined
+  >(undefined);
+  const olderFetchInFlightRef = useRef(false);
+  useEffect(() => {
+    opts.registerDebounce(() => clearTimeout(loadOlderDebounceRef.current));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function revealEntry(entryIndex: number) {
-    const total = opts.filteredEntries().length;
+    const total = filteredEntriesRef.current.length;
     if (entryIndex < 0 || entryIndex >= total) return;
     const requiredCount = total - entryIndex;
-    if (requiredCount > visibleCount()) {
+    if (requiredCount > visibleCountRef.current) {
       setVisibleCount(requiredCount);
     }
   }
 
   async function revealMessageIndex(messageIndex: number): Promise<boolean> {
-    if (messageIndex < 0 || messageIndex >= totalMessages()) return false;
+    if (messageIndex < 0 || messageIndex >= totalMessagesRef.current)
+      return false;
 
-    if (messageIndex < windowStart()) {
-      if (olderFetchInFlight) return false;
-      const sessionId = opts.sessionId();
-      olderFetchInFlight = true;
+    if (messageIndex < windowStartRef.current) {
+      if (olderFetchInFlightRef.current) return false;
+      const sessionId = sessionIdRef.current;
+      olderFetchInFlightRef.current = true;
       try {
-        const span = windowStart() - messageIndex;
+        const span = windowStartRef.current - messageIndex;
         const older = await getSessionMessagesWindow(
           sessionId,
           messageIndex,
           span,
         );
-        if (sessionId !== opts.sessionId()) return false;
-        opts.setMeta((prev) => opts.withTokenTotals(prev, older.token_totals));
-        opts.setMessages((prev) => [...older.messages, ...prev]);
-        setWindowStart(older.start);
-        setTotalMessages(older.total);
+        if (sessionId !== sessionIdRef.current) return false;
+        // flushSync so `filteredEntriesRef` reflects the prepend synchronously
+        // before the entry lookup below (Solid recomputed the memo inline).
+        flushSync(() => {
+          opts.setMeta((prev) =>
+            opts.withTokenTotals(prev, older.token_totals),
+          );
+          opts.setMessages((prev) => [...older.messages, ...prev]);
+          setWindowStart(older.start);
+          setTotalMessages(older.total);
+        });
       } catch (e) {
         if (isLoadCanceledError(e)) return false;
         console.warn("reveal message failed:", e);
         return false;
       } finally {
-        olderFetchInFlight = false;
+        olderFetchInFlightRef.current = false;
       }
     }
 
-    const entryIndex = opts.filteredEntries().findIndex((entry) => {
+    const entryIndex = filteredEntriesRef.current.findIndex((entry) => {
       if (entry.type !== "message") return false;
       return entry.messageIndex === messageIndex;
     });
@@ -156,15 +200,16 @@ export function createSessionPagination(
     revealLoadedEntries: boolean;
     pinScroll: boolean;
   }): Promise<boolean> {
-    if (olderFetchInFlight || windowStart() <= 0) return false;
-    const sessionId = opts.sessionId();
-    olderFetchInFlight = true;
-    const newStart = Math.max(0, windowStart() - TAIL_BATCH);
-    const span = windowStart() - newStart;
+    if (olderFetchInFlightRef.current || windowStartRef.current <= 0)
+      return false;
+    const sessionId = sessionIdRef.current;
+    olderFetchInFlightRef.current = true;
+    const newStart = Math.max(0, windowStartRef.current - TAIL_BATCH);
+    const span = windowStartRef.current - newStart;
     const scrollBefore = opts.getMessagesRef()?.scrollTop ?? 0;
     try {
       const older = await getSessionMessagesWindow(sessionId, newStart, span);
-      if (sessionId !== opts.sessionId()) return false;
+      if (sessionId !== sessionIdRef.current) return false;
       opts.setMeta((prev) => opts.withTokenTotals(prev, older.token_totals));
       // Prepend the newly fetched older messages and grow `visibleCount`
       // by the same amount so the just-fetched entries actually become
@@ -186,47 +231,51 @@ export function createSessionPagination(
       console.warn("load older messages failed:", e);
       return false;
     } finally {
-      olderFetchInFlight = false;
+      olderFetchInFlightRef.current = false;
     }
   }
 
   async function loadAllOlderEntriesForSearch(): Promise<boolean> {
-    if (olderFetchInFlight) return false;
-    const start = windowStart();
+    if (olderFetchInFlightRef.current) return false;
+    const start = windowStartRef.current;
     if (start <= 0) return true;
 
-    const sessionId = opts.sessionId();
-    olderFetchInFlight = true;
+    const sessionId = sessionIdRef.current;
+    olderFetchInFlightRef.current = true;
     try {
       const older = await getSessionMessagesWindow(sessionId, 0, start);
-      if (sessionId !== opts.sessionId()) return false;
-      opts.setMeta((prev) => opts.withTokenTotals(prev, older.token_totals));
-      opts.setMessages((prev) => [...older.messages, ...prev]);
-      setWindowStart(older.start);
-      setTotalMessages(older.total);
+      if (sessionId !== sessionIdRef.current) return false;
+      // flushSync so `filteredEntriesRef` reflects the prepend synchronously
+      // before `resolveCompleteSearchMatch` scans it (Solid recomputed inline).
+      flushSync(() => {
+        opts.setMeta((prev) => opts.withTokenTotals(prev, older.token_totals));
+        opts.setMessages((prev) => [...older.messages, ...prev]);
+        setWindowStart(older.start);
+        setTotalMessages(older.total);
+      });
       return older.start === 0;
     } catch (e) {
       if (isLoadCanceledError(e)) return false;
       console.warn("load complete session for search failed:", e);
       return false;
     } finally {
-      olderFetchInFlight = false;
+      olderFetchInFlightRef.current = false;
     }
   }
 
   function loadOlderEntries() {
     const messagesRef = opts.getMessagesRef();
-    if (!messagesRef || !hasMore()) return;
+    if (!messagesRef || !hasMoreRef.current) return;
     // column-reverse: older entries append at the end of the DOM (visual top).
     // First exhaust the in-memory window via visibleCount, then page in
     // older messages from the backend cache.
-    if (visibleCount() < opts.filteredEntries().length) {
+    if (visibleCountRef.current < filteredEntriesRef.current.length) {
       const scrollBefore = messagesRef.scrollTop;
       setVisibleCount((count) => count + BATCH_SIZE);
       pinScrollAfterPrepend(scrollBefore);
       return;
     }
-    if (windowStart() > 0) {
+    if (windowStartRef.current > 0) {
       void loadOlderTail({ revealLoadedEntries: true, pinScroll: true });
     }
   }
@@ -234,13 +283,13 @@ export function createSessionPagination(
   async function resolveCompleteSearchMatch(
     term: string,
   ): Promise<number | null> {
-    if (windowStart() > 0) {
+    if (windowStartRef.current > 0) {
       const loadedCompleteWindow = await loadAllOlderEntriesForSearch();
       if (!loadedCompleteWindow) return null;
     }
 
     const matchIndex = findFirstMatchingEntryIndex(
-      opts.filteredEntries(),
+      filteredEntriesRef.current,
       term,
     );
     return matchIndex >= 0 ? matchIndex : null;
@@ -248,7 +297,7 @@ export function createSessionPagination(
 
   function handleMessagesScroll(e: Event) {
     const target = e.currentTarget as HTMLDivElement;
-    clearTimeout(loadOlderDebounce);
+    clearTimeout(loadOlderDebounceRef.current);
 
     // column-reverse: scrollTop=0 is bottom (newest). User scrolls up -> scrollTop
     // goes negative. We want to load more when user reaches the visual top.
@@ -258,7 +307,7 @@ export function createSessionPagination(
       LOAD_MORE_THRESHOLD;
 
     if (atVisualTop) {
-      loadOlderDebounce = setTimeout(() => {
+      loadOlderDebounceRef.current = setTimeout(() => {
         const messagesRef = opts.getMessagesRef();
         if (!messagesRef) return;
         const stillAtTop =

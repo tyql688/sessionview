@@ -1,4 +1,4 @@
-import { createSignal, createMemo, Show, createUniqueId } from "solid-js";
+import { useState, useMemo, useId } from "react";
 import type { Message, Provider } from "../../lib/types";
 import { ProviderIcon, UserIcon } from "../icons";
 import { useI18n } from "../../i18n/index";
@@ -75,15 +75,15 @@ function SystemMessage(props: { content: string }) {
     const config = SYSTEM_SUBTYPE_CONFIG[match[1]];
     if (config) {
       return (
-        <div class={`msg-system msg-system-tag ${config.cls}`}>
-          <span class="sys-icon">{config.icon}</span>
-          <span class="sys-label">{t(config.labelKey)}</span>
-          <span class="sys-detail">{match[2]}</span>
+        <div className={`msg-system msg-system-tag ${config.cls}`}>
+          <span className="sys-icon">{config.icon}</span>
+          <span className="sys-label">{t(config.labelKey)}</span>
+          <span className="sys-detail">{match[2]}</span>
         </div>
       );
     }
   }
-  return <div class="msg-system">{props.content}</div>;
+  return <div className="msg-system">{props.content}</div>;
 }
 
 export function MessageBubble(props: {
@@ -92,8 +92,8 @@ export function MessageBubble(props: {
   parentSessionId?: string;
   highlightTerm?: string;
 }) {
-  const footnotePrefix = createUniqueId();
-  const [previewImage, setPreviewImage] = createSignal<{
+  const footnotePrefix = useId();
+  const [previewImage, setPreviewImage] = useState<{
     src: string;
     source?: string;
   } | null>(null);
@@ -139,13 +139,14 @@ export function MessageBubble(props: {
     ((props.message.role === "user" || props.message.role === "assistant") &&
       hasLegacyLocalCommandPrefix());
 
-  const displayContent = createMemo(() => {
+  const displayContent = useMemo(() => {
     if (!hasLegacyLocalCommandPrefix()) return props.message.content;
     return props.message.content
       .trimStart()
       .slice(LEGACY_LOCAL_COMMAND_PREFIX.length)
       .trimStart();
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.message.content]);
 
   const rendersMarkdown = () =>
     props.message.role !== "tool" &&
@@ -153,113 +154,106 @@ export function MessageBubble(props: {
     !isEmpty() &&
     !isSystemContent();
 
-  const copyText = createMemo(() =>
-    rendersMarkdown() ? sanitizeMessageForClipboard(displayContent()) : "",
+  const copyText = useMemo(
+    () =>
+      rendersMarkdown() ? sanitizeMessageForClipboard(displayContent) : "",
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [props.message, displayContent],
   );
   // Split the markdown parse (expensive, content-only) from the render
   // (highlight-dependent). Keying the parse on content alone means committing a
   // new in-session Cmd+F query re-renders highlights without re-parsing the AST
   // of every visible bubble — the prior jank source.
-  const parsedMarkdown = createMemo(() => {
+  const parsedMarkdown = useMemo(() => {
     if (!rendersMarkdown()) return null;
-    return parseMarkdownDocument(displayContent());
-  });
-  const markdownContent = createMemo(() => {
-    const parsed = parsedMarkdown();
+    return parseMarkdownDocument(displayContent);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.message, displayContent]);
+  const markdownContent = useMemo(() => {
+    const parsed = parsedMarkdown;
     if (!parsed) return null;
     return renderParsedMarkdown(parsed, {
       footnotePrefix,
       highlightTerm: props.highlightTerm,
       onPreview: (src, source) => setPreviewImage({ src, source }),
     });
-  });
-  const msgTs = createMemo(() => {
+  }, [parsedMarkdown, props.highlightTerm, footnotePrefix]);
+  const msgTs = useMemo(() => {
     const ts = props.message.timestamp;
     if (!ts) return null;
     const ms = parseTimestamp(ts);
     if (!ms) return null;
     const d = new Date(ms);
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  });
+  }, [props.message.timestamp]);
 
   if (isEmpty() || isSystemContent()) return null;
 
   return (
     <>
-      <Show
-        when={props.message.role !== "tool"}
-        fallback={
-          <ToolMessage
-            message={props.message}
-            provider={props.provider}
-            parentSessionId={props.parentSessionId}
-          />
-        }
-      >
-        <Show
-          when={props.message.role !== "system"}
-          fallback={
-            props.message.content.startsWith("[thinking]\n") ? (
-              <ThinkingBlock
-                content={props.message.content.slice("[thinking]\n".length)}
-              />
-            ) : (
-              <SystemMessage content={props.message.content} />
-            )
-          }
-        >
-          <div class={`msg-row msg-row-${props.message.role}`}>
-            <div
-              class={`msg-avatar msg-avatar-${props.message.role}${props.message.role === "assistant" ? ` ${props.provider ?? "claude"}` : ""}`}
-            >
-              <Show
-                when={props.message.role === "user"}
-                fallback={
-                  <ProviderIcon provider={props.provider ?? "claude"} />
-                }
+      {props.message.role !== "tool" ? (
+        props.message.role !== "system" ? (
+          <>
+            <div className={`msg-row msg-row-${props.message.role}`}>
+              <div
+                className={`msg-avatar msg-avatar-${props.message.role}${props.message.role === "assistant" ? ` ${props.provider ?? "claude"}` : ""}`}
               >
-                <UserIcon />
-              </Show>
+                {props.message.role === "user" ? (
+                  <UserIcon />
+                ) : (
+                  <ProviderIcon provider={props.provider ?? "claude"} />
+                )}
+              </div>
+              <div
+                className={`msg-bubble msg-bubble-${props.message.role}${isCommandMessage() ? " msg-bubble-command" : ""}`}
+              >
+                {markdownContent}
+                <CopyMessageButton
+                  content={displayContent}
+                  copyText={copyText}
+                />
+                {msgTs && (
+                  <div className="msg-bubble-footer">
+                    <span className="msg-bubble-ts">{msgTs}</span>
+                  </div>
+                )}
+              </div>
             </div>
-            <div
-              class={`msg-bubble msg-bubble-${props.message.role}${isCommandMessage() ? " msg-bubble-command" : ""}`}
-            >
-              {markdownContent()}
-              <CopyMessageButton
-                content={displayContent()}
-                copyText={copyText()}
-              />
-              <Show when={msgTs()}>
-                <div class="msg-bubble-footer">
-                  <span class="msg-bubble-ts">{msgTs()}</span>
+            {props.message.role === "assistant" &&
+              (props.message.token_usage || props.message.model) && (
+                <div className="msg-token-row">
+                  {props.message.model && (
+                    <span className="msg-model-label">
+                      {props.message.model}
+                    </span>
+                  )}
+                  {props.message.token_usage && (
+                    <TokenUsageDisplay usage={props.message.token_usage!} />
+                  )}
                 </div>
-              </Show>
-            </div>
-          </div>
-          <Show
-            when={
-              props.message.role === "assistant" &&
-              (props.message.token_usage || props.message.model)
-            }
-          >
-            <div class="msg-token-row">
-              <Show when={props.message.model}>
-                <span class="msg-model-label">{props.message.model}</span>
-              </Show>
-              <Show when={props.message.token_usage}>
-                <TokenUsageDisplay usage={props.message.token_usage!} />
-              </Show>
-            </div>
-          </Show>
-        </Show>
-      </Show>
-      <Show when={previewImage()}>
+              )}
+          </>
+        ) : props.message.content.startsWith("[thinking]\n") ? (
+          <ThinkingBlock
+            content={props.message.content.slice("[thinking]\n".length)}
+          />
+        ) : (
+          <SystemMessage content={props.message.content} />
+        )
+      ) : (
+        <ToolMessage
+          message={props.message}
+          provider={props.provider}
+          parentSessionId={props.parentSessionId}
+        />
+      )}
+      {previewImage && (
         <ImagePreview
-          src={previewImage()!.src}
-          source={previewImage()!.source}
+          src={previewImage.src}
+          source={previewImage.source}
           onClose={() => setPreviewImage(null)}
         />
-      </Show>
+      )}
     </>
   );
 }

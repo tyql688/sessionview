@@ -1,4 +1,4 @@
-import { createSignal, createMemo, Show, For } from "solid-js";
+import { useState, useMemo } from "react";
 import type { Message, Provider } from "../lib/types";
 import { toolDisplayName, toolIcon } from "../lib/tools";
 import { MessageBubble } from "./MessageBubble";
@@ -10,8 +10,8 @@ export function MergedToolRow(props: {
   parentSessionId?: string;
   highlightTerm?: string;
 }) {
-  const [manualExpanded, setManualExpanded] = createSignal(false);
-  const searchMatchesGroup = createMemo(() => {
+  const [manualExpanded, setManualExpanded] = useState(false);
+  const searchMatchesGroup = useMemo(() => {
     const term = (props.highlightTerm ?? "").trim().toLocaleLowerCase();
     if (!term) return false;
     return props.messages.some((message) =>
@@ -19,10 +19,10 @@ export function MergedToolRow(props: {
         .filter((value): value is string => !!value)
         .some((value) => value.toLocaleLowerCase().includes(term)),
     );
-  });
-  const expanded = () => manualExpanded() || searchMatchesGroup();
+  }, [props.highlightTerm, props.messages]);
+  const expanded = manualExpanded || searchMatchesGroup;
 
-  const label = () =>
+  const label =
     props.tools.length > 0
       ? props.tools
           .map((toolName, index) => {
@@ -36,30 +36,29 @@ export function MergedToolRow(props: {
       : "tools";
 
   return (
-    <div class="merged-tools">
+    <div className="merged-tools">
       <div
-        class="merged-tools-header"
+        className="merged-tools-header"
         onClick={() => setManualExpanded((v) => !v)}
       >
-        <span class="merged-tools-label">{label()}</span>
-        <span class="merged-tools-chevron">
-          {expanded() ? "\u25BE" : "\u25B8"}
+        <span className="merged-tools-label">{label}</span>
+        <span className="merged-tools-chevron">
+          {expanded ? "\u25BE" : "\u25B8"}
         </span>
       </div>
-      <Show when={expanded()}>
-        <div class="merged-tools-body">
-          <For each={props.messages}>
-            {(msg) => (
-              <MessageBubble
-                message={msg}
-                provider={props.provider}
-                parentSessionId={props.parentSessionId}
-                highlightTerm={props.highlightTerm}
-              />
-            )}
-          </For>
+      {expanded && (
+        <div className="merged-tools-body">
+          {props.messages.map((msg, i) => (
+            <MessageBubble
+              key={i}
+              message={msg}
+              provider={props.provider}
+              parentSessionId={props.parentSessionId}
+              highlightTerm={props.highlightTerm}
+            />
+          ))}
         </div>
-      </Show>
+      )}
     </div>
   );
 }

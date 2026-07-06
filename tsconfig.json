@@ -25,11 +25,16 @@
     "src/components/icons.tsx",
     "src/components/CodeBlock.tsx",
     "src/components/MermaidBlock.tsx",
-    "src/components/MessageBubble/markdown",
-    "src/components/MessageBubble/MarkdownRenderer.tsx",
-    "src/components/MessageBubble/ImagePreview.tsx",
-    "src/components/MessageBubble/TokenUsage.tsx",
-    "src/components/MessageBubble/ThinkingBlock.tsx"
+    "src/components/MergedToolRow.tsx",
+    "src/components/MessageBubble",
+    "src/components/SessionView/hooks.ts",
+    "src/components/SessionView/search-utils.ts",
+    "src/components/SessionView/createRoleFilter.ts",
+    "src/components/SessionView/useLiveWatch.ts",
+    "src/components/SessionView/createSessionPagination.ts",
+    "src/components/SessionView/createSessionSearch.ts",
+    "src/components/SessionView/useFavoriteSync.ts",
+    "src/components/SessionView/useSessionCommandEvents.ts"
   ],
   "exclude": ["**/*.test.ts", "**/*.test.tsx"]
 }

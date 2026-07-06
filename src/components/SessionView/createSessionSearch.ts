@@ -1,8 +1,8 @@
-import { createEffect, createSignal, on } from "solid-js";
-import type { Accessor, Setter } from "solid-js";
+import { useEffect, useRef, useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import {
-  pendingSessionSearch,
   setPendingSessionSearch,
+  usePendingSessionSearch,
 } from "../../stores/search";
 import type { ProcessedEntry } from "./hooks";
 import {
@@ -12,13 +12,13 @@ import {
 
 export interface CreateSessionSearchOptions {
   /** Role-filtered entries the search runs against. */
-  filteredEntries: Accessor<ProcessedEntry[]>;
+  filteredEntries: ProcessedEntry[];
   /** Lazy ref getter — the messages container may not exist yet. */
   getMessagesRef: () => HTMLDivElement | undefined;
   /** Whether the session is still loading (gates the pending-search effect). */
-  loading: Accessor<boolean>;
+  loading: boolean;
   /** The current session id (matched against a pending global search). */
-  sessionId: Accessor<string>;
+  sessionId: string;
   /** Load the complete searchable window and return the first matching entry. */
   resolveCompleteSearchMatch: (term: string) => Promise<number | null>;
   /** Expand the normal render window until the matched entry is present. */
@@ -28,13 +28,13 @@ export interface CreateSessionSearchOptions {
 }
 
 export interface CreateSessionSearchResult {
-  sessionSearch: Accessor<string>;
-  setSessionSearch: Setter<string>;
-  activeSessionSearch: Accessor<string>;
-  searchBarOpen: Accessor<boolean>;
-  setSearchBarOpen: Setter<boolean>;
-  searchMatchIdx: Accessor<number>;
-  setSearchMatchIdx: Setter<number>;
+  sessionSearch: string;
+  setSessionSearch: Dispatch<SetStateAction<string>>;
+  activeSessionSearch: string;
+  searchBarOpen: boolean;
+  setSearchBarOpen: Dispatch<SetStateAction<boolean>>;
+  searchMatchIdx: number;
+  setSearchMatchIdx: Dispatch<SetStateAction<number>>;
 }
 
 /**
@@ -46,19 +46,35 @@ export interface CreateSessionSearchResult {
  *
  * The debounce timer is owned here but its cleanup is registered back with the
  * component via `registerDebounce` so onCleanup stays in one place.
+ *
+ * Now a React hook: call it at the top level of a component. Latest-value refs
+ * back `sessionSearch`/`filteredEntries` so the debounced/awaited callbacks read
+ * current values rather than a stale closure capture.
  */
-export function createSessionSearch(
+export function useSessionSearch(
   opts: CreateSessionSearchOptions,
 ): CreateSessionSearchResult {
-  const [sessionSearch, setSessionSearch] = createSignal("");
-  const [activeSessionSearch, setActiveSessionSearch] = createSignal("");
-  const [searchBarOpen, setSearchBarOpen] = createSignal(false);
-  const [searchMatchIdx, setSearchMatchIdx] = createSignal(0);
+  const [sessionSearch, setSessionSearch] = useState("");
+  const [activeSessionSearch, setActiveSessionSearch] = useState("");
+  const [searchBarOpen, setSearchBarOpen] = useState(false);
+  const [searchMatchIdx, setSearchMatchIdx] = useState(0);
 
-  let sessionSearchDebounce: ReturnType<typeof setTimeout> | undefined;
-  let suppressNextSearchEffect = false;
-  let searchRequestId = 0;
-  opts.registerDebounce(() => clearTimeout(sessionSearchDebounce));
+  const pending = usePendingSessionSearch();
+
+  const sessionSearchRef = useRef(sessionSearch);
+  sessionSearchRef.current = sessionSearch;
+  const filteredEntriesRef = useRef(opts.filteredEntries);
+  filteredEntriesRef.current = opts.filteredEntries;
+
+  const sessionSearchDebounceRef = useRef<
+    ReturnType<typeof setTimeout> | undefined
+  >(undefined);
+  const suppressNextSearchEffectRef = useRef(false);
+  const searchRequestIdRef = useRef(0);
+  useEffect(() => {
+    opts.registerDebounce(() => clearTimeout(sessionSearchDebounceRef.current));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function focusRenderedSearchMatch(entryKey: string | undefined) {
     requestAnimationFrame(() => {
@@ -87,7 +103,7 @@ export function createSessionSearch(
   }
 
   async function commitSessionSearch(raw: string) {
-    const requestId = ++searchRequestId;
+    const requestId = ++searchRequestIdRef.current;
     const term = raw.trim();
     setSearchMatchIdx(0);
     if (!term) {
@@ -96,10 +112,14 @@ export function createSessionSearch(
     }
 
     const matchIdx = (await opts.resolveCompleteSearchMatch(term)) ?? -1;
-    if (requestId !== searchRequestId || term !== sessionSearch().trim()) {
+    if (
+      requestId !== searchRequestIdRef.current ||
+      term !== sessionSearchRef.current.trim()
+    ) {
       return;
     }
-    const targetEntry = matchIdx >= 0 ? opts.filteredEntries()[matchIdx] : null;
+    const targetEntry =
+      matchIdx >= 0 ? filteredEntriesRef.current[matchIdx] : null;
     if (targetEntry) {
       opts.revealEntry(matchIdx);
     }
@@ -110,35 +130,35 @@ export function createSessionSearch(
   // Consume a pending session search set by the global SearchOverlay.
   // Runs after the session finishes loading; applies the query, opens the
   // in-session search bar, and scrolls to the first match.
-  createEffect(() => {
-    const pending = pendingSessionSearch();
-    if (!pending || opts.loading()) return;
-    if (pending.sessionId !== opts.sessionId()) return;
+  useEffect(() => {
+    if (!pending || opts.loading) return;
+    if (pending.sessionId !== opts.sessionId) return;
     setPendingSessionSearch(null);
 
-    suppressNextSearchEffect = true;
+    suppressNextSearchEffectRef.current = true;
     setSessionSearch(pending.query);
     setSearchBarOpen(true);
     void commitSessionSearch(pending.query);
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending, opts.loading, opts.sessionId]);
 
-  createEffect(
-    on(sessionSearch, (raw) => {
-      clearTimeout(sessionSearchDebounce);
-      if (suppressNextSearchEffect) {
-        suppressNextSearchEffect = false;
-        return;
-      }
-      if (!raw.trim()) {
-        void commitSessionSearch("");
-        return;
-      }
-      sessionSearchDebounce = setTimeout(
-        () => void commitSessionSearch(raw),
-        SESSION_SEARCH_DEBOUNCE_MS,
-      );
-    }),
-  );
+  useEffect(() => {
+    const raw = sessionSearch;
+    clearTimeout(sessionSearchDebounceRef.current);
+    if (suppressNextSearchEffectRef.current) {
+      suppressNextSearchEffectRef.current = false;
+      return;
+    }
+    if (!raw.trim()) {
+      void commitSessionSearch("");
+      return;
+    }
+    sessionSearchDebounceRef.current = setTimeout(
+      () => void commitSessionSearch(raw),
+      SESSION_SEARCH_DEBOUNCE_MS,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionSearch]);
 
   return {
     sessionSearch,

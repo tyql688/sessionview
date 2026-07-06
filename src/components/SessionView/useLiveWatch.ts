@@ -1,17 +1,16 @@
-import { createEffect, on, onCleanup } from "solid-js";
-import type { Accessor } from "solid-js";
+import { useEffect } from "react";
 import { listenBackendEvent, type UnlistenFn } from "../../lib/backend-events";
 import {
   getProviderWatchConfig,
-  getProviderWatchVersion,
   loadProviderWatchSnapshots,
 } from "../../lib/provider-watch";
+import { useProviderSnapshotVersion } from "../../stores/providerSnapshots";
 import type { Provider } from "../../lib/types";
 
 export interface UseLiveWatchOptions {
-  watching: Accessor<boolean>;
-  provider: Accessor<Provider>;
-  sourcePath: Accessor<string>;
+  watching: boolean;
+  provider: Provider;
+  sourcePath: string;
   reload: () => Promise<void>;
 }
 
@@ -22,88 +21,77 @@ export interface UseLiveWatchOptions {
  * the parent component doesn't juggle them inline.
  *
  * Each effect iteration captures its own `cancelled` flag: if a newer
- * iteration (or `onCleanup`) fires while `await listen(..)` is still in
+ * iteration (or cleanup) fires while `await listen(..)` is still in
  * flight, the awaited `unlisten` is invoked immediately on resolution so the
  * stale subscription doesn't outlive the iteration that spawned it.
  */
 export function useLiveWatch(opts: UseLiveWatchOptions): void {
-  let unwatchFn: UnlistenFn | undefined;
-  let pollTimer: ReturnType<typeof setInterval> | undefined;
-  let watchDebounce: ReturnType<typeof setTimeout> | undefined;
-  let currentIteration: { cancelled: boolean } | undefined;
+  // Reactive read so the effect re-runs when provider snapshots finish loading
+  // (mirrors the Solid `getProviderWatchVersion()` dep in the original `on(...)`).
+  const snapshotVersion = useProviderSnapshotVersion();
 
-  createEffect(
-    on(
-      () =>
-        [
-          opts.watching(),
-          opts.provider(),
-          opts.sourcePath(),
-          getProviderWatchVersion(),
-        ] as const,
-      async ([isWatching]) => {
-        // Cancel the previous iteration's in-flight listen() if any, then
-        // clean up whatever it already installed.
-        if (currentIteration) currentIteration.cancelled = true;
-        clearTimeout(watchDebounce);
-        clearInterval(pollTimer);
-        pollTimer = undefined;
-        unwatchFn?.();
-        unwatchFn = undefined;
+  useEffect(() => {
+    let cancelled = false;
+    let unwatchFn: UnlistenFn | undefined;
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
+    let watchDebounce: ReturnType<typeof setTimeout> | undefined;
 
-        if (!isWatching) {
-          currentIteration = undefined;
-          return;
-        }
+    const run = async () => {
+      if (!opts.watching) return;
 
-        const iteration = { cancelled: false };
-        currentIteration = iteration;
+      void loadProviderWatchSnapshots();
 
-        void loadProviderWatchSnapshots();
+      const activeSourcePath = opts.sourcePath;
+      const watchConfig = getProviderWatchConfig(opts.provider);
 
-        const activeSourcePath = opts.sourcePath();
-        const watchConfig = getProviderWatchConfig(opts.provider());
+      if (watchConfig.strategy === "poll") {
+        pollTimer = setInterval(
+          () => void opts.reload(),
+          watchConfig.debounceMs,
+        );
+        return;
+      }
 
-        if (watchConfig.strategy === "poll") {
-          pollTimer = setInterval(
+      const unlisten = await listenBackendEvent(
+        "sessions-changed",
+        (payload) => {
+          const changedPaths = payload ?? [];
+          if (!activeSourcePath) return;
+          if (!changedPaths.includes(activeSourcePath)) return;
+
+          clearTimeout(watchDebounce);
+          watchDebounce = setTimeout(
             () => void opts.reload(),
             watchConfig.debounceMs,
           );
-          return;
-        }
+        },
+      );
 
-        const unlisten = await listenBackendEvent(
-          "sessions-changed",
-          (payload) => {
-            const changedPaths = payload ?? [];
-            if (!activeSourcePath) return;
-            if (!changedPaths.includes(activeSourcePath)) return;
+      if (cancelled) {
+        // A newer iteration (or onCleanup) ran while listen() was in
+        // flight; drop the now-stale subscription immediately rather than
+        // letting it leak until the next flip.
+        unlisten();
+        return;
+      }
+      unwatchFn = unlisten;
+    };
 
-            clearTimeout(watchDebounce);
-            watchDebounce = setTimeout(
-              () => void opts.reload(),
-              watchConfig.debounceMs,
-            );
-          },
-        );
+    void run();
 
-        if (iteration.cancelled) {
-          // A newer iteration (or onCleanup) ran while listen() was in
-          // flight; drop the now-stale subscription immediately rather than
-          // letting it leak until the next flip.
-          unlisten();
-          return;
-        }
-        unwatchFn = unlisten;
-      },
-    ),
-  );
-
-  onCleanup(() => {
-    if (currentIteration) currentIteration.cancelled = true;
-    clearTimeout(watchDebounce);
-    clearInterval(pollTimer);
-    pollTimer = undefined;
-    unwatchFn?.();
-  });
+    // Cancel the in-flight listen() if any, then clean up whatever this
+    // iteration already installed. React runs this before the next effect
+    // iteration (dep change) and on unmount.
+    return () => {
+      cancelled = true;
+      clearTimeout(watchDebounce);
+      clearInterval(pollTimer);
+      pollTimer = undefined;
+      unwatchFn?.();
+    };
+    // Deps mirror the Solid `on([watching, provider, sourcePath, watchVersion])`
+    // array exactly; `reload` is intentionally read but not a dependency so a
+    // fresh `reload` identity each render doesn't tear down the subscription.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opts.watching, opts.provider, opts.sourcePath, snapshotVersion]);
 }
