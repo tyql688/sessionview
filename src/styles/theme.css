@@ -137,4 +137,18 @@
   html {
     @apply font-sans;
   }
+  /* Minimal form-control reset (the slice of preflight the Base UI
+   * components depend on): without it, ghost/outline buttons show the
+   * native macOS button chrome through their transparent backgrounds and
+   * ignore padding/radius utilities. Legacy styles are unlayered and still
+   * win wherever they set their own properties. */
+  button {
+    appearance: none;
+    -webkit-appearance: none;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    font: inherit;
+    color: inherit;
+  }
 }
