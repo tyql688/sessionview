@@ -54,6 +54,19 @@ export function GeneralSettings() {
   const terminalApp = useTerminalApp();
   const showOrphans = useShowOrphans();
 
+  const themeLabel: Record<Theme, string> = {
+    light: t("settings.themeLight"),
+    dark: t("settings.themeDark"),
+    system: t("settings.themeSystem"),
+  };
+  const localeLabel: Record<Locale, string> = {
+    en: t("settings.languageEnglish"),
+    zh: t("settings.languageChinese"),
+  };
+  const terminalLabel =
+    TERMINAL_OPTIONS.find((option) => option.value === terminalApp)?.label ??
+    terminalApp;
+
   return (
     <div className="settings-section">
       <div className="settings-section-title">{t("settings.general")}</div>
@@ -69,7 +82,7 @@ export function GeneralSettings() {
           }}
         >
           <SelectTrigger size="sm" className="w-40">
-            <SelectValue />
+            <SelectValue>{themeLabel[theme]}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="light">{t("settings.themeLight")}</SelectItem>
@@ -92,7 +105,7 @@ export function GeneralSettings() {
           }}
         >
           <SelectTrigger size="sm" className="w-40">
-            <SelectValue />
+            <SelectValue>{localeLabel[locale]}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="en">{t("settings.languageEnglish")}</SelectItem>
@@ -115,7 +128,7 @@ export function GeneralSettings() {
           }}
         >
           <SelectTrigger size="sm" className="w-40">
-            <SelectValue />
+            <SelectValue>{terminalLabel}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             {TERMINAL_OPTIONS.map((option) => (
