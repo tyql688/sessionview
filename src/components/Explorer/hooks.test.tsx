@@ -7,13 +7,13 @@ vi.mock("../../lib/tauri", () => ({
 
 import {
   addBlockedFolder,
-  blockedFolders,
+  getBlockedFolders,
   removeBlockedFolder,
 } from "../../stores/settings";
 import { filterBlockedFolders } from "./hooks";
 
 function clearBlockedFolders() {
-  for (const folder of [...blockedFolders()]) {
+  for (const folder of [...getBlockedFolders()]) {
     removeBlockedFolder(folder);
   }
 }

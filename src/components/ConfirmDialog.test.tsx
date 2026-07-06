@@ -1,10 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent } from "@solidjs/testing-library";
+import { render, fireEvent } from "@testing-library/react";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 describe("ConfirmDialog", () => {
   it("renders nothing when closed", () => {
-    const { queryByRole } = render(() => (
+    const { queryByRole } = render(
       <ConfirmDialog
         open={false}
         title="Delete session"
@@ -12,13 +12,13 @@ describe("ConfirmDialog", () => {
         confirmLabel="Delete"
         onConfirm={() => {}}
         onCancel={() => {}}
-      />
-    ));
+      />,
+    );
     expect(queryByRole("dialog")).toBeNull();
   });
 
   it("renders title, message and confirm label when open", () => {
-    const { getByRole, getByText } = render(() => (
+    const { getByRole, getByText } = render(
       <ConfirmDialog
         open={true}
         title="Delete session"
@@ -26,8 +26,8 @@ describe("ConfirmDialog", () => {
         confirmLabel="Delete"
         onConfirm={() => {}}
         onCancel={() => {}}
-      />
-    ));
+      />,
+    );
     const dialog = getByRole("dialog");
     expect(dialog).toBeInTheDocument();
     expect(dialog).toHaveAttribute("aria-modal", "true");
@@ -38,7 +38,7 @@ describe("ConfirmDialog", () => {
 
   it("invokes onConfirm when the confirm button is clicked", () => {
     const onConfirm = vi.fn();
-    const { getByText } = render(() => (
+    const { getByText } = render(
       <ConfirmDialog
         open={true}
         title="Delete session"
@@ -46,14 +46,14 @@ describe("ConfirmDialog", () => {
         confirmLabel="Delete"
         onConfirm={onConfirm}
         onCancel={() => {}}
-      />
-    ));
+      />,
+    );
     fireEvent.click(getByText("Delete"));
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
   it("applies the danger class to the confirm button when danger is set", () => {
-    const { getByText } = render(() => (
+    const { getByText } = render(
       <ConfirmDialog
         open={true}
         title="Delete session"
@@ -62,8 +62,8 @@ describe("ConfirmDialog", () => {
         danger={true}
         onConfirm={() => {}}
         onCancel={() => {}}
-      />
-    ));
+      />,
+    );
     expect(getByText("Delete")).toHaveClass("btn-danger");
   });
 });

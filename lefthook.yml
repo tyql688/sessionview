@@ -7,7 +7,9 @@ pre-commit:
   commands:
     biome:
       glob: "src/**/*.{ts,tsx,css}"
-      run: npx biome check --write {staged_files}
+      # --no-errors-on-unmatched: a commit touching only biome-ignored files
+      # (e.g. *.test.* which biome.json excludes) must not fail the hook.
+      run: npx biome check --write --no-errors-on-unmatched {staged_files}
       stage_fixed: true
     eslint:
       glob: "src/**/*.{ts,tsx}"

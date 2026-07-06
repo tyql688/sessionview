@@ -1,5 +1,4 @@
-import { render } from "@solidjs/testing-library";
-import { createSignal } from "solid-js";
+import { renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -8,32 +7,20 @@ import {
 } from "../../lib/session-command-events";
 import { useSessionCommandEvents } from "./useSessionCommandEvents";
 
-function CommandHarness(props: {
-  active: () => boolean;
-  record: (command: string) => void;
-}) {
-  useSessionCommandEvents({
-    active: props.active,
-    onResume: () => props.record("resume"),
-    onExport: () => props.record("export"),
-    onFavorite: () => props.record("favorite"),
-    onWatch: () => props.record("watch"),
-    onDelete: () => props.record("delete"),
-    onSessionSearch: () => props.record("sessionSearch"),
-  });
-
-  return <div />;
-}
-
 describe("useSessionCommandEvents", () => {
   it("runs every session command while the view is active", () => {
     const commands: string[] = [];
-    render(() => (
-      <CommandHarness
-        active={() => true}
-        record={(name) => commands.push(name)}
-      />
-    ));
+    renderHook(() =>
+      useSessionCommandEvents({
+        active: true,
+        onResume: () => commands.push("resume"),
+        onExport: () => commands.push("export"),
+        onFavorite: () => commands.push("favorite"),
+        onWatch: () => commands.push("watch"),
+        onDelete: () => commands.push("delete"),
+        onSessionSearch: () => commands.push("sessionSearch"),
+      }),
+    );
 
     dispatchSessionCommand(SESSION_COMMAND_EVENTS.resume);
     dispatchSessionCommand(SESSION_COMMAND_EVENTS.exportSession);
@@ -53,14 +40,23 @@ describe("useSessionCommandEvents", () => {
   });
 
   it("ignores commands while inactive and reads active state live", () => {
-    const [active, setActive] = createSignal(false);
     const commands: string[] = [];
-    render(() => (
-      <CommandHarness active={active} record={(name) => commands.push(name)} />
-    ));
+    const { rerender } = renderHook(
+      ({ active }: { active: boolean }) =>
+        useSessionCommandEvents({
+          active,
+          onResume: () => commands.push("resume"),
+          onExport: () => {},
+          onFavorite: () => {},
+          onWatch: () => {},
+          onDelete: () => {},
+          onSessionSearch: () => {},
+        }),
+      { initialProps: { active: false } },
+    );
 
     dispatchSessionCommand(SESSION_COMMAND_EVENTS.resume);
-    setActive(true);
+    rerender({ active: true });
     dispatchSessionCommand(SESSION_COMMAND_EVENTS.resume);
 
     expect(commands).toEqual(["resume"]);
@@ -68,12 +64,17 @@ describe("useSessionCommandEvents", () => {
 
   it("removes document listeners on cleanup", () => {
     const commands: string[] = [];
-    const { unmount } = render(() => (
-      <CommandHarness
-        active={() => true}
-        record={(name) => commands.push(name)}
-      />
-    ));
+    const { unmount } = renderHook(() =>
+      useSessionCommandEvents({
+        active: true,
+        onResume: () => commands.push("resume"),
+        onExport: () => {},
+        onFavorite: () => {},
+        onWatch: () => {},
+        onDelete: () => {},
+        onSessionSearch: () => {},
+      }),
+    );
 
     unmount();
     dispatchSessionCommand(SESSION_COMMAND_EVENTS.resume);

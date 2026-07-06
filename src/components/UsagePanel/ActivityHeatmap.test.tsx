@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { render, fireEvent } from "@solidjs/testing-library";
-import { createSignal } from "solid-js";
+import { render, fireEvent } from "@testing-library/react";
+import { useState } from "react";
 import { ActivityHeatmap } from "./ActivityHeatmap";
 import { buildHeatmapGrid, type HeatmapMetric } from "../../lib/heatmap";
 import type { ActivityDay } from "../../lib/types";
@@ -24,24 +24,35 @@ function setup(opts?: {
   const days = opts?.days ?? [day("2026-01-01", 5), day("2026-01-03", 1)];
   const start = "2026-01-01";
   const end = "2026-01-07";
-  const [metric, setMetric] = createSignal<HeatmapMetric>(
-    opts?.metric ?? "sessions",
-  );
-  const [year, setYear] = createSignal<number | null>(opts?.year ?? null);
-  const grid = () => buildHeatmapGrid(days, metric(), start, end);
+  // Metric/year are owned by the harness (controlled component); mirror the
+  // latest committed values into closure vars so tests can read them.
+  let latestMetric: HeatmapMetric = opts?.metric ?? "sessions";
+  let latestYear: number | null = opts?.year ?? null;
 
-  const result = render(() => (
-    <ActivityHeatmap
-      grid={grid}
-      metric={metric}
-      setMetric={setMetric}
-      year={year}
-      setYear={setYear}
-      availableYears={() => opts?.years ?? [2026, 2025]}
-      loading={() => false}
-    />
-  ));
-  return { ...result, metric, year };
+  function Harness() {
+    const [metric, setMetric] = useState<HeatmapMetric>(
+      opts?.metric ?? "sessions",
+    );
+    const [year, setYear] = useState<number | null>(opts?.year ?? null);
+    latestMetric = metric;
+    latestYear = year;
+    const grid = buildHeatmapGrid(days, metric, start, end);
+
+    return (
+      <ActivityHeatmap
+        grid={grid}
+        metric={metric}
+        setMetric={setMetric}
+        year={year}
+        setYear={setYear}
+        availableYears={opts?.years ?? [2026, 2025]}
+        loading={false}
+      />
+    );
+  }
+
+  const result = render(<Harness />);
+  return { ...result, metric: () => latestMetric, year: () => latestYear };
 }
 
 describe("ActivityHeatmap", () => {

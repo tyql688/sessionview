@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Message, SessionMeta } from "../../lib/types";
@@ -150,7 +150,7 @@ beforeEach(() => {
 
 describe("SessionView smoke", () => {
   it("mounts and renders messages once the load resolves", async () => {
-    const { findByText } = render(() => (
+    const { findByText } = render(
       <SessionView
         session={{
           id: META.id,
@@ -164,8 +164,8 @@ describe("SessionView smoke", () => {
         active={true}
         onRefreshTree={() => {}}
         onCloseTab={() => {}}
-      />
-    ));
+      />,
+    );
 
     // The async session-load effect resolves the mocked tail; both messages
     // should appear in the rendered timeline.
@@ -186,7 +186,7 @@ describe("SessionView smoke", () => {
     totalMessages = 2;
     messagesWindowMessages = [olderUserMessage];
 
-    const { findByText } = render(() => (
+    const { findByText } = render(
       <SessionView
         session={{
           id: META.id,
@@ -200,8 +200,8 @@ describe("SessionView smoke", () => {
         active={true}
         onRefreshTree={() => {}}
         onCloseTab={() => {}}
-      />
-    ));
+      />,
+    );
 
     expect(await findByText("General Kenobi reply")).toBeInTheDocument();
     document.dispatchEvent(
@@ -239,7 +239,7 @@ describe("SessionView smoke", () => {
     totalMessages = 3;
     messagesWindowMessages = [oldestUserMessage, middleMessage];
 
-    const { findByText } = render(() => (
+    const { findByText } = render(
       <SessionView
         session={{
           id: META.id,
@@ -253,8 +253,8 @@ describe("SessionView smoke", () => {
         active={true}
         onRefreshTree={() => {}}
         onCloseTab={() => {}}
-      />
-    ));
+      />,
+    );
 
     expect(await findByText("无常后面又被提到")).toBeInTheDocument();
     document.dispatchEvent(
@@ -303,7 +303,7 @@ describe("SessionView smoke", () => {
     openWindowMessages = manyMessages;
     totalMessages = manyMessages.length;
 
-    const { findByText, queryByText } = render(() => (
+    const { findByText, queryByText } = render(
       <SessionView
         session={{
           id: META.id,
@@ -317,8 +317,8 @@ describe("SessionView smoke", () => {
         active={true}
         onRefreshTree={() => {}}
         onCloseTab={() => {}}
-      />
-    ));
+      />,
+    );
 
     expect(await findByText("message 119")).toBeInTheDocument();
     expect(queryByText("target after search")).not.toBeInTheDocument();

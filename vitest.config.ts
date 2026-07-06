@@ -20,6 +20,12 @@ export default defineConfig({
           environment: "happy-dom",
           include: ["src/**/*.test.tsx"],
           setupFiles: ["./vitest.setup.ts"],
+          server: {
+            // @lobehub/icons pulls in @lobehub/fluent-emoji, whose ESM entry
+            // uses extensionless directory imports that Node's native ESM
+            // loader rejects. Inlining routes it through Vite's resolver.
+            deps: { inline: [/@lobehub/] },
+          },
         },
       },
     ],

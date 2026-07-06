@@ -1,5 +1,5 @@
-import { fireEvent, render, waitFor } from "@solidjs/testing-library";
-import { createSignal } from "solid-js";
+import { fireEvent, render, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { beforeAll, describe, expect, it } from "vitest";
 import { SessionSearch } from "./SessionSearch";
 
@@ -9,22 +9,31 @@ beforeAll(() => {
 });
 
 function setup(messagesRef: () => HTMLDivElement | undefined) {
-  const [sessionSearch, setSessionSearch] = createSignal("foo");
-  const [activeSessionSearch, setActiveSessionSearch] = createSignal("foo");
-  const [searchMatchIdx, setSearchMatchIdx] = createSignal(0);
-  const [, setSearchBarOpen] = createSignal(true);
-  const result = render(() => (
-    <SessionSearch
-      sessionSearch={sessionSearch}
-      activeSessionSearch={activeSessionSearch}
-      setSessionSearch={setSessionSearch}
-      searchMatchIdx={searchMatchIdx}
-      setSearchMatchIdx={setSearchMatchIdx}
-      setSearchBarOpen={setSearchBarOpen}
-      messagesRef={messagesRef}
-    />
-  ));
-  return { ...result, searchMatchIdx, setActiveSessionSearch };
+  // The search-match index lives inside the React harness; mirror the latest
+  // committed value into a closure var so tests can read it after fireEvent.
+  let latestMatchIdx = 0;
+
+  function Harness() {
+    const [sessionSearch, setSessionSearch] = useState("foo");
+    const [activeSessionSearch] = useState("foo");
+    const [searchMatchIdx, setSearchMatchIdx] = useState(0);
+    const [, setSearchBarOpen] = useState(true);
+    latestMatchIdx = searchMatchIdx;
+    return (
+      <SessionSearch
+        sessionSearch={sessionSearch}
+        activeSessionSearch={activeSessionSearch}
+        setSessionSearch={setSessionSearch}
+        searchMatchIdx={searchMatchIdx}
+        setSearchMatchIdx={setSearchMatchIdx}
+        setSearchBarOpen={setSearchBarOpen}
+        messagesRef={messagesRef}
+      />
+    );
+  }
+
+  const result = render(<Harness />);
+  return { ...result, searchMatchIdx: () => latestMatchIdx };
 }
 
 function markedContainer(count: number): HTMLDivElement {
@@ -43,10 +52,8 @@ describe("SessionSearch", () => {
     // load (Cmd+F) mounted SessionSearch while the messages div did not exist
     // yet, permanently capturing `undefined`. With an accessor, navigation must
     // see the container once it later mounts.
-    const [container, setContainer] = createSignal<HTMLDivElement | undefined>(
-      undefined,
-    );
-    const { getByLabelText, searchMatchIdx } = setup(container);
+    let container: HTMLDivElement | undefined;
+    const { getByLabelText, searchMatchIdx } = setup(() => container);
 
     // Messages div mounts *after* the search bar (post-load).
     const div = document.createElement("div");
@@ -54,7 +61,7 @@ describe("SessionSearch", () => {
       '<mark class="search-highlight">a</mark>' +
       '<mark class="search-highlight">b</mark>';
     document.body.appendChild(div);
-    setContainer(div);
+    container = div;
 
     fireEvent.click(getByLabelText("Next match"));
 

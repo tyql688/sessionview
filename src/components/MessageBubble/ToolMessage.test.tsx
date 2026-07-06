@@ -1,4 +1,4 @@
-import { fireEvent, render } from "@solidjs/testing-library";
+import { fireEvent, render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { Message } from "../../lib/types";
@@ -78,9 +78,7 @@ const bashOutputMessage: Message = {
 
 describe("ToolMessage", () => {
   it("renders raw output after expansion", () => {
-    const { container } = render(() => (
-      <ToolMessage message={bashOutputMessage} />
-    ));
+    const { container } = render(<ToolMessage message={bashOutputMessage} />);
 
     expect(container.querySelector(".msg-tool-output")).toBeNull();
     const header = container.querySelector(".msg-tool-header");
@@ -94,7 +92,7 @@ describe("ToolMessage", () => {
   });
 
   it("uses presentation raw output policy to suppress terminal output", () => {
-    const { container } = render(() => (
+    const { container } = render(
       <ToolMessage
         message={{
           ...bashOutputMessage,
@@ -112,8 +110,8 @@ describe("ToolMessage", () => {
             },
           },
         }}
-      />
-    ));
+      />,
+    );
 
     const header = container.querySelector(".msg-tool-header");
     if (!header) throw new Error("expected tool header");
@@ -124,7 +122,7 @@ describe("ToolMessage", () => {
   });
 
   it("does not suppress ordinary output when presentation policy is keep", () => {
-    const { container } = render(() => (
+    const { container } = render(
       <ToolMessage
         message={{
           ...bashOutputMessage,
@@ -142,8 +140,8 @@ describe("ToolMessage", () => {
             },
           },
         }}
-      />
-    ));
+      />,
+    );
 
     const header = container.querySelector(".msg-tool-header");
     if (!header) throw new Error("expected tool header");
@@ -173,13 +171,13 @@ describe("ToolMessage", () => {
     };
     window.addEventListener("open-subagent", listener);
 
-    const { getByRole } = render(() => (
+    const { getByRole } = render(
       <ToolMessage
         message={agentMessage}
         provider="antigravity"
         parentSessionId="parent-conversation-1"
-      />
-    ));
+      />,
+    );
 
     fireEvent.click(getByRole("button", { name: /Open/ }));
     window.removeEventListener("open-subagent", listener);
@@ -192,13 +190,13 @@ describe("ToolMessage", () => {
   });
 
   it("does not show an open button for antigravity define_subagent", () => {
-    const { queryByRole } = render(() => (
+    const { queryByRole } = render(
       <ToolMessage
         message={defineSubagentMessage}
         provider="antigravity"
         parentSessionId="parent-conversation-1"
-      />
-    ));
+      />,
+    );
 
     expect(queryByRole("button", { name: /Open/ })).toBeNull();
   });
@@ -222,13 +220,13 @@ describe("ToolMessage", () => {
     };
     window.addEventListener("open-subagent", listener);
 
-    const { getByRole } = render(() => (
+    const { getByRole } = render(
       <ToolMessage
         message={promptOnlyInvokeMessage}
         provider="antigravity"
         parentSessionId="parent-conversation-1"
-      />
-    ));
+      />,
+    );
 
     fireEvent.click(getByRole("button", { name: /Open/ }));
     window.removeEventListener("open-subagent", listener);
@@ -259,13 +257,13 @@ describe("ToolMessage", () => {
     };
     window.addEventListener("open-subagent", listener);
 
-    const { getByRole } = render(() => (
+    const { getByRole } = render(
       <ToolMessage
         message={kimiSwarmMessage}
         provider="kimi"
         parentSessionId="session_parent"
-      />
-    ));
+      />,
+    );
 
     expect(
       getByRole("button", { name: /Open apps\/desktop\/src\/App\.vue/ }),
