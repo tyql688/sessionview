@@ -47,9 +47,7 @@ const TOOL_ICONS: Record<string, string> = {
 };
 
 /** Parse MCP tool name: mcp__server__tool → { server, tool, display } */
-export function parseMcpToolName(
-  name: string,
-): { server: string; tool: string; display: string } | null {
+export function parseMcpToolName(name: string): { server: string; tool: string; display: string } | null {
   if (!name.startsWith("mcp__")) return null;
   const parts = name.slice(5).split("__");
   if (parts.length < 2) return null;
@@ -72,9 +70,7 @@ export function toolIcon(name: string, metadata?: ToolMetadata): string {
   if (metadata?.category === "mcp" || name.startsWith("mcp__")) {
     return TOOL_ICONS.mcp;
   }
-  return (
-    TOOL_ICONS[metadata?.canonical_name ?? name] || TOOL_ICONS[name] || "⚙"
-  );
+  return TOOL_ICONS[metadata?.canonical_name ?? name] || TOOL_ICONS[name] || "⚙";
 }
 
 function joinParts(parts: string[]): string {
@@ -110,12 +106,7 @@ export function toolSummary(message: Message): string {
           ]),
         );
       case "Bash":
-        return firstString(obj, [
-          "description",
-          "command",
-          "cmd",
-          "CommandLine",
-        ]);
+        return firstString(obj, ["description", "command", "cmd", "CommandLine"]);
       case "Glob":
         return firstString(obj, ["pattern", "DirectoryPath"]);
       case "Grep": {
@@ -127,41 +118,19 @@ export function toolSummary(message: Message): string {
         return firstString(obj, ["description", "prompt"]);
       case "TaskList":
         return joinParts([
-          typeof obj.active_only === "boolean"
-            ? obj.active_only
-              ? "active"
-              : "all"
-            : "",
-          optionalNumber(obj, "limit")
-            ? `limit ${optionalNumber(obj, "limit")}`
-            : "",
+          typeof obj.active_only === "boolean" ? (obj.active_only ? "active" : "all") : "",
+          optionalNumber(obj, "limit") ? `limit ${optionalNumber(obj, "limit")}` : "",
         ]);
       case "TaskOutput":
-        return joinParts([
-          firstString(obj, ["task_id", "taskId"]),
-          obj.block === true ? "wait" : "",
-        ]);
+        return joinParts([firstString(obj, ["task_id", "taskId"]), obj.block === true ? "wait" : ""]);
       case "TaskStop":
-        return joinParts([
-          firstString(obj, ["task_id", "taskId"]),
-          firstString(obj, ["reason"]),
-        ]);
+        return joinParts([firstString(obj, ["task_id", "taskId"]), firstString(obj, ["reason"])]);
       case "Workflow":
         return firstString(obj, ["name", "description", "script"]);
       case "StructuredOutput":
-        return firstString(obj, [
-          "finding_id",
-          "title",
-          "analysis",
-          "summary",
-          "corrected_root_cause",
-          "minimal_fix",
-        ]);
+        return firstString(obj, ["finding_id", "title", "analysis", "summary", "corrected_root_cause", "minimal_fix"]);
       case "CronCreate":
-        return joinParts([
-          firstString(obj, ["cron"]),
-          firstString(obj, ["prompt"]),
-        ]);
+        return joinParts([firstString(obj, ["cron"]), firstString(obj, ["prompt"])]);
       case "CronDelete":
         return firstString(obj, ["id"]);
       case "Skill":
@@ -181,27 +150,17 @@ export function toolSummary(message: Message): string {
           firstString(obj, ["key", "direction", "element_index", "action"]),
         ]);
       case "AskUserQuestion": {
-        const questions = Array.isArray(obj.questions)
-          ? `${obj.questions.length} question(s)`
-          : "";
-        return joinParts([
-          questions,
-          obj.background === true ? "background" : "",
-        ]);
+        const questions = Array.isArray(obj.questions) ? `${obj.questions.length} question(s)` : "";
+        return joinParts([questions, obj.background === true ? "background" : ""]);
       }
       case "CreateGoal":
         return firstString(obj, ["objective"]);
       case "SetGoalBudget":
-        return joinParts([
-          optionalNumber(obj, "value"),
-          firstString(obj, ["unit"]),
-        ]);
+        return joinParts([optionalNumber(obj, "value"), firstString(obj, ["unit"])]);
       case "UpdateGoal":
         return firstString(obj, ["status"]);
       default: {
-        const first = Object.values(obj).find(
-          (v) => typeof v === "string" && (v as string).length > 0,
-        );
+        const first = Object.values(obj).find((v) => typeof v === "string" && (v as string).length > 0);
         return first ? String(first) : "";
       }
     }

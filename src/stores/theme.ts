@@ -3,10 +3,7 @@ import { create } from "zustand";
 export type Theme = "light" | "dark" | "system";
 
 function readStoredTheme(): Theme {
-  if (
-    typeof localStorage === "undefined" ||
-    typeof localStorage.getItem !== "function"
-  ) {
+  if (typeof localStorage === "undefined" || typeof localStorage.getItem !== "function") {
     return "system";
   }
   try {
@@ -19,10 +16,7 @@ function readStoredTheme(): Theme {
 }
 
 function writeStoredTheme(theme: Theme): void {
-  if (
-    typeof localStorage === "undefined" ||
-    typeof localStorage.setItem !== "function"
-  ) {
+  if (typeof localStorage === "undefined" || typeof localStorage.setItem !== "function") {
     return;
   }
   try {
@@ -34,15 +28,10 @@ function writeStoredTheme(theme: Theme): void {
 
 /** Resolve the OS color scheme; defaults to light when unavailable (tests/SSR). */
 function resolveSystemTheme(): "light" | "dark" {
-  if (
-    typeof window === "undefined" ||
-    typeof window.matchMedia !== "function"
-  ) {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
     return "light";
   }
-  return window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 export function applyTheme(theme: Theme) {
@@ -68,8 +57,7 @@ const initialTheme = readStoredTheme();
 
 const useThemeStore = create<ThemeState>(() => ({
   theme: initialTheme,
-  resolvedTheme:
-    initialTheme === "system" ? resolveSystemTheme() : initialTheme,
+  resolvedTheme: initialTheme === "system" ? resolveSystemTheme() : initialTheme,
 }));
 
 export function setTheme(t: Theme) {
@@ -92,11 +80,9 @@ export function useResolvedTheme(): "light" | "dark" {
 // Re-apply on OS theme change while tracking it ("system" mode), so a live
 // light<->dark switch in the OS is reflected without a restart.
 if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
-  window
-    .matchMedia("(prefers-color-scheme: dark)")
-    .addEventListener("change", () => {
-      if (useThemeStore.getState().theme === "system") {
-        applyTheme("system");
-      }
-    });
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (useThemeStore.getState().theme === "system") {
+      applyTheme("system");
+    }
+  });
 }

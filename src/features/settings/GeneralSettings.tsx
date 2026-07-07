@@ -1,10 +1,4 @@
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useI18n } from "@/i18n/index";
 import type { Locale } from "@/i18n/index";
@@ -66,9 +60,7 @@ export function GeneralSettings() {
     en: t("settings.languageEnglish"),
     zh: t("settings.languageChinese"),
   };
-  const terminalLabel =
-    TERMINAL_OPTIONS.find((option) => option.value === terminalApp)?.label ??
-    terminalApp;
+  const terminalLabel = TERMINAL_OPTIONS.find((option) => option.value === terminalApp)?.label ?? terminalApp;
 
   return (
     <div className="settings-section">
@@ -148,10 +140,7 @@ export function GeneralSettings() {
           <div className="settings-label">{t("settings.showOrphans")}</div>
           <div className="settings-desc">{t("settings.showOrphansDesc")}</div>
         </div>
-        <Switch
-          checked={showOrphans}
-          onCheckedChange={(checked) => setShowOrphans(checked)}
-        />
+        <Switch checked={showOrphans} onCheckedChange={(checked) => setShowOrphans(checked)} />
       </div>
 
       <div className="settings-row">
@@ -159,10 +148,7 @@ export function GeneralSettings() {
           <div className="settings-label">{t("settings.focusMode")}</div>
           <div className="settings-desc">{t("settings.focusModeDesc")}</div>
         </div>
-        <Switch
-          checked={focusMode}
-          onCheckedChange={(checked) => setFocusMode(checked)}
-        />
+        <Switch checked={focusMode} onCheckedChange={(checked) => setFocusMode(checked)} />
       </div>
     </div>
   );

@@ -17,14 +17,8 @@ import { ProviderIcon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 
 function sanitizeSnippet(html: string): string {
-  const escaped = html
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-  return escaped
-    .replace(/&lt;mark&gt;/gi, "<mark>")
-    .replace(/&lt;\/mark&gt;/gi, "</mark>");
+  const escaped = html.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return escaped.replace(/&lt;mark&gt;/gi, "<mark>").replace(/&lt;\/mark&gt;/gi, "</mark>");
 }
 
 export function SearchOverlay(props: {
@@ -89,9 +83,7 @@ export function SearchOverlay(props: {
     }
     if (e.key === "ArrowUp") {
       e.preventDefault();
-      setSelectedIndex((i) =>
-        r.length === 0 ? 0 : (i - 1 + r.length) % r.length,
-      );
+      setSelectedIndex((i) => (r.length === 0 ? 0 : (i - 1 + r.length) % r.length));
       return;
     }
     if (e.key === "Enter") {
@@ -122,12 +114,7 @@ export function SearchOverlay(props: {
           if (e.target === e.currentTarget) handleClose();
         }}
       >
-        <div
-          className="search-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-label={t("search.ariaLabel")}
-        >
+        <div className="search-overlay" role="dialog" aria-modal="true" aria-label={t("search.ariaLabel")}>
           <div className="search-overlay-input-row">
             <svg
               className="search-icon"
@@ -159,14 +146,10 @@ export function SearchOverlay(props: {
                 <div className="spinner spinner-sm" />
               </div>
             )}
-            {!isSearching &&
-              results.length === 0 &&
-              query.trim().length > 0 && (
-                <div className="search-no-results">{t("search.noResults")}</div>
-              )}
-            {query.trim().length === 0 && (
-              <div className="search-no-results">{t("search.placeholder")}</div>
+            {!isSearching && results.length === 0 && query.trim().length > 0 && (
+              <div className="search-no-results">{t("search.noResults")}</div>
             )}
+            {query.trim().length === 0 && <div className="search-no-results">{t("search.placeholder")}</div>}
             {results.map((result, i) => (
               <Button
                 key={result.session.id}
@@ -181,16 +164,11 @@ export function SearchOverlay(props: {
                 }}
                 onMouseEnter={() => setSelectedIndex(i)}
               >
-                <span
-                  className="provider-dot provider-logo"
-                  style={{ color: `var(--${result.session.provider})` }}
-                >
+                <span className="provider-dot provider-logo" style={{ color: `var(--${result.session.provider})` }}>
                   <ProviderIcon provider={result.session.provider} />
                 </span>
                 <div className="search-result-text">
-                  <span className="search-result-title">
-                    {result.session.title}
-                  </span>
+                  <span className="search-result-title">{result.session.title}</span>
                   <span
                     className="search-result-snippet"
                     // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitizeSnippet escapes then restores <mark> only

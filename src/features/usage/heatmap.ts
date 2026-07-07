@@ -75,10 +75,7 @@ export function weekday(iso: string): number {
  *    current year so we never render empty future cells. A future year would
  *    yield start > end (empty grid); callers feed only years that have data.
  */
-export function dateRangeForYear(
-  year: number | null,
-  today: string,
-): { start: string; end: string } {
+export function dateRangeForYear(year: number | null, today: string): { start: string; end: string } {
   if (year === null) {
     return { start: addDays(today, -363), end: today };
   }
@@ -105,15 +102,11 @@ function metricValue(day: ActivityDay, metric: HeatmapMetric): number {
 function quartiles(values: number[]): [number, number, number] {
   if (values.length === 0) return [0, 0, 0];
   const sorted = [...values].sort((a, b) => a - b);
-  const at = (p: number) =>
-    sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
+  const at = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
   return [at(0.25), at(0.5), at(0.75)];
 }
 
-function levelForValue(
-  value: number,
-  [q1, q2, q3]: [number, number, number],
-): HeatmapLevel {
+function levelForValue(value: number, [q1, q2, q3]: [number, number, number]): HeatmapLevel {
   if (value <= 0) return 0;
   if (value <= q1) return 1;
   if (value <= q2) return 2;
@@ -127,12 +120,7 @@ function levelForValue(
  * marked `inRange: false`). Intensity is bucketed by quartiles of the non-zero
  * in-range values so any metric scale (sessions … tokens) reads sensibly.
  */
-export function buildHeatmapGrid(
-  days: ActivityDay[],
-  metric: HeatmapMetric,
-  start: string,
-  end: string,
-): HeatmapGrid {
+export function buildHeatmapGrid(days: ActivityDay[], metric: HeatmapMetric, start: string, end: string): HeatmapGrid {
   const byDate = new Map(days.map((day) => [day.date, day]));
 
   // Snap the grid to whole weeks: back to the Sunday on/before start, forward

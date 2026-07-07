@@ -37,8 +37,7 @@ export function getLocale(): Locale {
 export function useI18n() {
   const { t, i18n } = useTranslation();
   return {
-    t: (key: string, options?: Record<string, unknown>): string =>
-      t(key, options ?? {}),
+    t: (key: string, options?: Record<string, unknown>): string => t(key, options ?? {}),
     locale: i18n.language as Locale,
     setLocale: (next: Locale) => i18n.changeLanguage(next),
   };

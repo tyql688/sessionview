@@ -52,9 +52,7 @@ export function useTrashState(onRefreshTree: () => void): UseTrashStateResult {
   const [deleteAllTarget, setDeleteAllTarget] = useState<TreeNode | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
-  const [trashItems, setTrashItems] = useState<TrashMeta[] | undefined>(
-    undefined,
-  );
+  const [trashItems, setTrashItems] = useState<TrashMeta[] | undefined>(undefined);
   const [trashLoading, setTrashLoading] = useState(true);
   const [resourceError, setResourceError] = useState<unknown>(null);
 
@@ -71,10 +69,7 @@ export function useTrashState(onRefreshTree: () => void): UseTrashStateResult {
     }
   }, []);
 
-  const trashError = useMemo(
-    () => (resourceError ? errorMessage(resourceError) : null),
-    [resourceError],
-  );
+  const trashError = useMemo(() => (resourceError ? errorMessage(resourceError) : null), [resourceError]);
 
   useEffect(() => {
     void refetch();
@@ -92,8 +87,7 @@ export function useTrashState(onRefreshTree: () => void): UseTrashStateResult {
     [trashItems, unknownLabel, untitledLabel],
   );
 
-  // Auto-expand every non-session node whenever the tree is rebuilt (mirrors
-  // the side effect the Solid `tree` memo performed inline on each recompute).
+  // Auto-expand every non-session node whenever the tree is rebuilt.
   useEffect(() => {
     const ids = new Set<string>();
     const collectIds = (nodes: TreeNode[]) => {
@@ -152,10 +146,7 @@ export function useTrashState(onRefreshTree: () => void): UseTrashStateResult {
     try {
       const result = await restoreSessionsBatch(ids);
       await Promise.all([refetch(), onRefreshTree()]);
-      if (result.failed > 0)
-        toastError(
-          `${result.failed}/${result.succeeded + result.failed} ${t("trash.restore")}`,
-        );
+      if (result.failed > 0) toastError(`${result.failed}/${result.succeeded + result.failed} ${t("trash.restore")}`);
       else toast(`${result.succeeded} ${t("trash.restoreOk")}`);
     } catch (e) {
       toastError(`${t("trash.restore")}: ${errorMessage(e)}`);

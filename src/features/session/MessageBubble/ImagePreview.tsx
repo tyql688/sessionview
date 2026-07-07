@@ -16,10 +16,7 @@ export function isLocalPath(source: string): boolean {
   );
 }
 
-export function LocalImage(props: {
-  path: string;
-  onPreview: (src: string, source: string) => void;
-}) {
+export function LocalImage(props: { path: string; onPreview: (src: string, source: string) => void }) {
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -45,9 +42,7 @@ export function LocalImage(props: {
   }, [props.path]);
 
   if (src) {
-    return (
-      <InlineImage src={src} source={props.path} onPreview={props.onPreview} />
-    );
+    return <InlineImage src={src} source={props.path} onPreview={props.onPreview} />;
   }
 
   return failed ? (
@@ -61,10 +56,7 @@ export function LocalImage(props: {
   );
 }
 
-export function RemoteImage(props: {
-  src: string;
-  onPreview: (src: string, source: string) => void;
-}) {
+export function RemoteImage(props: { src: string; onPreview: (src: string, source: string) => void }) {
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -96,13 +88,7 @@ export function RemoteImage(props: {
   }, [props.src]);
 
   if (loadedSrc) {
-    return (
-      <InlineImage
-        src={loadedSrc}
-        source={props.src}
-        onPreview={props.onPreview}
-      />
-    );
+    return <InlineImage src={loadedSrc} source={props.src} onPreview={props.onPreview} />;
   }
 
   return failed ? (
@@ -116,11 +102,7 @@ export function RemoteImage(props: {
   );
 }
 
-function InlineImage(props: {
-  src: string;
-  source: string;
-  onPreview: (src: string, source: string) => void;
-}) {
+function InlineImage(props: { src: string; source: string; onPreview: (src: string, source: string) => void }) {
   return (
     <div className="msg-image-wrap">
       <Button
@@ -146,14 +128,9 @@ function InlineImage(props: {
 function ImageLoading(props: { source: string }) {
   const { t } = useI18n();
   return (
-    <div
-      className="msg-image-state msg-image-loading"
-      title={describeImageSource(props.source)}
-    >
+    <div className="msg-image-state msg-image-loading" title={describeImageSource(props.source)}>
       <span className="msg-image-state-label">{t("common.loading")}</span>
-      <span className="msg-image-state-source">
-        {labelImageSource(props.source, t)}
-      </span>
+      <span className="msg-image-state-source">{labelImageSource(props.source, t)}</span>
     </div>
   );
 }
@@ -161,25 +138,14 @@ function ImageLoading(props: { source: string }) {
 function ImageFallback(props: { source: string }) {
   const { t } = useI18n();
   return (
-    <div
-      className="msg-image-state msg-image-fallback"
-      title={describeImageSource(props.source)}
-    >
-      <span className="msg-image-state-label">
-        {t("common.imageLoadFailed")}
-      </span>
-      <span className="msg-image-state-source">
-        {labelImageSource(props.source, t)}
-      </span>
+    <div className="msg-image-state msg-image-fallback" title={describeImageSource(props.source)}>
+      <span className="msg-image-state-label">{t("common.imageLoadFailed")}</span>
+      <span className="msg-image-state-source">{labelImageSource(props.source, t)}</span>
     </div>
   );
 }
 
-export function ImagePreview(props: {
-  src: string;
-  source?: string;
-  onClose: () => void;
-}) {
+export function ImagePreview(props: { src: string; source?: string; onClose: () => void }) {
   const { t } = useI18n();
 
   return (

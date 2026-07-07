@@ -44,8 +44,7 @@ export function SessionSearch(props: SessionSearchProps) {
           const activeQuery = props.activeSessionSearch.trim();
           if (!query) return "";
           if (query !== activeQuery) return "";
-          if (props.matchTotal > 0)
-            return `${props.searchMatchIdx + 1}/${props.matchTotal}`;
+          if (props.matchTotal > 0) return `${props.searchMatchIdx + 1}/${props.matchTotal}`;
           return t("session.searchNoMatch");
         })()}
       </span>

@@ -24,10 +24,7 @@ function addMonths(date: Date, months: number): Date {
 }
 
 function sameMonth(left: Date, right: Date): boolean {
-  return (
-    left.getFullYear() === right.getFullYear() &&
-    left.getMonth() === right.getMonth()
-  );
+  return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth();
 }
 
 function formatTriggerDate(iso: string): string {
@@ -45,9 +42,7 @@ export interface DatePickerProps {
 export function DatePicker(props: DatePickerProps) {
   const { t, locale } = useI18n();
   const [open, setOpen] = useState(false);
-  const [visibleMonth, setVisibleMonth] = useState(() =>
-    monthStartFor(props.value),
-  );
+  const [visibleMonth, setVisibleMonth] = useState(() => monthStartFor(props.value));
 
   const localeTag = locale === "zh" ? "zh-CN" : "en-US";
   const minMonth = props.min ? monthStartFor(props.min) : null;
@@ -75,14 +70,11 @@ export function DatePicker(props: DatePickerProps) {
     };
   });
 
-  const canGoPrevious =
-    !minMonth || addMonths(visibleMonth, -1).getTime() >= minMonth.getTime();
-  const canGoNext =
-    !maxMonth || addMonths(visibleMonth, 1).getTime() <= maxMonth.getTime();
+  const canGoPrevious = !minMonth || addMonths(visibleMonth, -1).getTime() >= minMonth.getTime();
+  const canGoNext = !maxMonth || addMonths(visibleMonth, 1).getTime() <= maxMonth.getTime();
 
   const isDisabled = (iso: string): boolean =>
-    (props.min !== undefined && iso < props.min) ||
-    (props.max !== undefined && iso > props.max);
+    (props.min !== undefined && iso < props.min) || (props.max !== undefined && iso > props.max);
 
   return (
     <Popover.Root open={open} onOpenChange={(next) => setOpen(next)}>
@@ -98,12 +90,7 @@ export function DatePicker(props: DatePickerProps) {
         <span>{formatTriggerDate(props.value)}</span>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Positioner
-          className="isolate z-50"
-          side="bottom"
-          align="start"
-          sideOffset={6}
-        >
+        <Popover.Positioner className="isolate z-50" side="bottom" align="start" sideOffset={6}>
           <Popover.Popup className="usage-date-popover" initialFocus={false}>
             <div className="usage-date-popover-head">
               <button
@@ -141,11 +128,7 @@ export function DatePicker(props: DatePickerProps) {
                 return (
                   <button
                     key={day.iso}
-                    className={cn(
-                      "usage-date-day",
-                      !day.currentMonth && "is-outside",
-                      selected && "is-selected",
-                    )}
+                    className={cn("usage-date-day", !day.currentMonth && "is-outside", selected && "is-selected")}
                     type="button"
                     aria-pressed={selected}
                     disabled={isDisabled(day.iso)}

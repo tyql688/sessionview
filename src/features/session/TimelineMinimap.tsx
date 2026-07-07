@@ -56,33 +56,18 @@ export function TimelineMinimap(props: MinimapProps) {
 
   function tickWidth(index: number): number {
     const hoveredIndex = hovered;
-    const hoverDistance =
-      hoveredIndex === null
-        ? Number.POSITIVE_INFINITY
-        : Math.abs(index - hoveredIndex);
-    const scrollDistance = props.scrolling
-      ? Math.abs(index - props.activeIndex)
-      : Number.POSITIVE_INFINITY;
-    return (
-      MOUNTAIN[Math.min(hoverDistance, scrollDistance)]?.width ?? BASE_WIDTH
-    );
+    const hoverDistance = hoveredIndex === null ? Number.POSITIVE_INFINITY : Math.abs(index - hoveredIndex);
+    const scrollDistance = props.scrolling ? Math.abs(index - props.activeIndex) : Number.POSITIVE_INFINITY;
+    return MOUNTAIN[Math.min(hoverDistance, scrollDistance)]?.width ?? BASE_WIDTH;
   }
 
   function tickClass(index: number): string {
     if (index === props.activeIndex) return "timeline-minimap-tick-active";
 
     const hoveredIndex = hovered;
-    const hoverDistance =
-      hoveredIndex === null
-        ? Number.POSITIVE_INFINITY
-        : Math.abs(index - hoveredIndex);
-    const scrollDistance = props.scrolling
-      ? Math.abs(index - props.activeIndex)
-      : Number.POSITIVE_INFINITY;
-    return (
-      MOUNTAIN[Math.min(hoverDistance, scrollDistance)]?.className ??
-      "timeline-minimap-tick-base"
-    );
+    const hoverDistance = hoveredIndex === null ? Number.POSITIVE_INFINITY : Math.abs(index - hoveredIndex);
+    const scrollDistance = props.scrolling ? Math.abs(index - props.activeIndex) : Number.POSITIVE_INFINITY;
+    return MOUNTAIN[Math.min(hoverDistance, scrollDistance)]?.className ?? "timeline-minimap-tick-base";
   }
 
   function cardPosition(index: number): string {
@@ -132,14 +117,8 @@ export function TimelineMinimap(props: MinimapProps) {
                   void props.onRevealMessage(turn.message_index);
                 }}
               >
-                <span className="timeline-minimap-card-title">
-                  {turn.user_text || "…"}
-                </span>
-                {turn.reply_text && (
-                  <span className="timeline-minimap-card-reply">
-                    {turn.reply_text}
-                  </span>
-                )}
+                <span className="timeline-minimap-card-title">{turn.user_text || "…"}</span>
+                {turn.reply_text && <span className="timeline-minimap-card-reply">{turn.reply_text}</span>}
               </Button>
             )}
           </div>

@@ -1,8 +1,8 @@
 # Rust Style Guide
 
 The canonical coding standard for the `src-tauri/` backend (Tauri 2.0 + Rust).
-`CLAUDE.md` links here instead of duplicating these rules — this file is the single
-source of truth.
+`AGENTS.md` links here instead of duplicating these rules — this file is the
+single source of truth.
 
 Every rule lists its **enforcing tool**:
 
@@ -13,8 +13,9 @@ Every rule lists its **enforcing tool**:
 | `compiler` | `rustc` / exhaustiveness — a violation fails to compile |
 | `review` | No automated check; enforced by human/agent review |
 
-Run `cd src-tauri && cargo fmt && cargo clippy --all-targets --all-features -- -D warnings && cargo test`
-before every commit (the lefthook pre-push hook runs this).
+Run `cd src-tauri && cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test`
+before committing larger backend changes. The lefthook pre-push hook runs these
+checks after the frontend checks.
 
 ---
 

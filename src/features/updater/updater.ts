@@ -1,14 +1,7 @@
 import type { Update } from "@tauri-apps/plugin-updater";
 import { create } from "zustand";
 
-export type UpdatePhase =
-  | "idle"
-  | "checking"
-  | "upToDate"
-  | "available"
-  | "downloading"
-  | "installing"
-  | "error";
+export type UpdatePhase = "idle" | "checking" | "upToDate" | "available" | "downloading" | "installing" | "error";
 
 interface UpdaterState {
   phase: UpdatePhase;
@@ -31,12 +24,9 @@ function setPhase(phase: UpdatePhase) {
 }
 
 // Imperative getters (also used by the phase-machine guards below).
-export const getUpdaterPhase = (): UpdatePhase =>
-  useUpdaterStore.getState().phase;
-export const getAvailableVersion = (): string | null =>
-  useUpdaterStore.getState().availableVersion;
-export const getUpdaterError = (): string | null =>
-  useUpdaterStore.getState().errorDetail;
+export const getUpdaterPhase = (): UpdatePhase => useUpdaterStore.getState().phase;
+export const getAvailableVersion = (): string | null => useUpdaterStore.getState().availableVersion;
+export const getUpdaterError = (): string | null => useUpdaterStore.getState().errorDetail;
 
 /** Clear any pending phase-reset timer. */
 function clearResetTimer() {
@@ -56,12 +46,7 @@ function scheduleReset(target: UpdatePhase, ms: number) {
 }
 
 export async function checkForUpdate(): Promise<void> {
-  if (
-    isChecking ||
-    getUpdaterPhase() === "downloading" ||
-    getUpdaterPhase() === "installing"
-  )
-    return;
+  if (isChecking || getUpdaterPhase() === "downloading" || getUpdaterPhase() === "installing") return;
   isChecking = true;
   clearResetTimer();
   setPhase("checking");

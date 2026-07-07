@@ -29,14 +29,8 @@ jobs:
       - name: Install frontend deps
         run: npm ci
 
-      - name: Type check
-        run: npx tsc --noEmit
-
-      - name: Lint (eslint-solid)
-        run: npx eslint src/
-
-      - name: Biome check (format + lint)
-        run: npx biome check src/
+      - name: Frontend check
+        run: npm run check
 
       - name: Frontend tests
         run: npm test

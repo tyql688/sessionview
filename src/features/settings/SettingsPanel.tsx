@@ -6,23 +6,14 @@ import { DataSourceSettings } from "@/features/settings/DataSourceSettings";
 import { IndexSettings } from "@/features/settings/IndexSettings";
 import { KeyboardSettings } from "@/features/settings/KeyboardSettings";
 import { AboutSettings } from "@/features/settings/AboutSettings";
-import {
-  listProviderSnapshots,
-  refreshProviderSnapshots,
-} from "@/stores/providerSnapshots";
+import { listProviderSnapshots, refreshProviderSnapshots } from "@/stores/providerSnapshots";
 import { cn } from "@/lib/utils";
 
-type SettingsCategory =
-  | "general"
-  | "dataSources"
-  | "index"
-  | "keyboard"
-  | "about";
+type SettingsCategory = "general" | "dataSources" | "index" | "keyboard" | "about";
 
 export function SettingsPanel() {
   const { t } = useI18n();
-  const [activeCategory, setActiveCategory] =
-    useState<SettingsCategory>("general");
+  const [activeCategory, setActiveCategory] = useState<SettingsCategory>("general");
 
   useEffect(() => {
     if (activeCategory === "dataSources") {
@@ -85,13 +76,9 @@ export function SettingsPanel() {
       <div className="settings-content">
         {activeCategory === "general" && <GeneralSettings />}
 
-        {activeCategory === "dataSources" && (
-          <DataSourceSettings providerSnapshots={listProviderSnapshots} />
-        )}
+        {activeCategory === "dataSources" && <DataSourceSettings providerSnapshots={listProviderSnapshots} />}
 
-        {activeCategory === "index" && (
-          <IndexSettings onIndexChanged={handleIndexChanged} />
-        )}
+        {activeCategory === "index" && <IndexSettings onIndexChanged={handleIndexChanged} />}
 
         {activeCategory === "keyboard" && <KeyboardSettings />}
 

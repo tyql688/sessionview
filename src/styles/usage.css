@@ -3,12 +3,7 @@
   overflow-y: auto;
   padding: 24px 28px 40px;
   background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--accent) 4%, transparent),
-      transparent 220px
-    ),
-    var(--bg-editor);
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 4%, transparent), transparent 220px), var(--bg-editor);
   color: var(--text-primary);
 }
 
@@ -202,8 +197,7 @@
   font-size: 11px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  box-shadow: inset 0 1px 0
-    color-mix(in srgb, var(--bg-editor) 72%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bg-editor) 72%, transparent);
 }
 
 .usage-date-trigger:hover,
@@ -408,8 +402,7 @@
   color: var(--text-primary);
   border-color: color-mix(in srgb, var(--provider-accent) 42%, var(--border));
   background: color-mix(in srgb, var(--provider-accent) 12%, var(--bg-editor));
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--provider-accent) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--provider-accent) 15%, transparent);
 }
 
 .usage-chip.inactive {
@@ -479,11 +472,7 @@
 .usage-summary-card {
   padding: 16px 18px;
   background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--accent) 7%, transparent),
-      transparent 140px
-    ),
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 140px),
     color-mix(in srgb, var(--bg-editor) 94%, var(--bg-sidebar));
 }
 
@@ -820,11 +809,7 @@
 .usage-spotlight-bar-fill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(
-    90deg,
-    var(--accent),
-    color-mix(in srgb, var(--accent) 45%, var(--accent-secondary))
-  );
+  background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 45%, var(--accent-secondary)));
 }
 
 .usage-spotlight-cost,
@@ -1060,11 +1045,7 @@
  * Activity calendar — GitHub-style contribution heatmap.
  * ------------------------------------------------------------------------- */
 .usage-heatmap-card {
-  --heatmap-control-bg: color-mix(
-    in srgb,
-    var(--bg-sidebar) 84%,
-    var(--bg-editor)
-  );
+  --heatmap-control-bg: color-mix(in srgb, var(--bg-sidebar) 84%, var(--bg-editor));
   --heatmap-cell-outline: color-mix(in srgb, var(--border) 74%, transparent);
   padding: 16px;
   display: flex;
@@ -1108,8 +1089,7 @@
   border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
   border-radius: 10px;
   background: var(--heatmap-control-bg);
-  box-shadow: inset 0 1px 0
-    color-mix(in srgb, var(--bg-editor) 70%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bg-editor) 70%, transparent);
 }
 
 .usage-heatmap-card .usage-metric-toggle {

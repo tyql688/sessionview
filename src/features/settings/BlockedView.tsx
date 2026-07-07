@@ -1,11 +1,7 @@
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n/index";
-import {
-  removeBlockedFolder,
-  useBlockedFolders,
-  useBlockedFoldersError,
-} from "@/stores/settings";
+import { removeBlockedFolder, useBlockedFolders, useBlockedFoldersError } from "@/stores/settings";
 
 export function BlockedView(props: { onRefreshTree?: () => void }) {
   const { t } = useI18n();
@@ -15,9 +11,7 @@ export function BlockedView(props: { onRefreshTree?: () => void }) {
   return (
     <div className="blocked-view">
       <div className="explorer-header">{t("settings.blockedFolders")}</div>
-      {blockedFoldersError && (
-        <div className="session-error">{blockedFoldersError}</div>
-      )}
+      {blockedFoldersError && <div className="session-error">{blockedFoldersError}</div>}
       {!blockedFoldersError && blockedFolders.length > 0 ? (
         <div className="blocked-list">
           {blockedFolders.map((folder) => {

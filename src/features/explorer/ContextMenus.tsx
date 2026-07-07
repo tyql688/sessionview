@@ -25,9 +25,7 @@ export function buildSessionMenuItems(ctx: SessionMenuContext): MenuItemDef[] {
     {
       label: t("contextMenu.copySessionId"),
       onClick: () => {
-        void navigator.clipboard
-          .writeText(node.id)
-          .then(() => toast(t("toast.idCopied")));
+        void navigator.clipboard.writeText(node.id).then(() => toast(t("toast.idCopied")));
       },
     },
     {
@@ -57,9 +55,7 @@ export function buildSessionMenuItems(ctx: SessionMenuContext): MenuItemDef[] {
           {
             label: t("contextMenu.copyPath"),
             onClick: () => {
-              void navigator.clipboard
-                .writeText(sessionProjectPath)
-                .then(() => toast(t("toast.copied")));
+              void navigator.clipboard.writeText(sessionProjectPath).then(() => toast(t("toast.copied")));
             },
           },
         ]
@@ -113,18 +109,14 @@ export interface SelectionMenuContext {
   exportSelectedBatch: () => void;
 }
 
-export function buildSelectionMenuItems(
-  ctx: SelectionMenuContext,
-): MenuItemDef[] {
+export function buildSelectionMenuItems(ctx: SelectionMenuContext): MenuItemDef[] {
   return [
     {
-      label: () =>
-        `${ctx.t("contextMenu.deleteSelected")} (${selectionCount()})`,
+      label: () => `${ctx.t("contextMenu.deleteSelected")} (${selectionCount()})`,
       onClick: ctx.trashSelected,
     },
     {
-      label: () =>
-        `${ctx.t("contextMenu.exportSelected")} (${selectionCount()})`,
+      label: () => `${ctx.t("contextMenu.exportSelected")} (${selectionCount()})`,
       onClick: ctx.exportSelectedBatch,
     },
   ];
@@ -182,9 +174,7 @@ export function buildNodeMenuItems(ctx: NodeMenuContext): MenuItemDef[] {
           {
             label: t("contextMenu.copyPath"),
             onClick: () => {
-              void navigator.clipboard
-                .writeText(projectPath)
-                .then(() => toast(t("toast.copied")));
+              void navigator.clipboard.writeText(projectPath).then(() => toast(t("toast.copied")));
             },
           },
           { label: "", separator: true, onClick: () => {} },

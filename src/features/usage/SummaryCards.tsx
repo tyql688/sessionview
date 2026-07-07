@@ -31,9 +31,7 @@ export function SummaryCards(props: SummaryCardsProps) {
           <div className="usage-cost-row">
             <div className="usage-cost-hero">{fmtCost(props.totalCost)}</div>
             {props.totalCostTrend !== null && (
-              <span
-                className={`usage-trend ${trendClass(props.totalCostTrend, true)}`}
-              >
+              <span className={`usage-trend ${trendClass(props.totalCostTrend, true)}`}>
                 {fmtTrend(props.totalCostTrend)}
               </span>
             )}
@@ -48,9 +46,7 @@ export function SummaryCards(props: SummaryCardsProps) {
               <strong className="usage-kpi-value">{item.value}</strong>
               <span className="usage-kpi-sub">
                 {item.trend !== null ? (
-                  <span className={`usage-trend ${trendClass(item.trend)}`}>
-                    {fmtTrend(item.trend)}
-                  </span>
+                  <span className={`usage-trend ${trendClass(item.trend)}`}>{fmtTrend(item.trend)}</span>
                 ) : (
                   " "
                 )}
@@ -71,9 +67,7 @@ export function SummaryCards(props: SummaryCardsProps) {
       </div>
 
       <div className="usage-summary-notes">
-        <span className="usage-note-pill">
-          {t("usage.rebuildKeepsSessions")}
-        </span>
+        <span className="usage-note-pill">{t("usage.rebuildKeepsSessions")}</span>
         <span className="usage-note-pill">{t("usage.pricingSourceNote")}</span>
       </div>
     </section>

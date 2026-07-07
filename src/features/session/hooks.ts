@@ -63,10 +63,7 @@ export function isRenderableMessage(msg: Message): boolean {
  * window-relative indices here silently broke turn anchors and minimap jumps
  * for any session larger than the initial tail.
  */
-export function processMessages(
-  msgs: Message[],
-  windowStart: number,
-): ProcessedEntry[] {
+export function processMessages(msgs: Message[], windowStart: number): ProcessedEntry[] {
   const entries: ProcessedEntry[] = [];
   const renderableMsgs = msgs
     .map((msg, i) => ({ msg, messageIndex: windowStart + i }))
@@ -81,18 +78,13 @@ export function processMessages(
       const toolGroup: Message[] = [msg];
       const toolIndices: number[] = [messageIndex];
       let j = i + 1;
-      while (
-        j < renderableMsgs.length &&
-        isMergeableToolMessage(renderableMsgs[j].msg)
-      ) {
+      while (j < renderableMsgs.length && isMergeableToolMessage(renderableMsgs[j].msg)) {
         toolGroup.push(renderableMsgs[j].msg);
         toolIndices.push(renderableMsgs[j].messageIndex);
         j++;
       }
       if (toolGroup.length > 1) {
-        const toolNames = toolGroup
-          .map((m) => m.tool_name)
-          .filter((n): n is string => !!n && n.trim().length > 0);
+        const toolNames = toolGroup.map((m) => m.tool_name).filter((n): n is string => !!n && n.trim().length > 0);
         entries.push({
           // Keys are built on absolute indices so prepending an older page
           // never re-keys (and remounts) the already-rendered rows.

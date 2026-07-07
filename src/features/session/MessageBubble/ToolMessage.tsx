@@ -3,12 +3,7 @@ import { Button } from "@/components/ui/button";
 import type { Message } from "@/lib/types";
 import { useI18n } from "@/i18n/index";
 import { readToolResultText } from "@/lib/tauri";
-import {
-  buildToolLineDiff,
-  inlineSegments,
-  pairChangedLines,
-  type ToolDiffLine,
-} from "@/lib/diff";
+import { buildToolLineDiff, inlineSegments, pairChangedLines, type ToolDiffLine } from "@/lib/diff";
 import {
   formatToolInput,
   formatToolResultMetadata,
@@ -17,11 +12,7 @@ import {
   toolIcon,
   toolSummary,
 } from "@/lib/tools";
-import {
-  extractPersistedOutputPaths,
-  loadPersistedOutput,
-  substitutePersistedOutputs,
-} from "@/lib/persisted-output";
+import { extractPersistedOutputPaths, loadPersistedOutput, substitutePersistedOutputs } from "@/lib/persisted-output";
 import {
   SUBAGENT_FILE_PROVIDERS,
   extractAgentChildIds,
@@ -34,20 +25,10 @@ import {
 } from "@/lib/subagent";
 import { parseContent } from "@/lib/message-content";
 import { SubagentInline } from "@/features/session/MessageBubble/SubagentInline";
-import {
-  ImagePreview,
-  LocalImage,
-  RemoteImage,
-  isLocalPath,
-} from "@/features/session/MessageBubble/ImagePreview";
+import { ImagePreview, LocalImage, RemoteImage, isLocalPath } from "@/features/session/MessageBubble/ImagePreview";
 
 /** Dispatch a custom event to open a subagent session by description, nickname, or agent ID. */
-function openSubagent(
-  description: string,
-  nickname?: string,
-  agentId?: string,
-  parentSessionId?: string,
-) {
+function openSubagent(description: string, nickname?: string, agentId?: string, parentSessionId?: string) {
   window.dispatchEvent(
     new CustomEvent("open-subagent", {
       detail: { description, nickname, agentId, parentSessionId },
@@ -63,10 +44,7 @@ function subagentButtonLabel(
   total: number,
 ): string {
   if (total <= 1) return t("tool.openSubagent");
-  const identity =
-    prompt?.replace(/\s+/g, " ").trim() ||
-    agentId?.replace(/\s+/g, " ").trim() ||
-    `#${index + 1}`;
+  const identity = prompt?.replace(/\s+/g, " ").trim() || agentId?.replace(/\s+/g, " ").trim() || `#${index + 1}`;
   return t("tool.openSubagentNamed", { name: identity });
 }
 
@@ -123,18 +101,11 @@ function DiffRows(props: { lines: ToolDiffLine[] }) {
 }
 
 function LineDiff(props: { oldText: string; newText: string }) {
-  const lines = useMemo(
-    () => buildToolLineDiff(props.oldText, props.newText),
-    [props.oldText, props.newText],
-  );
+  const lines = useMemo(() => buildToolLineDiff(props.oldText, props.newText), [props.oldText, props.newText]);
   return <DiffRows lines={lines} />;
 }
 
-export function ToolMessage(props: {
-  message: Message;
-  provider?: string;
-  parentSessionId?: string;
-}) {
+export function ToolMessage(props: { message: Message; provider?: string; parentSessionId?: string }) {
   const { t } = useI18n();
   // Const copy so truthiness narrowing survives into nested JSX callbacks.
   const parentSessionId = props.parentSessionId;
@@ -147,21 +118,16 @@ export function ToolMessage(props: {
   const [fullResultError, setFullResultError] = useState<string | null>(null);
   const [loadingFullResult, setLoadingFullResult] = useState(false);
 
-  const hasInput = () =>
-    !!props.message.tool_input && props.message.tool_input.trim().length > 0;
-  const hasOutput = () =>
-    !!props.message.content && props.message.content.trim().length > 0;
-  const hasName = () =>
-    !!props.message.tool_name && props.message.tool_name.trim().length > 0;
+  const hasInput = () => !!props.message.tool_input && props.message.tool_input.trim().length > 0;
+  const hasOutput = () => !!props.message.content && props.message.content.trim().length > 0;
+  const hasName = () => !!props.message.tool_name && props.message.tool_name.trim().length > 0;
 
   // <persisted-output> tag blocks are no longer resolved at parse time
   // (see src-tauri/src/providers/claude/mod.rs comment) so we resolve
   // them here on first render. Cache hits are synchronous; first-time
   // reads briefly show the raw tag block, then swap in the file
   // content once `loadPersistedOutput` completes.
-  const [resolvedReplacements, setResolvedReplacements] = useState<
-    Map<string, string>
-  >(new Map());
+  const [resolvedReplacements, setResolvedReplacements] = useState<Map<string, string>>(new Map());
   useEffect(() => {
     const content = props.message.content || "";
     const paths = extractPersistedOutputPaths(content);
@@ -193,9 +159,7 @@ export function ToolMessage(props: {
   const resolvedContent = useMemo(() => {
     const raw = props.message.content || "";
     const replacements = resolvedReplacements;
-    return replacements.size === 0
-      ? raw
-      : substitutePersistedOutputs(raw, replacements);
+    return replacements.size === 0 ? raw : substitutePersistedOutputs(raw, replacements);
   }, [props.message.content, resolvedReplacements]);
 
   const name = () => props.message.tool_name || "";
@@ -204,17 +168,13 @@ export function ToolMessage(props: {
   const icon = () => toolIcon(name(), metadata());
   const displayName = () => toolDisplayName(name(), metadata());
   const summary = useMemo(() => toolSummary(props.message), [props.message]);
-  const formatted = useMemo(
-    () => formatToolInput(props.message),
-    [props.message],
-  );
+  const formatted = useMemo(() => formatToolInput(props.message), [props.message]);
   const resultMetadata = useMemo(
     () => formatToolResultMetadata(props.message.tool_metadata),
     [props.message.tool_metadata],
   );
   const persistedOutputPath = () => resultMetadata?.persistedOutputPath;
-  const resultHasDiff = () =>
-    !!resultMetadata?.diff || !!resultMetadata?.patchDiff;
+  const resultHasDiff = () => !!resultMetadata?.diff || !!resultMetadata?.patchDiff;
   const showInputDetail = () => !!formatted && !resultHasDiff();
   const isAgent = () => isAgentToolMessage(props.message);
   /** Parsed tool_input/tool_output JSON, memoized so each downstream
@@ -244,36 +204,22 @@ export function ToolMessage(props: {
     [props.message, toolInputObj],
   );
   const agentId = useMemo(
-    () =>
-      isAgent()
-        ? extractAgentId(
-            props.message.content,
-            props.message.tool_metadata,
-            toolInputObj,
-          )
-        : undefined,
+    () => (isAgent() ? extractAgentId(props.message.content, props.message.tool_metadata, toolInputObj) : undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [props.message, toolInputObj],
   );
   const agentChildIds = useMemo<string[] | undefined>(
-    () =>
-      isAgent() ? extractAgentChildIds(props.message.tool_metadata) : undefined,
+    () => (isAgent() ? extractAgentChildIds(props.message.tool_metadata) : undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [props.message],
   );
   const agentChildPrompts = useMemo<string[]>(
-    () =>
-      isAgent() ? extractAgentChildPrompts(props.message.tool_metadata) : [],
+    () => (isAgent() ? extractAgentChildPrompts(props.message.tool_metadata) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [props.message],
   );
   const agentPromptTargets = useMemo<string[]>(() => {
-    if (
-      !isAgent() ||
-      props.provider !== "antigravity" ||
-      metadata()?.raw_name !== "invoke_subagent" ||
-      agentChildIds
-    ) {
+    if (!isAgent() || props.provider !== "antigravity" || metadata()?.raw_name !== "invoke_subagent" || agentChildIds) {
       return [];
     }
     return agentChildPrompts.filter((prompt) => prompt.trim().length > 0);
@@ -312,22 +258,13 @@ export function ToolMessage(props: {
     if (policy === "keep") return false;
 
     const kind = props.message.tool_metadata?.result_kind;
-    return (
-      !!resultMetadata &&
-      (kind === "terminal_output" || (kind === "file_patch" && resultHasDiff()))
-    );
+    return !!resultMetadata && (kind === "terminal_output" || (kind === "file_patch" && resultHasDiff()));
   };
   const showRawOutput = () => expanded && hasOutput() && !suppressRawOutput();
   const outputSegments = useMemo(
     () => (showRawOutput() ? parseContent(resolvedContent) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      expanded,
-      props.message.content,
-      props.message.tool_metadata,
-      resultMetadata,
-      resolvedContent,
-    ],
+    [expanded, props.message.content, props.message.tool_metadata, resultMetadata, resolvedContent],
   );
 
   if (!hasName()) return null;
@@ -344,21 +281,12 @@ export function ToolMessage(props: {
           (
             agentChildIds ??
             (agentPromptTargets.length > 0 ? agentPromptTargets : undefined) ??
-            (canOpenSingleAgent &&
-            (agentNickname || agentId || agentDescription)
-              ? [null]
-              : [])
+            (canOpenSingleAgent && (agentNickname || agentId || agentDescription) ? [null] : [])
           ).length > 0 &&
           (agentChildIds ? (
             agentChildIds.map((childId, i) => {
               const prompt = agentChildPrompts[i] ?? "";
-              const label = subagentButtonLabel(
-                t,
-                prompt,
-                childId,
-                i,
-                (agentChildIds ?? []).length,
-              );
+              const label = subagentButtonLabel(t, prompt, childId, i, (agentChildIds ?? []).length);
               return (
                 <Button
                   variant="ghost"
@@ -367,18 +295,9 @@ export function ToolMessage(props: {
                   key={childId}
                   onClick={(e) => {
                     e.stopPropagation();
-                    openSubagent(
-                      prompt || agentDescription || summary,
-                      undefined,
-                      childId,
-                      props.parentSessionId,
-                    );
+                    openSubagent(prompt || agentDescription || summary, undefined, childId, props.parentSessionId);
                   }}
-                  title={
-                    prompt
-                      ? prompt
-                      : t("tool.openSubagentTitleId", { id: childId })
-                  }
+                  title={prompt ? prompt : t("tool.openSubagentTitleId", { id: childId })}
                 >
                   {label}
                 </Button>
@@ -386,13 +305,7 @@ export function ToolMessage(props: {
             })
           ) : agentPromptTargets.length > 0 ? (
             agentPromptTargets.map((prompt, i) => {
-              const label = subagentButtonLabel(
-                t,
-                prompt,
-                undefined,
-                i,
-                agentPromptTargets.length,
-              );
+              const label = subagentButtonLabel(t, prompt, undefined, i, agentPromptTargets.length);
               return (
                 <Button
                   variant="ghost"
@@ -401,12 +314,7 @@ export function ToolMessage(props: {
                   key={i}
                   onClick={(e) => {
                     e.stopPropagation();
-                    openSubagent(
-                      prompt,
-                      undefined,
-                      undefined,
-                      props.parentSessionId,
-                    );
+                    openSubagent(prompt, undefined, undefined, props.parentSessionId);
                   }}
                   title={prompt}
                 >
@@ -421,12 +329,7 @@ export function ToolMessage(props: {
               className="msg-tool-subagent-link h-auto min-w-0 active:translate-y-0"
               onClick={(e) => {
                 e.stopPropagation();
-                openSubagent(
-                  agentDescription ?? summary,
-                  agentNickname,
-                  agentId,
-                  props.parentSessionId,
-                );
+                openSubagent(agentDescription ?? summary, agentNickname, agentId, props.parentSessionId);
               }}
               title={t("tool.openSubagentTitle")}
             >
@@ -447,15 +350,8 @@ export function ToolMessage(props: {
                   <pre className="msg-tool-field-value">{line.value}</pre>
                 </div>
               ))}
-              {formatted!.diff && (
-                <LineDiff
-                  oldText={formatted!.diff!.old}
-                  newText={formatted!.diff!.new}
-                />
-              )}
-              {formatted!.patchDiff && (
-                <DiffRows lines={formatted!.patchDiff!} />
-              )}
+              {formatted!.diff && <LineDiff oldText={formatted!.diff!.old} newText={formatted!.diff!.new} />}
+              {formatted!.patchDiff && <DiffRows lines={formatted!.patchDiff!} />}
             </div>
           )}
           {resultMetadata && (
@@ -466,15 +362,8 @@ export function ToolMessage(props: {
                   <pre className="msg-tool-field-value">{line.value}</pre>
                 </div>
               ))}
-              {resultMetadata.diff && (
-                <LineDiff
-                  oldText={resultMetadata.diff.old}
-                  newText={resultMetadata.diff.new}
-                />
-              )}
-              {resultMetadata.patchDiff && (
-                <DiffRows lines={resultMetadata.patchDiff} />
-              )}
+              {resultMetadata.diff && <LineDiff oldText={resultMetadata.diff.old} newText={resultMetadata.diff.new} />}
+              {resultMetadata.patchDiff && <DiffRows lines={resultMetadata.patchDiff} />}
               {persistedOutputPath() && (
                 <Button
                   variant="ghost"
@@ -487,14 +376,10 @@ export function ToolMessage(props: {
                   }}
                   type="button"
                 >
-                  {loadingFullResult
-                    ? t("common.loading")
-                    : t("tool.loadFullResult")}
+                  {loadingFullResult ? t("common.loading") : t("tool.loadFullResult")}
                 </Button>
               )}
-              {fullResultError && (
-                <pre className="msg-tool-input">{fullResultError}</pre>
-              )}
+              {fullResultError && <pre className="msg-tool-input">{fullResultError}</pre>}
               {fullResult && <pre className="msg-tool-input">{fullResult}</pre>}
             </div>
           )}
@@ -510,9 +395,7 @@ export function ToolMessage(props: {
                       <LocalImage
                         key={i}
                         path={seg.content}
-                        onPreview={(src, source) =>
-                          setPreviewImage({ src, source })
-                        }
+                        onPreview={(src, source) => setPreviewImage({ src, source })}
                       />
                     );
                   }
@@ -520,9 +403,7 @@ export function ToolMessage(props: {
                     <RemoteImage
                       key={i}
                       src={seg.content}
-                      onPreview={(src, source) =>
-                        setPreviewImage({ src, source })
-                      }
+                      onPreview={(src, source) => setPreviewImage({ src, source })}
                     />
                   );
                 }
@@ -542,13 +423,10 @@ export function ToolMessage(props: {
                     agentId: childId,
                     description: agentChildPrompts[i] || agentDescription,
                   }}
-                  label={
-                    agentChildPrompts[i]?.replace(/\s+/g, " ").trim() || childId
-                  }
+                  label={agentChildPrompts[i]?.replace(/\s+/g, " ").trim() || childId}
                 />
               ))
-            ) : canOpenSingleAgent &&
-              (agentNickname || agentId || agentDescription) ? (
+            ) : canOpenSingleAgent && (agentNickname || agentId || agentDescription) ? (
               <SubagentInline
                 parentSessionId={parentSessionId}
                 request={{
@@ -562,11 +440,7 @@ export function ToolMessage(props: {
         </>
       )}
       {previewImage && (
-        <ImagePreview
-          src={previewImage.src}
-          source={previewImage.source}
-          onClose={() => setPreviewImage(null)}
-        />
+        <ImagePreview src={previewImage.src} source={previewImage.source} onClose={() => setPreviewImage(null)} />
       )}
     </div>
   );

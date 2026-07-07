@@ -20,12 +20,7 @@ import {
   type StreamdownTranslations,
 } from "streamdown";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { useI18n } from "@/i18n/index";
 import { useResolvedTheme } from "@/stores/theme";
 import { openExternalUrl } from "@/lib/external-links";
@@ -39,9 +34,7 @@ const code = createCodePlugin({ themes: ["github-light", "github-dark"] });
 /** Streamdown's built-in control labels default to English — feed them from
  * the app locale. The `markdown.*` keys mirror StreamdownTranslations field
  * names one-to-one. */
-const STREAMDOWN_TRANSLATION_KEYS = Object.keys(
-  defaultTranslations,
-) as (keyof StreamdownTranslations)[];
+const STREAMDOWN_TRANSLATION_KEYS = Object.keys(defaultTranslations) as (keyof StreamdownTranslations)[];
 
 function useStreamdownTranslations(): StreamdownTranslations {
   const { t } = useI18n();
@@ -81,19 +74,12 @@ function ExternalLinkModal({ isOpen, onClose, url }: LinkSafetyModalProps) {
     <Dialog open={isOpen} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="max-w-sm gap-3" showCloseButton={false}>
         <DialogTitle>{t("markdown.openExternalLink")}</DialogTitle>
-        <DialogDescription className="-mt-1">
-          {t("markdown.externalLinkWarning")}
-        </DialogDescription>
+        <DialogDescription className="-mt-1">{t("markdown.externalLinkWarning")}</DialogDescription>
         <div className="max-h-24 overflow-auto rounded-md border border-border-subtle bg-surface-code px-2.5 py-2 font-mono text-xs break-all text-text-secondary">
           {url}
         </div>
         <div className="flex items-center justify-end gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => void copyLink()}
-          >
+          <Button type="button" variant="ghost" size="sm" onClick={() => void copyLink()}>
             {copied ? (
               <Check className="size-3.5" aria-hidden="true" />
             ) : (
@@ -149,8 +135,7 @@ export const Markdown = memo(function Markdown({
     const natural = { useMaxWidth: false };
     return {
       config: {
-        theme:
-          resolvedTheme === "dark" ? ("dark" as const) : ("default" as const),
+        theme: resolvedTheme === "dark" ? ("dark" as const) : ("default" as const),
         flowchart: natural,
         sequence: natural,
         gantt: natural,

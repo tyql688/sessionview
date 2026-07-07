@@ -6,12 +6,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ChevronsRight } from "lucide-react";
-import {
-  type MouseEvent as ReactMouseEvent,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
 import type { SessionRef, Provider } from "@/lib/types";
 import { useI18n } from "@/i18n/index";
 import { ContextMenu, type MenuItemDef } from "@/components/ContextMenu";
@@ -74,15 +69,13 @@ export function TabBar(props: {
   useEffect(() => {
     const id = props.activeTabId;
     if (!id || !scrollRef.current) return;
-    const el = scrollRef.current.querySelector(
-      `[data-tab-id="${CSS.escape(id)}"]`,
-    ) as HTMLElement | null;
+    const el = scrollRef.current.querySelector(`[data-tab-id="${CSS.escape(id)}"]`) as HTMLElement | null;
     el?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [props.activeTabId]);
 
   // Natural horizontal wheel scroll. React attaches `wheel` as a passive
   // listener at the root, so `preventDefault()` there is a no-op — attach a
-  // non-passive native listener to keep the Solid behavior.
+  // non-passive native listener for consistent horizontal tab scrolling.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -153,9 +146,7 @@ export function TabBar(props: {
         onDrop={(e) => {
           e.preventDefault();
           const rawPayload =
-            e.dataTransfer?.getData(TAB_DRAG_MIME) ||
-            e.dataTransfer?.getData(TAB_DRAG_FALLBACK_MIME) ||
-            "";
+            e.dataTransfer?.getData(TAB_DRAG_MIME) || e.dataTransfer?.getData(TAB_DRAG_FALLBACK_MIME) || "";
           if (rawPayload.length === 0) return;
 
           try {
@@ -209,10 +200,7 @@ export function TabBar(props: {
               }}
               onContextMenu={(e) => handleContextMenu(e, tab.id)}
             >
-              <span
-                className="tab-dot"
-                style={{ background: providerColor(tab.provider) }}
-              />
+              <span className="tab-dot" style={{ background: providerColor(tab.provider) }} />
               <span className="tab-title">{tab.title}</span>
               <Button
                 variant="ghost"
@@ -246,21 +234,14 @@ export function TabBar(props: {
           >
             <ChevronsRight className="size-3.5" aria-hidden="true" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            side="bottom"
-            className="w-64 max-w-80"
-          >
+          <DropdownMenuContent align="end" side="bottom" className="w-64 max-w-80">
             {props.tabs.map((tab) => (
               <DropdownMenuItem
                 key={tab.id}
                 className={`tab-overflow-item${tab.id === props.activeTabId ? " active" : ""}${tab.id === props.previewTabId ? " preview" : ""}`}
                 onClick={() => props.onTabSelect(tab.id)}
               >
-                <span
-                  className="tab-dot"
-                  style={{ background: providerColor(tab.provider) }}
-                />
+                <span className="tab-dot" style={{ background: providerColor(tab.provider) }} />
                 <span className="tab-overflow-title">{tab.title}</span>
               </DropdownMenuItem>
             ))}
@@ -268,11 +249,7 @@ export function TabBar(props: {
         </DropdownMenu>
       )}
 
-      <ContextMenu
-        items={menuItems()}
-        position={menuState?.pos ?? null}
-        onClose={() => setMenuState(null)}
-      />
+      <ContextMenu items={menuItems()} position={menuState?.pos ?? null} onClose={() => setMenuState(null)} />
     </div>
   );
 }

@@ -1,14 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import {
-  setPendingSessionSearch,
-  usePendingSessionSearch,
-} from "@/features/search/search";
-import {
-  applySearchHighlight,
-  buildMatchLocations,
-  SESSION_SEARCH_DEBOUNCE_MS,
-} from "@/features/session/search-utils";
+import { setPendingSessionSearch, usePendingSessionSearch } from "@/features/search/search";
+import { applySearchHighlight, buildMatchLocations, SESSION_SEARCH_DEBOUNCE_MS } from "@/features/session/search-utils";
 import type { ProcessedEntry } from "@/features/session/hooks";
 
 export interface CreateSessionSearchOptions {
@@ -51,9 +44,7 @@ export interface CreateSessionSearchResult {
  * DOM highlight paint runs separately in SessionView over whatever rows are
  * mounted.
  */
-export function useSessionSearch(
-  opts: CreateSessionSearchOptions,
-): CreateSessionSearchResult {
+export function useSessionSearch(opts: CreateSessionSearchOptions): CreateSessionSearchResult {
   const [sessionSearch, setSessionSearch] = useState("");
   const [activeSessionSearch, setActiveSessionSearch] = useState("");
   const [searchBarOpen, setSearchBarOpen] = useState(false);
@@ -73,9 +64,7 @@ export function useSessionSearch(
   const searchMatchIdxRef = useRef(searchMatchIdx);
   searchMatchIdxRef.current = searchMatchIdx;
 
-  const sessionSearchDebounceRef = useRef<
-    ReturnType<typeof setTimeout> | undefined
-  >(undefined);
+  const sessionSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const suppressNextSearchEffectRef = useRef(false);
   const searchRequestIdRef = useRef(0);
   useEffect(() => {
@@ -95,10 +84,7 @@ export function useSessionSearch(
 
     // Page in the complete session so the data-level match list is total.
     await opts.resolveCompleteSearchMatch(term);
-    if (
-      requestId !== searchRequestIdRef.current ||
-      term !== sessionSearchRef.current.trim()
-    ) {
+    if (requestId !== searchRequestIdRef.current || term !== sessionSearchRef.current.trim()) {
       return;
     }
     setActiveSessionSearch(term);
@@ -118,8 +104,7 @@ export function useSessionSearch(
   function navigateMatch(delta: number) {
     const locations = matchLocationsRef.current;
     if (locations.length === 0) return;
-    const next =
-      (searchMatchIdxRef.current + delta + locations.length) % locations.length;
+    const next = (searchMatchIdxRef.current + delta + locations.length) % locations.length;
     setSearchMatchIdx(next);
     opts.revealEntry(locations[next]);
   }
@@ -135,8 +120,7 @@ export function useSessionSearch(
     // Only arm the suppress flag when the state write actually changes the
     // value — an identical query re-runs no effect, and a stale flag would
     // swallow the user's next keystroke.
-    suppressNextSearchEffectRef.current =
-      pending.query !== sessionSearchRef.current;
+    suppressNextSearchEffectRef.current = pending.query !== sessionSearchRef.current;
     setSessionSearch(pending.query);
     setSearchBarOpen(true);
     void commitSessionSearch(pending.query);
@@ -154,10 +138,7 @@ export function useSessionSearch(
       void commitSessionSearch("");
       return;
     }
-    sessionSearchDebounceRef.current = setTimeout(
-      () => void commitSessionSearch(raw),
-      SESSION_SEARCH_DEBOUNCE_MS,
-    );
+    sessionSearchDebounceRef.current = setTimeout(() => void commitSessionSearch(raw), SESSION_SEARCH_DEBOUNCE_MS);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionSearch]);
 

@@ -63,33 +63,17 @@ export function TrashView(props: { onRefreshTree: () => void }) {
           )}
           {isLeaf && <span className="trash-tree-spacer" />}
 
-          {node.node_type === "provider" && node.provider && (
-            <ProviderDot provider={node.provider} />
-          )}
+          {node.node_type === "provider" && node.provider && <ProviderDot provider={node.provider} />}
           {isGroup && (
             <span className="trash-tree-icon">
-              <svg
-                width="14"
-                height="14"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                viewBox="0 0 24 24"
-              >
+              <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
                 <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
               </svg>
             </span>
           )}
           {isLeaf && (
             <span className="trash-tree-icon trash-tree-icon-session">
-              <svg
-                width="14"
-                height="14"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                viewBox="0 0 24 24"
-              >
+              <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
                 <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
               </svg>
             </span>
@@ -139,9 +123,7 @@ export function TrashView(props: { onRefreshTree: () => void }) {
 
           {isLeaf && trashItem && (
             <>
-              <span className="trash-tree-date">
-                {formatAbsoluteTime(trashItem.trashed_at)}
-              </span>
+              <span className="trash-tree-date">{formatAbsoluteTime(trashItem.trashed_at)}</span>
               <div className="trash-tree-actions">
                 <Button
                   variant="ghost"
@@ -174,9 +156,7 @@ export function TrashView(props: { onRefreshTree: () => void }) {
 
         {expanded &&
           !isLeaf &&
-          node.children.map((child) => (
-            <TrashTreeNode key={child.id} node={child} depth={depth + 1} />
-          ))}
+          node.children.map((child) => <TrashTreeNode key={child.id} node={child} depth={depth + 1} />)}
       </div>
     );
   }
@@ -186,42 +166,33 @@ export function TrashView(props: { onRefreshTree: () => void }) {
       <div className="trash-header">
         <span className="trash-title">
           {t("trash.title")}
-          {trashItems && trashItems.length > 0 && (
-            <span className="trash-count"> ({trashItems.length})</span>
-          )}
+          {trashItems && trashItems.length > 0 && <span className="trash-count"> ({trashItems.length})</span>}
         </span>
         {trashItems && trashItems.length > 0 && (
-          <Button
-            variant="destructive"
-            size="xs"
-            onClick={() => setShowEmptyConfirm(true)}
-          >
+          <Button variant="destructive" size="xs" onClick={() => setShowEmptyConfirm(true)}>
             {t("trash.emptyTrash")}
           </Button>
         )}
       </div>
 
       <div className="trash-list">
-        {!trashLoading &&
-          !trashError &&
-          trashItems &&
-          trashItems.length === 0 && (
-            <div className="trash-empty-state">
-              <svg
-                className="icon-faded"
-                width="32"
-                height="32"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1"
-                viewBox="0 0 24 24"
-              >
-                <polyline points="3 6 5 6 21 6" />
-                <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-              </svg>
-              <span>{t("trash.empty")}</span>
-            </div>
-          )}
+        {!trashLoading && !trashError && trashItems && trashItems.length === 0 && (
+          <div className="trash-empty-state">
+            <svg
+              className="icon-faded"
+              width="32"
+              height="32"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1"
+              viewBox="0 0 24 24"
+            >
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+            </svg>
+            <span>{t("trash.empty")}</span>
+          </div>
+        )}
 
         {trashLoading && (
           <div className="trash-empty-state">

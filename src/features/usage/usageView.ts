@@ -54,47 +54,31 @@ const useUsageViewStore = create<UsageViewState>(() => ({
   sessionSort: { col: "updated_at", asc: false },
 }));
 
-export const setRangeDays = (rangeDays: number | null) =>
-  useUsageViewStore.setState({ rangeDays });
-export const setCustomRange = (customRange: CustomDateRange | null) =>
-  useUsageViewStore.setState({ customRange });
+export const setRangeDays = (rangeDays: number | null) => useUsageViewStore.setState({ rangeDays });
+export const setCustomRange = (customRange: CustomDateRange | null) => useUsageViewStore.setState({ customRange });
 export const setSelectedProviders = (selectedProviders: Set<string>) =>
   useUsageViewStore.setState({ selectedProviders });
-export const setDidInitProviders = (didInitProviders: boolean) =>
-  useUsageViewStore.setState({ didInitProviders });
-export const setProviderSelectionTouched = (
-  providerSelectionTouched: boolean,
-) => useUsageViewStore.setState({ providerSelectionTouched });
-export const setProjectLimit = (projectLimit: LimitOption) =>
-  useUsageViewStore.setState({ projectLimit });
-export const setSessionLimit = (sessionLimit: LimitOption) =>
-  useUsageViewStore.setState({ sessionLimit });
-export const setChartMetric = (chartMetric: ChartMetric) =>
-  useUsageViewStore.setState({ chartMetric });
-export const setCalendarMetric = (calendarMetric: HeatmapMetric) =>
-  useUsageViewStore.setState({ calendarMetric });
-export const setCalendarYear = (calendarYear: number | null) =>
-  useUsageViewStore.setState({ calendarYear });
-export const setModelSort = (modelSort: UsageSortState) =>
-  useUsageViewStore.setState({ modelSort });
-export const setProjectSort = (projectSort: UsageSortState) =>
-  useUsageViewStore.setState({ projectSort });
-export const setSessionSort = (sessionSort: UsageSortState) =>
-  useUsageViewStore.setState({ sessionSort });
+export const setDidInitProviders = (didInitProviders: boolean) => useUsageViewStore.setState({ didInitProviders });
+export const setProviderSelectionTouched = (providerSelectionTouched: boolean) =>
+  useUsageViewStore.setState({ providerSelectionTouched });
+export const setProjectLimit = (projectLimit: LimitOption) => useUsageViewStore.setState({ projectLimit });
+export const setSessionLimit = (sessionLimit: LimitOption) => useUsageViewStore.setState({ sessionLimit });
+export const setChartMetric = (chartMetric: ChartMetric) => useUsageViewStore.setState({ chartMetric });
+export const setCalendarMetric = (calendarMetric: HeatmapMetric) => useUsageViewStore.setState({ calendarMetric });
+export const setCalendarYear = (calendarYear: number | null) => useUsageViewStore.setState({ calendarYear });
+export const setModelSort = (modelSort: UsageSortState) => useUsageViewStore.setState({ modelSort });
+export const setProjectSort = (projectSort: UsageSortState) => useUsageViewStore.setState({ projectSort });
+export const setSessionSort = (sessionSort: UsageSortState) => useUsageViewStore.setState({ sessionSort });
 
 export const useRangeDays = () => useUsageViewStore((s) => s.rangeDays);
 export const useCustomRange = () => useUsageViewStore((s) => s.customRange);
-export const useSelectedProviders = () =>
-  useUsageViewStore((s) => s.selectedProviders);
-export const useDidInitProviders = () =>
-  useUsageViewStore((s) => s.didInitProviders);
-export const useProviderSelectionTouched = () =>
-  useUsageViewStore((s) => s.providerSelectionTouched);
+export const useSelectedProviders = () => useUsageViewStore((s) => s.selectedProviders);
+export const useDidInitProviders = () => useUsageViewStore((s) => s.didInitProviders);
+export const useProviderSelectionTouched = () => useUsageViewStore((s) => s.providerSelectionTouched);
 export const useProjectLimit = () => useUsageViewStore((s) => s.projectLimit);
 export const useSessionLimit = () => useUsageViewStore((s) => s.sessionLimit);
 export const useChartMetric = () => useUsageViewStore((s) => s.chartMetric);
-export const useCalendarMetric = () =>
-  useUsageViewStore((s) => s.calendarMetric);
+export const useCalendarMetric = () => useUsageViewStore((s) => s.calendarMetric);
 export const useCalendarYear = () => useUsageViewStore((s) => s.calendarYear);
 export const useModelSort = () => useUsageViewStore((s) => s.modelSort);
 export const useProjectSort = () => useUsageViewStore((s) => s.projectSort);

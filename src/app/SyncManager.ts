@@ -118,9 +118,7 @@ export function createSyncManager(callbacks: SyncCallbacks) {
           toastError(`${t("usage.firstUseBootstrapFailed")}: ${String(error)}`);
           return;
         }
-        await new Promise((resolve) =>
-          setTimeout(resolve, RETRY_BACKOFF_MS * attempt),
-        );
+        await new Promise((resolve) => setTimeout(resolve, RETRY_BACKOFF_MS * attempt));
       }
     }
   }

@@ -1,7 +1,4 @@
-import {
-  fmtTokens as fmtTokensShared,
-  shortenHomePath,
-} from "@/lib/formatters";
+import { fmtTokens as fmtTokensShared, shortenHomePath } from "@/lib/formatters";
 import type { ChartMetric, UsageSortState } from "@/lib/usage";
 
 /** Chip-width provider label: the first word of the snapshot label
@@ -23,9 +20,7 @@ export function fmtPct(n: number): string {
   return `${(n * 100).toFixed(0)}%`;
 }
 
-export function makeFmtChartValue(
-  metric: () => ChartMetric,
-): (n: number) => string {
+export function makeFmtChartValue(metric: () => ChartMetric): (n: number) => string {
   return (n) => (metric() === "cost" ? fmtCost(n) : fmtTokens(n));
 }
 
@@ -36,10 +31,7 @@ export function fmtTrend(pct: number | null): string {
   return `${arrow} ${abs.toFixed(0)}%`;
 }
 
-export function trendClass(
-  pct: number | null,
-  invertColor: boolean = false,
-): string {
+export function trendClass(pct: number | null, invertColor: boolean = false): string {
   if (pct === null) return "";
   if (pct > 0) return invertColor ? "usage-trend-down" : "usage-trend-up";
   if (pct < 0) return invertColor ? "usage-trend-up" : "usage-trend-down";
@@ -55,17 +47,11 @@ export function fmtActive(ts: number): string {
   return `${Math.floor(diff / 86400)}d`;
 }
 
-export function formatProjectPath(
-  projectPath: string,
-  fallback: string,
-): string {
+export function formatProjectPath(projectPath: string, fallback: string): string {
   return shortenHomePath(projectPath || fallback);
 }
 
-export function sortIcon(
-  currentSort: UsageSortState,
-  col: string,
-): "↕" | "↑" | "↓" {
+export function sortIcon(currentSort: UsageSortState, col: string): "↕" | "↑" | "↓" {
   if (currentSort.col !== col) return "↕";
   return currentSort.asc ? "↑" : "↓";
 }

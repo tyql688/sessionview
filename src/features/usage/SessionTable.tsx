@@ -2,12 +2,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useI18n } from "@/i18n/index";
 import type { SessionCostRow } from "@/lib/types";
 import { ROW_LIMIT_OPTIONS, type UsageSortState } from "@/lib/usage";
-import {
-  fmtActive,
-  fmtCost,
-  fmtTokens,
-  sortIcon,
-} from "@/features/usage/formatters";
+import { fmtActive, fmtCost, fmtTokens, sortIcon } from "@/features/usage/formatters";
 import type { LimitOption } from "@/features/usage/usageView";
 import type { ProviderChipInfo } from "@/features/usage/Toolbar";
 import { cn } from "@/lib/utils";
@@ -35,8 +30,7 @@ export function SessionTable(props: SessionTableProps) {
         <div>
           <div className="usage-section-title">{t("usage.recentSessions")}</div>
           <div className="usage-section-subtitle">
-            {Math.min(props.sessionLimit, props.totalSessionCount)}/
-            {props.totalSessionCount}
+            {Math.min(props.sessionLimit, props.totalSessionCount)}/{props.totalSessionCount}
           </div>
         </div>
         <ToggleGroup
@@ -55,10 +49,7 @@ export function SessionTable(props: SessionTableProps) {
             <ToggleGroupItem
               key={limit}
               value={String(limit)}
-              className={cn(
-                "usage-limit-btn h-auto min-w-0",
-                props.sessionLimit === limit && "active",
-              )}
+              className={cn("usage-limit-btn h-auto min-w-0", props.sessionLimit === limit && "active")}
             >
               {limit}
             </ToggleGroupItem>
@@ -97,28 +88,18 @@ export function SessionTable(props: SessionTableProps) {
                 <tr key={row.id}>
                   <td>
                     <div className="usage-entity-cell">
-                      <div className="usage-entity-title">
-                        {props.formatProjectName(row.project, row.project_path)}
-                      </div>
-                      <div
-                        className="usage-entity-subtitle"
-                        title={props.formatProjectPath(row.project_path)}
-                      >
+                      <div className="usage-entity-title">{props.formatProjectName(row.project, row.project_path)}</div>
+                      <div className="usage-entity-subtitle" title={props.formatProjectPath(row.project_path)}>
                         {props.formatProjectPath(row.project_path)}
                       </div>
                     </div>
                   </td>
                   <td className="usage-provider-cell">
-                    <span
-                      className="usage-provider-dot"
-                      style={{ background: info.color }}
-                    />
+                    <span className="usage-provider-dot" style={{ background: info.color }} />
                     {info.label}
                   </td>
                   <td>
-                    <span className="usage-model-tag">
-                      {props.formatModelName(row.model)}
-                    </span>
+                    <span className="usage-model-tag">{props.formatModelName(row.model)}</span>
                   </td>
                   <td className="r usage-dim">{fmtActive(row.updated_at)}</td>
                   <td className="r">{row.turns.toLocaleString()}</td>

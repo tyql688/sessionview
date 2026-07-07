@@ -25,25 +25,16 @@ export function TopModels(props: TopModelsProps) {
           {props.topModels.map((row) => (
             <div key={row.model} className="usage-spotlight-item">
               <div className="usage-spotlight-meta">
-                <span className="usage-model-tag">
-                  {props.formatModelName(row.model)}
-                </span>
+                <span className="usage-model-tag">{props.formatModelName(row.model)}</span>
                 <span className="usage-spotlight-tokens">
-                  {fmtTokens(
-                    row.input_tokens + row.output_tokens + row.cache_tokens,
-                  )}
+                  {fmtTokens(row.input_tokens + row.output_tokens + row.cache_tokens)}
                 </span>
               </div>
               <div className="usage-spotlight-bar">
                 <div
                   className="usage-spotlight-bar-fill"
                   style={{
-                    width: `${Math.max(
-                      8,
-                      props.maxTopModelCost > 0
-                        ? (row.cost / props.maxTopModelCost) * 100
-                        : 0,
-                    )}%`,
+                    width: `${Math.max(8, props.maxTopModelCost > 0 ? (row.cost / props.maxTopModelCost) * 100 : 0)}%`,
                   }}
                 />
               </div>

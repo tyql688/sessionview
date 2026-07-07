@@ -1,14 +1,7 @@
 import type { Message, ToolMetadata } from "@/lib/types";
 
 /** Providers where subagents are stored as separate session files (can be opened). */
-export const SUBAGENT_FILE_PROVIDERS = new Set([
-  "claude",
-  "codex",
-  "kimi",
-  "cursor",
-  "cc-mirror",
-  "antigravity",
-]);
+export const SUBAGENT_FILE_PROVIDERS = new Set(["claude", "codex", "kimi", "cursor", "cc-mirror", "antigravity"]);
 
 /**
  * Subagent metadata extracted from an Agent tool message. Each field is
@@ -40,23 +33,14 @@ export interface SubagentMatchCandidate {
   title: string;
 }
 
-export function isAgentToolMessage(
-  message: Pick<Message, "tool_name" | "tool_metadata">,
-): boolean {
-  return (
-    message.tool_name === "Agent" ||
-    message.tool_metadata?.canonical_name === "Agent"
-  );
+export function isAgentToolMessage(message: Pick<Message, "tool_name" | "tool_metadata">): boolean {
+  return message.tool_name === "Agent" || message.tool_metadata?.canonical_name === "Agent";
 }
 
 /** Narrow `structured` metadata to a plain object record (not array/null). */
-function structuredRecord(
-  metadata: ToolMetadata | undefined,
-): Record<string, unknown> | null {
+function structuredRecord(metadata: ToolMetadata | undefined): Record<string, unknown> | null {
   const structured = metadata?.structured;
-  return structured &&
-    typeof structured === "object" &&
-    !Array.isArray(structured)
+  return structured && typeof structured === "object" && !Array.isArray(structured)
     ? (structured as Record<string, unknown>)
     : null;
 }
@@ -76,9 +60,7 @@ export function parseToolJsonObject(
   if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return undefined;
   try {
     const parsed: unknown = JSON.parse(trimmed);
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : undefined;
+    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : undefined;
   } catch (error) {
     console.warn(`Failed to parse ${label} JSON:`, error);
     return undefined;
@@ -86,9 +68,7 @@ export function parseToolJsonObject(
 }
 
 /** Extract nickname from Agent tool output (Codex: {"nickname":"Faraday"}). */
-export function extractAgentNickname(
-  output: Record<string, unknown> | undefined,
-): string | undefined {
+export function extractAgentNickname(output: Record<string, unknown> | undefined): string | undefined {
   if (typeof output?.nickname === "string") return output.nickname;
   for (const key of ["name", "teammate_id"]) {
     const value = output?.[key];
@@ -101,9 +81,7 @@ export function extractAgentNickname(
 
 /** Full description from Agent tool input (not truncated, for subagent matching).
  *  Codex spawn_agent carries the task text in `message`, not `description`/`prompt`. */
-export function extractAgentDescription(
-  input: Record<string, unknown> | undefined,
-): string | undefined {
+export function extractAgentDescription(input: Record<string, unknown> | undefined): string | undefined {
   if (!input) return undefined;
   const candidate = input.description ?? input.prompt ?? input.message;
   return typeof candidate === "string" ? candidate : undefined;
@@ -124,23 +102,14 @@ export function extractAgentId(
     if (m) return m[1];
   }
   const structured = metadata?.structured;
-  if (
-    structured &&
-    typeof structured === "object" &&
-    !Array.isArray(structured) &&
-    "agentId" in structured
-  ) {
+  if (structured && typeof structured === "object" && !Array.isArray(structured) && "agentId" in structured) {
     return String((structured as Record<string, unknown>).agentId);
   }
   if (input) {
     const single = input.target ?? input.agent_id ?? input.agentId;
     if (typeof single === "string") return single;
     const targets = input.targets;
-    if (
-      Array.isArray(targets) &&
-      targets.length === 1 &&
-      typeof targets[0] === "string"
-    ) {
+    if (Array.isArray(targets) && targets.length === 1 && typeof targets[0] === "string") {
       return targets[0];
     }
   }
@@ -153,16 +122,12 @@ export function extractAgentId(
  * render one "Open" link per child instead of the single-button path used by
  * single-spawn providers.
  */
-export function extractAgentChildIds(
-  metadata: ToolMetadata | undefined,
-): string[] | undefined {
+export function extractAgentChildIds(metadata: ToolMetadata | undefined): string[] | undefined {
   const structured = structuredRecord(metadata);
   if (!structured) return undefined;
   const raw = structured.childConversationIds;
   if (!Array.isArray(raw)) return undefined;
-  const ids = raw.filter(
-    (v): v is string => typeof v === "string" && v.length > 0,
-  );
+  const ids = raw.filter((v): v is string => typeof v === "string" && v.length > 0);
   return ids.length > 0 ? ids : undefined;
 }
 
@@ -172,9 +137,7 @@ export function extractAgentChildIds(
  * "Open" button can display *what* the subagent was asked to do instead of an
  * opaque "Open #2".
  */
-export function extractAgentChildPrompts(
-  metadata: ToolMetadata | undefined,
-): string[] {
+export function extractAgentChildPrompts(metadata: ToolMetadata | undefined): string[] {
   const structured = structuredRecord(metadata);
   if (!structured) return [];
   const raw = structured.childPrompts;
@@ -218,9 +181,7 @@ function agentIdAliases(agentId: string): string[] {
   const withoutAgentPrefix = withoutSession.startsWith("agent-")
     ? withoutSession.slice("agent-".length)
     : withoutSession;
-  return [...new Set([trimmed, withoutSession, withoutAgentPrefix])].filter(
-    (value) => value.length > 0,
-  );
+  return [...new Set([trimmed, withoutSession, withoutAgentPrefix])].filter((value) => value.length > 0);
 }
 
 export function matchesSubagentSession(

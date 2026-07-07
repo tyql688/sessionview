@@ -4,10 +4,6 @@ import tseslint from "typescript-eslint";
 
 // Formatting is owned by Biome (biome.json); ESLint keeps only typescript-eslint
 // correctness rules + react-hooks rules. No formatting rules are enabled here.
-//
-// MIGRATION (migrate/react): the `ignores` block lists not-yet-ported Solid
-// source, excluded until its phase ports it. Shrink as phases land. See
-// MIGRATION.md. Kept in sync with tsconfig.json + biome.json exclude lists.
 export default tseslint.config(
   {
     ignores: [

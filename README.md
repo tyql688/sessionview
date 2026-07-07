@@ -88,7 +88,7 @@ Grab the latest build from [**Releases**](https://github.com/tyql688/cc-session/
 
 ## 🛠️ Build from source
 
-Requires [Rust](https://rustup.rs/) and [Node.js](https://nodejs.org/) 20+.
+Requires [Rust](https://rustup.rs/) and [Node.js](https://nodejs.org/) 22.12+.
 
 ```bash
 git clone https://github.com/tyql688/cc-session.git
@@ -103,17 +103,18 @@ npx tauri build --bundles dmg    # DMG only
 ```bash
 npm run tauri dev                # Dev with hot reload
 npm run check                    # Type-check + Biome + ESLint (frontend)
+npm run knip                     # Release dead-code/dependency audit
 npm test                         # Frontend tests (Vitest)
 cd src-tauri && cargo test       # Rust tests
 cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-Code style is documented in [`style/ts.md`](style/ts.md) and [`style/rust.md`](style/rust.md), enforced by Biome, ESLint, Clippy, and a lefthook pre-commit hook.
+Code style is documented in [`style/ts.md`](style/ts.md) and [`style/rust.md`](style/rust.md), enforced by Biome, ESLint, Clippy, Knip, and lefthook. Knip runs as a release gate rather than a per-push hook.
 
 ## 🏗️ Built with
 
 - [Tauri 2](https://v2.tauri.app/) — desktop shell and native integrations
-- [SolidJS](https://www.solidjs.com/) — reactive frontend UI
+- [React 19](https://react.dev/) — frontend UI with React Compiler
 - [Rust](https://www.rust-lang.org/) — provider parsing, indexing, export, and session lifecycle
 - [SQLite](https://www.sqlite.org/) + FTS5 — local storage and full-text search
 - [Vitest](https://vitest.dev/), [Biome](https://biomejs.dev/), [ESLint](https://eslint.org/), and [Clippy](https://doc.rust-lang.org/clippy/) — testing and code quality

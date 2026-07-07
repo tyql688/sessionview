@@ -38,8 +38,7 @@ export function ProjectTable(props: ProjectTableProps) {
         <div>
           <div className="usage-section-title">{t("usage.costByProject")}</div>
           <div className="usage-section-subtitle">
-            {Math.min(props.projectLimit, props.totalProjectCount)}/
-            {props.totalProjectCount}
+            {Math.min(props.projectLimit, props.totalProjectCount)}/{props.totalProjectCount}
           </div>
         </div>
         <ToggleGroup
@@ -58,10 +57,7 @@ export function ProjectTable(props: ProjectTableProps) {
             <ToggleGroupItem
               key={limit}
               value={String(limit)}
-              className={cn(
-                "usage-limit-btn h-auto min-w-0",
-                props.projectLimit === limit && "active",
-              )}
+              className={cn("usage-limit-btn h-auto min-w-0", props.projectLimit === limit && "active")}
             >
               {limit}
             </ToggleGroupItem>
@@ -105,20 +101,10 @@ export function ProjectTable(props: ProjectTableProps) {
                     <td>
                       <div className="usage-entity-cell">
                         <div className="usage-entity-title">
-                          {expandable && (
-                            <span className="usage-expand-icon">
-                              {isOpen ? "▾" : "▸"}
-                            </span>
-                          )}
-                          {props.formatProjectName(
-                            row.project,
-                            row.project_path,
-                          )}
+                          {expandable && <span className="usage-expand-icon">{isOpen ? "▾" : "▸"}</span>}
+                          {props.formatProjectName(row.project, row.project_path)}
                         </div>
-                        <div
-                          className="usage-entity-subtitle"
-                          title={props.formatProjectPath(row.project_path)}
-                        >
+                        <div className="usage-entity-subtitle" title={props.formatProjectPath(row.project_path)}>
                           {props.formatProjectPath(row.project_path)}
                         </div>
                       </div>
@@ -127,15 +113,8 @@ export function ProjectTable(props: ProjectTableProps) {
                       {row.providers.map((prov) => {
                         const info = props.providerInfo(prov);
                         return (
-                          <span
-                            key={prov}
-                            className="usage-provider-chip"
-                            title={info.label}
-                          >
-                            <span
-                              className="usage-provider-dot"
-                              style={{ background: info.color }}
-                            />
+                          <span key={prov} className="usage-provider-chip" title={info.label}>
+                            <span className="usage-provider-dot" style={{ background: info.color }} />
                             {info.label}
                           </span>
                         );
@@ -154,10 +133,7 @@ export function ProjectTable(props: ProjectTableProps) {
                         <tr key={pp.provider} className="usage-subrow">
                           <td>
                             <span className="usage-subrow-label">
-                              <span
-                                className="usage-provider-dot"
-                                style={{ background: info.color }}
-                              />
+                              <span className="usage-provider-dot" style={{ background: info.color }} />
                               {info.label}
                             </span>
                           </td>
@@ -165,9 +141,7 @@ export function ProjectTable(props: ProjectTableProps) {
                           <td className="r">{pp.sessions}</td>
                           <td className="r">{pp.turns.toLocaleString()}</td>
                           <td className="r">{fmtTokens(pp.tokens)}</td>
-                          <td className="r usage-cost-val">
-                            {fmtCost(pp.cost)}
-                          </td>
+                          <td className="r usage-cost-val">{fmtCost(pp.cost)}</td>
                         </tr>
                       );
                     })}

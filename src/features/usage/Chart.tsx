@@ -1,11 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useI18n } from "@/i18n/index";
-import type {
-  ChartMetric,
-  HoveredDaySummary,
-  UsageDailyChartData,
-} from "@/lib/usage";
+import type { ChartMetric, HoveredDaySummary, UsageDailyChartData } from "@/lib/usage";
 import type { ProviderChipInfo } from "@/features/usage/Toolbar";
 import { cn } from "@/lib/utils";
 
@@ -31,9 +27,7 @@ export function Chart(props: ChartProps) {
         <div className="usage-section-title-row">
           <div className="usage-chart-heading">
             <div className="usage-section-title">{t("usage.dailyUsage")}</div>
-            <div className="usage-section-subtitle">
-              {props.activeRangeLabel}
-            </div>
+            <div className="usage-section-subtitle">{props.activeRangeLabel}</div>
             <ToggleGroup
               className="usage-metric-toggle"
               size="sm"
@@ -48,19 +42,13 @@ export function Chart(props: ChartProps) {
             >
               <ToggleGroupItem
                 value="tokens"
-                className={cn(
-                  "usage-metric-btn h-auto min-w-0",
-                  props.chartMetric === "tokens" && "active",
-                )}
+                className={cn("usage-metric-btn h-auto min-w-0", props.chartMetric === "tokens" && "active")}
               >
                 {t("usage.tokens")}
               </ToggleGroupItem>
               <ToggleGroupItem
                 value="cost"
-                className={cn(
-                  "usage-metric-btn h-auto min-w-0",
-                  props.chartMetric === "cost" && "active",
-                )}
+                className={cn("usage-metric-btn h-auto min-w-0", props.chartMetric === "cost" && "active")}
               >
                 {t("usage.cost")}
               </ToggleGroupItem>
@@ -71,16 +59,11 @@ export function Chart(props: ChartProps) {
           {summary ? (
             <>
               <div className="usage-chart-inspector-date">{summary.date}</div>
-              <div className="usage-chart-inspector-total">
-                {props.fmtChartValue(summary.total)}
-              </div>
+              <div className="usage-chart-inspector-total">{props.fmtChartValue(summary.total)}</div>
               <div className="usage-chart-inspector-breakdown">
                 {summary.breakdown.map((entry, i) => (
                   <span key={i} className="usage-chart-inspector-item">
-                    <span
-                      className="usage-provider-dot"
-                      style={{ background: entry.color }}
-                    />
+                    <span className="usage-provider-dot" style={{ background: entry.color }} />
                     {entry.label}
                     <strong>{props.fmtChartValue(entry.value)}</strong>
                   </span>
@@ -114,10 +97,7 @@ export function Chart(props: ChartProps) {
                     onMouseEnter={() => props.setHoveredDate(date)}
                     onMouseLeave={() => props.setHoveredDate(null)}
                     title={`${date} · ${props.fmtChartValue(
-                      [...providers.values()].reduce(
-                        (sum, value) => sum + value,
-                        0,
-                      ),
+                      [...providers.values()].reduce((sum, value) => sum + value, 0),
                     )}`}
                     type="button"
                   >
@@ -130,11 +110,7 @@ export function Chart(props: ChartProps) {
                         return val > 0 ? (
                           <span
                             key={provider}
-                            className={`usage-bar-seg${
-                              props.hoveredDate && !active
-                                ? " usage-bar-seg-muted"
-                                : ""
-                            }`}
+                            className={`usage-bar-seg${props.hoveredDate && !active ? " usage-bar-seg-muted" : ""}`}
                             style={{
                               height: `${Math.max(4, (val / max) * 100)}%`,
                               background: color,
@@ -148,10 +124,7 @@ export function Chart(props: ChartProps) {
             </div>
             <div className="usage-bar-labels">
               {props.dailyChartData.dates.map((date) => (
-                <span
-                  key={date}
-                  className={props.hoveredDate === date ? "active" : undefined}
-                >
+                <span key={date} className={props.hoveredDate === date ? "active" : undefined}>
                   {date.slice(5)}
                 </span>
               ))}

@@ -4,10 +4,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/i18n/index";
 import { fmtTokens } from "@/lib/formatters";
-import {
-  matchesSubagentSession,
-  type SubagentMatchRequest,
-} from "@/lib/subagent";
+import { matchesSubagentSession, type SubagentMatchRequest } from "@/lib/subagent";
 import { getChildSessions, getSessionOpenWindow } from "@/lib/tauri";
 import type { Message, SessionMeta } from "@/lib/types";
 import { errorMessage } from "@/lib/errors";
@@ -50,17 +47,9 @@ export function SubagentInline(props: {
         setError(t("toast.subagentNotFound"));
         return;
       }
-      const open = await getSessionOpenWindow(
-        match.id,
-        -TAIL_MESSAGES * 3,
-        TAIL_MESSAGES * 3,
-      );
+      const open = await getSessionOpenWindow(match.id, -TAIL_MESSAGES * 3, TAIL_MESSAGES * 3);
       const tail = open.window.messages
-        .filter(
-          (msg) =>
-            (msg.role === "user" || msg.role === "assistant") &&
-            msg.content.trim().length > 0,
-        )
+        .filter((msg) => (msg.role === "user" || msg.role === "assistant") && msg.content.trim().length > 0)
         .slice(-TAIL_MESSAGES);
       setPreview({ meta: open.meta, tail });
     } catch (e) {
@@ -78,10 +67,7 @@ export function SubagentInline(props: {
 
   const meta = preview?.meta;
   const totalTokens = meta
-    ? meta.input_tokens +
-      meta.output_tokens +
-      meta.cache_read_tokens +
-      meta.cache_write_tokens
+    ? meta.input_tokens + meta.output_tokens + meta.cache_read_tokens + meta.cache_write_tokens
     : 0;
 
   return (
@@ -94,10 +80,7 @@ export function SubagentInline(props: {
           className="flex h-auto min-w-0 flex-1 justify-start gap-1.5 rounded-none px-0 py-0 text-xs text-text-secondary transition-colors hover:bg-transparent hover:text-text-primary active:translate-y-0"
         >
           <ChevronDown
-            className={cn(
-              "size-3 shrink-0 transition-transform",
-              !expanded && "-rotate-90",
-            )}
+            className={cn("size-3 shrink-0 transition-transform", !expanded && "-rotate-90")}
             aria-hidden="true"
           />
           <span className="shrink-0">{t("tool.subagentPreview")}</span>
@@ -122,11 +105,7 @@ export function SubagentInline(props: {
       </div>
       {expanded && (
         <div className="border-t border-border-subtle px-2 py-1.5">
-          {loading && (
-            <div className="text-xs text-text-tertiary">
-              {t("common.loading")}
-            </div>
-          )}
+          {loading && <div className="text-xs text-text-tertiary">{t("common.loading")}</div>}
           {error && <div className="text-xs text-danger">{error}</div>}
           {meta && (
             <>
@@ -150,12 +129,7 @@ export function SubagentInline(props: {
               <div className="mt-1 flex flex-col gap-1">
                 {preview?.tail.map((msg, i) => (
                   <div key={i} className="flex gap-1.5 text-xs">
-                    <span
-                      className={cn(
-                        "shrink-0 font-medium",
-                        msg.role === "user" ? "text-brand" : "text-success",
-                      )}
-                    >
+                    <span className={cn("shrink-0 font-medium", msg.role === "user" ? "text-brand" : "text-success")}>
                       {msg.role === "user" ? "›" : "‹"}
                     </span>
                     <span className="min-w-0 whitespace-pre-wrap text-text-secondary [overflow-wrap:anywhere]">

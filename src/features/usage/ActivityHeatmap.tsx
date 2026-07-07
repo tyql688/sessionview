@@ -3,11 +3,7 @@ import { CircleDollarSign, Hash } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useI18n } from "@/i18n/index";
-import type {
-  HeatmapCell,
-  HeatmapGrid,
-  HeatmapMetric,
-} from "@/features/usage/heatmap";
+import type { HeatmapCell, HeatmapGrid, HeatmapMetric } from "@/features/usage/heatmap";
 import { fmtCost, fmtTokens } from "@/features/usage/formatters";
 import { cn } from "@/lib/utils";
 
@@ -32,17 +28,11 @@ export function ActivityHeatmap(props: ActivityHeatmapProps) {
   const localeTag = locale === "zh" ? "zh-CN" : "en-US";
 
   const monthLabel = (month: number): string =>
-    new Intl.DateTimeFormat(localeTag, { month: "short" }).format(
-      new Date(2020, month - 1, 1),
-    );
+    new Intl.DateTimeFormat(localeTag, { month: "short" }).format(new Date(2020, month - 1, 1));
 
   // GitHub labels only Mon / Wed / Fri (rows 1, 3, 5). 2023-01-01 was a Sunday.
   const weekdayLabel = (row: number): string =>
-    row % 2 === 1
-      ? new Intl.DateTimeFormat(localeTag, { weekday: "short" }).format(
-          new Date(2023, 0, 1 + row),
-        )
-      : "";
+    row % 2 === 1 ? new Intl.DateTimeFormat(localeTag, { weekday: "short" }).format(new Date(2023, 0, 1 + row)) : "";
 
   const formatDate = (iso: string): string => {
     const [y, m, d] = iso.split("-").map(Number);
@@ -69,15 +59,12 @@ export function ActivityHeatmap(props: ActivityHeatmapProps) {
   /** A value with its unit, e.g. "28 sessions", "12.3M tokens", or "$3.40". */
   const valueWithNoun = (metric: HeatmapMetric, value: number): string => {
     if (metric === "cost") return fmtCost(value);
-    const text =
-      metric === "tokens" ? fmtTokens(value) : value.toLocaleString();
+    const text = metric === "tokens" ? fmtTokens(value) : value.toLocaleString();
     return `${text} ${metricNoun(metric)}`;
   };
 
   const timeframe =
-    props.year === null
-      ? t("usage.activityTrailing")
-      : t("usage.activityInYear").replace("{year}", String(props.year));
+    props.year === null ? t("usage.activityTrailing") : t("usage.activityInYear").replace("{year}", String(props.year));
 
   const totalLabel = valueWithNoun(props.metric, props.grid.total);
   const headline = `${totalLabel} ${timeframe}`;
@@ -88,9 +75,7 @@ export function ActivityHeatmap(props: ActivityHeatmapProps) {
       .replace("{value}", valueWithNoun(props.metric, cell.value))
       .replace("{date}", formatDate(cell.date));
 
-  const inspectorText = hovered
-    ? cellTooltip(hovered)
-    : t("usage.activityHint");
+  const inspectorText = hovered ? cellTooltip(hovered) : t("usage.activityHint");
 
   const flatCells = props.grid.weeks.flatMap((week) => week.cells);
   const weekCount = props.grid.weeks.length;
@@ -119,18 +104,12 @@ export function ActivityHeatmap(props: ActivityHeatmapProps) {
               <ToggleGroupItem
                 key={metric}
                 value={metric}
-                className={cn(
-                  "usage-metric-btn h-auto min-w-0",
-                  props.metric === metric && "active",
-                )}
+                className={cn("usage-metric-btn h-auto min-w-0", props.metric === metric && "active")}
               >
                 {metric === "tokens" ? (
                   <Hash aria-hidden="true" data-icon="inline-start" />
                 ) : (
-                  <CircleDollarSign
-                    aria-hidden="true"
-                    data-icon="inline-start"
-                  />
+                  <CircleDollarSign aria-hidden="true" data-icon="inline-start" />
                 )}
                 {t(`usage.${metric}`)}
               </ToggleGroupItem>
@@ -150,10 +129,7 @@ export function ActivityHeatmap(props: ActivityHeatmapProps) {
           >
             <ToggleGroupItem
               value="trailing"
-              className={cn(
-                "usage-year-btn h-auto min-w-0",
-                props.year === null && "active",
-              )}
+              className={cn("usage-year-btn h-auto min-w-0", props.year === null && "active")}
             >
               {t("usage.activityYearTrailing")}
             </ToggleGroupItem>
@@ -161,10 +137,7 @@ export function ActivityHeatmap(props: ActivityHeatmapProps) {
               <ToggleGroupItem
                 key={year}
                 value={String(year)}
-                className={cn(
-                  "usage-year-btn h-auto min-w-0",
-                  props.year === year && "active",
-                )}
+                className={cn("usage-year-btn h-auto min-w-0", props.year === year && "active")}
               >
                 {year}
               </ToggleGroupItem>
@@ -244,18 +217,12 @@ export function ActivityHeatmap(props: ActivityHeatmapProps) {
 
       <div className="usage-heatmap-footer">
         {props.grid.activeDays === 0 && !props.loading && (
-          <span className="usage-heatmap-empty">
-            {t("usage.activityNoData")}
-          </span>
+          <span className="usage-heatmap-empty">{t("usage.activityNoData")}</span>
         )}
         <div className="usage-heatmap-legend">
           <span>{t("usage.activityLess")}</span>
           {LEGEND_LEVELS.map((level) => (
-            <span
-              key={level}
-              className="usage-heatmap-cell is-legend"
-              data-level={level}
-            />
+            <span key={level} className="usage-heatmap-cell is-legend" data-level={level} />
           ))}
           <span>{t("usage.activityMore")}</span>
         </div>

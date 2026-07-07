@@ -5,8 +5,7 @@ export interface ImageRef {
   source: string | null;
 }
 
-const IMAGE_PLACEHOLDER_RE =
-  /\[Image(?:\s*#\d+)?(?::\s*source:\s*([^\]]+))?\]/g;
+const IMAGE_PLACEHOLDER_RE = /\[Image(?:\s*#\d+)?(?::\s*source:\s*([^\]]+))?\]/g;
 
 /** Split message content into markdown text and the image refs embedded in
  * it. The backend embeds images as `[Image: source: …]` text placeholders,
@@ -51,8 +50,7 @@ export function parseContent(raw: string): ContentSegment[] {
   }
 
   const segments: ContentSegment[] = [];
-  const blockRegex =
-    /```([\w+#.-]*)\n?([\s\S]*?)```|\[Image(?:\s*#\d+)?(?::\s*source:\s*([^\]]+))?\]/g;
+  const blockRegex = /```([\w+#.-]*)\n?([\s\S]*?)```|\[Image(?:\s*#\d+)?(?::\s*source:\s*([^\]]+))?\]/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 

@@ -33,9 +33,7 @@ export function EditorArea(props: {
 }) {
   const { t, locale } = useI18n();
   const groups = useGroups();
-  const [activatedTabIds, setActivatedTabIds] = useState<Set<string>>(
-    new Set(),
-  );
+  const [activatedTabIds, setActivatedTabIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const activeId = props.activeTabId;
@@ -117,22 +115,13 @@ export function EditorArea(props: {
         groups.length === 1 && (
           <div className="editor-empty">
             <div className="editor-empty-icon">
-              <svg
-                width="48"
-                height="48"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1"
-                viewBox="0 0 24 24"
-              >
+              <svg width="48" height="48" fill="none" stroke="currentColor" strokeWidth="1" viewBox="0 0 24 24">
                 <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
               </svg>
             </div>
             {props.recentSessions && props.recentSessions.length > 0 && (
               <div className="editor-empty-recent">
-                <p className="editor-empty-label">
-                  {t("editor.recentSessions")}
-                </p>
+                <p className="editor-empty-label">{t("editor.recentSessions")}</p>
                 {props.recentSessions.map((session) => (
                   <Button
                     key={session.id}
@@ -140,45 +129,27 @@ export function EditorArea(props: {
                     className="editor-empty-session justify-start whitespace-normal active:translate-y-0"
                     onClick={() => props.onOpenSession(session)}
                   >
-                    <span
-                      className="provider-dot provider-logo"
-                      style={{ color: `var(--${session.provider})` }}
-                    >
+                    <span className="provider-dot provider-logo" style={{ color: `var(--${session.provider})` }}>
                       <ProviderIcon provider={session.provider} />
                     </span>
                     <div className="editor-empty-session-info">
-                      <span
-                        className="editor-empty-session-title"
-                        title={session.title}
-                      >
+                      <span className="editor-empty-session-title" title={session.title}>
                         {session.title}
                       </span>
                       <span className="editor-empty-session-meta">
-                        <span className="editor-empty-session-path">
-                          {session.project_name || ""}
-                        </span>
-                        {session.model && (
-                          <span className="editor-empty-session-model">
-                            {session.model}
-                          </span>
-                        )}
+                        <span className="editor-empty-session-path">{session.project_name || ""}</span>
+                        {session.model && <span className="editor-empty-session-model">{session.model}</span>}
                         {props.childCounts[session.id] ? (
-                          <span className="editor-empty-session-agents">
-                            🤖 {props.childCounts[session.id]}
-                          </span>
+                          <span className="editor-empty-session-agents">🤖 {props.childCounts[session.id]}</span>
                         ) : null}
                       </span>
                     </div>
-                    <span className="editor-empty-session-time">
-                      {formatTimestamp(session.updated_at, locale)}
-                    </span>
+                    <span className="editor-empty-session-time">{formatTimestamp(session.updated_at, locale)}</span>
                   </Button>
                 ))}
               </div>
             )}
-            {props.recentSessionsError && (
-              <p className="editor-empty-text">{props.recentSessionsError}</p>
-            )}
+            {props.recentSessionsError && <p className="editor-empty-text">{props.recentSessionsError}</p>}
             {!props.recentSessionsLoading &&
               !props.recentSessionsError &&
               (!props.recentSessions || props.recentSessions.length === 0) && (

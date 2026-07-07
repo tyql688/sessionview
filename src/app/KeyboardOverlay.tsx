@@ -1,9 +1,4 @@
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useI18n } from "@/i18n/index";
 import { isMac } from "@/lib/platform";
 
@@ -98,13 +93,8 @@ export function KeyboardOverlay(props: { show: boolean; onClose: () => void }) {
                 {t(cat.categoryKey)}
               </div>
               {cat.items.map((item, i) => (
-                <div
-                  className="flex items-center justify-between gap-4 py-1"
-                  key={i}
-                >
-                  <span className="text-sm">
-                    {t(item.descKey) || item.descKey}
-                  </span>
+                <div className="flex items-center justify-between gap-4 py-1" key={i}>
+                  <span className="text-sm">{t(item.descKey) || item.descKey}</span>
                   <kbd className="rounded-md border bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
                     {item.keys}
                   </kbd>

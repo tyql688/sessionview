@@ -37,10 +37,7 @@ function pushLine(
   });
 }
 
-export function buildToolLineDiff(
-  oldText: string,
-  newText: string,
-): ToolDiffLine[] {
+export function buildToolLineDiff(oldText: string, newText: string): ToolDiffLine[] {
   const lines: ToolDiffLine[] = [];
   let oldLine = 1;
   let newLine = 1;
@@ -69,11 +66,7 @@ export function buildPatchLineDiff(patchText: string): ToolDiffLine[] {
   const lines: ToolDiffLine[] = [];
 
   for (const rawLine of patchText.split("\n")) {
-    if (
-      rawLine === "*** Begin Patch" ||
-      rawLine === "*** End Patch" ||
-      rawLine.length === 0
-    ) {
+    if (rawLine === "*** Begin Patch" || rawLine === "*** End Patch" || rawLine.length === 0) {
       continue;
     }
 
@@ -119,9 +112,7 @@ export function buildPatchLineDiff(patchText: string): ToolDiffLine[] {
   return lines;
 }
 
-export function buildStructuredPatchLineDiff(
-  structuredPatch: unknown,
-): ToolDiffLine[] {
+export function buildStructuredPatchLineDiff(structuredPatch: unknown): ToolDiffLine[] {
   if (!Array.isArray(structuredPatch)) {
     return [];
   }
@@ -133,31 +124,16 @@ export function buildStructuredPatchLineDiff(
       continue;
     }
 
-    const oldStart =
-      typeof hunk.oldStart === "number" && Number.isFinite(hunk.oldStart)
-        ? hunk.oldStart
-        : null;
-    const oldLines =
-      typeof hunk.oldLines === "number" && Number.isFinite(hunk.oldLines)
-        ? hunk.oldLines
-        : 0;
-    const newStart =
-      typeof hunk.newStart === "number" && Number.isFinite(hunk.newStart)
-        ? hunk.newStart
-        : null;
-    const newLines =
-      typeof hunk.newLines === "number" && Number.isFinite(hunk.newLines)
-        ? hunk.newLines
-        : 0;
+    const oldStart = typeof hunk.oldStart === "number" && Number.isFinite(hunk.oldStart) ? hunk.oldStart : null;
+    const oldLines = typeof hunk.oldLines === "number" && Number.isFinite(hunk.oldLines) ? hunk.oldLines : 0;
+    const newStart = typeof hunk.newStart === "number" && Number.isFinite(hunk.newStart) ? hunk.newStart : null;
+    const newLines = typeof hunk.newLines === "number" && Number.isFinite(hunk.newLines) ? hunk.newLines : 0;
 
     lines.push({
       type: "skip",
       oldLine: null,
       newLine: null,
-      text:
-        oldStart !== null && newStart !== null
-          ? `@@ -${oldStart},${oldLines} +${newStart},${newLines} @@`
-          : "@@",
+      text: oldStart !== null && newStart !== null ? `@@ -${oldStart},${oldLines} +${newStart},${newLines} @@` : "@@",
     });
 
     let oldLine = oldStart;
@@ -203,19 +179,13 @@ export interface InlineSegment {
  * read single-line edits; disjoint rewrites degrade gracefully to one full
  * changed segment.
  */
-export function inlineSegments(
-  from: string,
-  to: string,
-): { from: InlineSegment[]; to: InlineSegment[] } {
+export function inlineSegments(from: string, to: string): { from: InlineSegment[]; to: InlineSegment[] } {
   let prefix = 0;
   const max = Math.min(from.length, to.length);
   while (prefix < max && from[prefix] === to[prefix]) prefix += 1;
 
   let suffix = 0;
-  while (
-    suffix < max - prefix &&
-    from[from.length - 1 - suffix] === to[to.length - 1 - suffix]
-  ) {
+  while (suffix < max - prefix && from[from.length - 1 - suffix] === to[to.length - 1 - suffix]) {
     suffix += 1;
   }
 

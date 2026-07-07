@@ -15,9 +15,7 @@ const SettingsPanel = lazy(() =>
     default: m.SettingsPanel,
   })),
 );
-const TrashView = lazy(() =>
-  import("@/features/trash").then((m) => ({ default: m.TrashView })),
-);
+const TrashView = lazy(() => import("@/features/trash").then((m) => ({ default: m.TrashView })));
 const FavoritesView = lazy(() =>
   import("@/features/favorites/FavoritesView").then((m) => ({
     default: m.FavoritesView,
@@ -28,9 +26,7 @@ const BlockedView = lazy(() =>
     default: m.BlockedView,
   })),
 );
-const UsagePanel = lazy(() =>
-  import("@/features/usage").then((m) => ({ default: m.UsagePanel })),
-);
+const UsagePanel = lazy(() => import("@/features/usage").then((m) => ({ default: m.UsagePanel })));
 import { KeyboardOverlay } from "@/app/KeyboardOverlay";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
@@ -76,8 +72,7 @@ import "@/styles/index.css";
 // Linux derived locally (platform.ts is intentionally minimal). On Linux the
 // app hides native decorations like Windows, so it needs the same custom
 // min/max/close window controls.
-const isLinux =
-  typeof navigator !== "undefined" && /Linux/.test(navigator.platform);
+const isLinux = typeof navigator !== "undefined" && /Linux/.test(navigator.platform);
 const showWindowControls = isWindows || isLinux;
 
 interface ErrorBoundaryProps {
@@ -118,13 +113,10 @@ export default function App() {
   const [showSearchOverlay, setShowSearchOverlay] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
-  const [lastScanTime, setLastScanTime] = useState<number | undefined>(
-    undefined,
-  );
+  const [lastScanTime, setLastScanTime] = useState<number | undefined>(undefined);
   const [todayCost, setTodayCost] = useState<number | undefined>(undefined);
   const [todayTokens, setTodayTokens] = useState<
-    | { input: number; output: number; cache_read: number; cache_write: number }
-    | undefined
+    { input: number; output: number; cache_read: number; cache_write: number } | undefined
   >(undefined);
 
   const disabledProviders = useDisabledProviders();
@@ -170,18 +162,12 @@ export default function App() {
 
     async function refreshStatusBarStats() {
       const [stats, cost, tokens] = await Promise.all([
-        invokeWithFallback(
-          getIndexStats(),
-          undefined,
-          "refresh status bar index stats",
-        ),
+        invokeWithFallback(getIndexStats(), undefined, "refresh status bar index stats"),
         invokeWithFallback(getTodayCost(), undefined, "refresh today cost"),
         invokeWithFallback(getTodayTokens(), undefined, "refresh today tokens"),
       ]);
 
-      const ts = stats?.last_index_time
-        ? Number(stats.last_index_time)
-        : undefined;
+      const ts = stats?.last_index_time ? Number(stats.last_index_time) : undefined;
       setLastScanTime(ts);
       setTodayCost(cost);
       setTodayTokens(tokens);
@@ -220,10 +206,7 @@ export default function App() {
       onLoadFailed: () => toastError(tRef.current("toast.subagentLoadFailed")),
       onNotFound: () => toastError(tRef.current("toast.subagentNotFound")),
       onChildSessionLoadError: (parentId, error) => {
-        console.error(
-          `Failed to load child sessions for parent ${parentId}:`,
-          error,
-        );
+        console.error(`Failed to load child sessions for parent ${parentId}:`, error);
       },
     });
 
@@ -260,10 +243,7 @@ export default function App() {
             const handle = window.setTimeout(warmMarkdown, WARMUP_FALLBACK_MS);
             return () => window.clearTimeout(handle);
           })();
-    const updateTimer = setTimeout(
-      () => void checkForUpdate(),
-      UPDATE_CHECK_DELAY_MS,
-    );
+    const updateTimer = setTimeout(() => void checkForUpdate(), UPDATE_CHECK_DELAY_MS);
 
     async function setup() {
       // Track maximize state so the custom (Windows/Linux) maximize button can
@@ -282,10 +262,7 @@ export default function App() {
           if (disposed) un();
           else unlistenResized = un;
         } catch (error) {
-          console.error(
-            "Failed to initialize window maximize tracking:",
-            error,
-          );
+          console.error("Failed to initialize window maximize tracking:", error);
         }
       }
 
@@ -310,9 +287,7 @@ export default function App() {
           void sync!.refreshTree();
           void loadProviderSnapshots(true);
           const message =
-            payload.job === "refresh_usage"
-              ? tRef.current("toast.refreshUsageOk")
-              : tRef.current("toast.rebuildOk");
+            payload.job === "refresh_usage" ? tRef.current("toast.refreshUsageOk") : tRef.current("toast.rebuildOk");
           toast(message);
         }
       });
@@ -333,13 +308,8 @@ export default function App() {
     };
   }, []);
 
-  const filteredTree = tree.filter(
-    (node) => !disabledProviders.includes(node.id as Provider),
-  );
-  const showExplorer =
-    activeView !== "settings" &&
-    activeView !== "trash" &&
-    activeView !== "usage";
+  const filteredTree = tree.filter((node) => !disabledProviders.includes(node.id as Provider));
+  const showExplorer = activeView !== "settings" && activeView !== "trash" && activeView !== "usage";
   const showExplorerTree =
     !sidebarCollapsed &&
     activeView !== "settings" &&
@@ -367,9 +337,7 @@ export default function App() {
           }}
         >
           <h2>{t("error.title")}</h2>
-          <p style={{ color: "var(--text-secondary)", maxWidth: "500px" }}>
-            {err?.message || t("error.message")}
-          </p>
+          <p style={{ color: "var(--text-secondary)", maxWidth: "500px" }}>{err?.message || t("error.message")}</p>
           <Button
             variant="outline"
             className="active:translate-y-0"
@@ -414,9 +382,7 @@ export default function App() {
               onPreviewSession={openPreview}
               onRefreshTree={sync.refreshTree}
               onRefreshProvider={(provider) => {
-                void sync
-                  .syncProviders([provider])
-                  .then(() => void loadProviderSnapshots(true));
+                void sync.syncProviders([provider]).then(() => void loadProviderSnapshots(true));
               }}
               onCollapse={() => setSidebarCollapsed(true)}
               onDeleteSession={async (id: string) => {
@@ -432,15 +398,9 @@ export default function App() {
           )}
           <Suspense fallback={null}>
             {activeView === "settings" && <SettingsPanel />}
-            {activeView === "trash" && (
-              <TrashView onRefreshTree={sync.refreshTree} />
-            )}
-            {activeView === "favorites" && (
-              <FavoritesView onOpenSession={openSession} />
-            )}
-            {activeView === "blocked" && (
-              <BlockedView onRefreshTree={sync.refreshTree} />
-            )}
+            {activeView === "trash" && <TrashView onRefreshTree={sync.refreshTree} />}
+            {activeView === "favorites" && <FavoritesView onOpenSession={openSession} />}
+            {activeView === "blocked" && <BlockedView onRefreshTree={sync.refreshTree} />}
             {activeView === "usage" && (
               <div
                 style={{
@@ -479,10 +439,7 @@ export default function App() {
           todayCost={todayCost}
           todayTokens={todayTokens}
         />
-        <KeyboardOverlay
-          show={showKeyboardOverlay}
-          onClose={() => setShowKeyboardOverlay(false)}
-        />
+        <KeyboardOverlay show={showKeyboardOverlay} onClose={() => setShowKeyboardOverlay(false)} />
         <SearchOverlay
           show={showSearchOverlay}
           onClose={() => setShowSearchOverlay(false)}

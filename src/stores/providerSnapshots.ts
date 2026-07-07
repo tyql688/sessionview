@@ -99,10 +99,7 @@ function activeProviderSnapshotMap(): Record<Provider, ProviderSnapshot> {
 }
 
 export async function loadProviderSnapshots(force = false) {
-  if (
-    !force &&
-    Object.keys(useProviderSnapshotStore.getState().snapshotMap).length > 0
-  ) {
+  if (!force && Object.keys(useProviderSnapshotStore.getState().snapshotMap).length > 0) {
     return;
   }
 
@@ -134,19 +131,14 @@ export function refreshProviderSnapshots() {
 }
 
 export function listProviderSnapshots(): ProviderSnapshot[] {
-  return Object.values(activeProviderSnapshotMap()).sort(
-    (left, right) => left.sort_order - right.sort_order,
-  );
+  return Object.values(activeProviderSnapshotMap()).sort((left, right) => left.sort_order - right.sort_order);
 }
 
 export function getProviderSnapshot(provider: Provider): ProviderSnapshot {
   return activeProviderSnapshotMap()[provider];
 }
 
-export function getProviderLabel(
-  provider: Provider,
-  variantName?: string,
-): string {
+export function getProviderLabel(provider: Provider, variantName?: string): string {
   if (provider === "cc-mirror") {
     return variantName || getProviderSnapshot(provider).label;
   }

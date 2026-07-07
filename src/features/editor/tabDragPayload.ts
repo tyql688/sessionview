@@ -33,10 +33,7 @@ export function parseTabDragPayload(raw: string): TabDragPayload {
     throw new Error("Tab drag payload is missing sessionId");
   }
 
-  if (
-    typeof parsed.sourceGroupId !== "string" ||
-    parsed.sourceGroupId.length === 0
-  ) {
+  if (typeof parsed.sourceGroupId !== "string" || parsed.sourceGroupId.length === 0) {
     throw new Error("Tab drag payload is missing sourceGroupId");
   }
 

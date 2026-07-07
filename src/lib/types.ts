@@ -2,16 +2,7 @@
  * `Provider` type derives from this array, so a hand-maintained list
  * elsewhere (which is how "pi" once went missing from tree grouping) can't
  * silently drift again. */
-export const PROVIDERS = [
-  "claude",
-  "codex",
-  "antigravity",
-  "opencode",
-  "kimi",
-  "cursor",
-  "cc-mirror",
-  "pi",
-] as const;
+export const PROVIDERS = ["claude", "codex", "antigravity", "opencode", "kimi", "cursor", "cc-mirror", "pi"] as const;
 
 export type Provider = (typeof PROVIDERS)[number];
 
@@ -73,10 +64,7 @@ export interface McpToolMetadata {
   display: string;
 }
 
-export type RawOutputPolicy =
-  | "keep"
-  | "suppress_terminal"
-  | "suppress_patch_when_diff_present";
+export type RawOutputPolicy = "keep" | "suppress_terminal" | "suppress_patch_when_diff_present";
 
 export type ToolDiffLineType = "context" | "add" | "remove" | "skip";
 

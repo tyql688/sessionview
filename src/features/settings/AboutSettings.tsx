@@ -53,10 +53,7 @@ export function AboutSettings() {
   };
 
   const isDisabled = () =>
-    phase === "checking" ||
-    phase === "upToDate" ||
-    phase === "downloading" ||
-    phase === "installing";
+    phase === "checking" || phase === "upToDate" || phase === "downloading" || phase === "installing";
 
   function handleClick() {
     if (phase === "available") {

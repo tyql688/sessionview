@@ -20,10 +20,7 @@ export interface CreateRoleFilterResult {
  *
  * Now a React hook: call it at the top level of a component.
  */
-export function useRoleFilter(
-  processedEntries: ProcessedEntry[],
-  focusMode: boolean,
-): CreateRoleFilterResult {
+export function useRoleFilter(processedEntries: ProcessedEntry[], focusMode: boolean): CreateRoleFilterResult {
   const [hiddenRoles, setHiddenRoles] = useState<Set<MessageRole>>(new Set());
   const effectiveHiddenRoles = useMemo(() => {
     if (!focusMode) return hiddenRoles;
@@ -53,8 +50,7 @@ export function useRoleFilter(
       system: 0,
     };
     for (const e of processedEntries) {
-      if (e.type === "message")
-        counts[e.msg.role] = (counts[e.msg.role] || 0) + 1;
+      if (e.type === "message") counts[e.msg.role] = (counts[e.msg.role] || 0) + 1;
       else if (e.type === "merged-tools") counts.tool += e.messages.length;
     }
     return counts;

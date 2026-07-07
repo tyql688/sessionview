@@ -71,16 +71,10 @@ export function ModelTable(props: ModelTableProps) {
               <tr key={row.model}>
                 <td>
                   <div className="usage-model-cell">
-                    <span className="usage-model-tag">
-                      {props.formatModelName(row.model)}
-                    </span>
-                    {row.cost === 0 &&
-                      row.input_tokens + row.output_tokens + row.cache_tokens >
-                        0 && (
-                        <span className="usage-price-badge">
-                          {t("usage.unpriced")}
-                        </span>
-                      )}
+                    <span className="usage-model-tag">{props.formatModelName(row.model)}</span>
+                    {row.cost === 0 && row.input_tokens + row.output_tokens + row.cache_tokens > 0 && (
+                      <span className="usage-price-badge">{t("usage.unpriced")}</span>
+                    )}
                   </div>
                 </td>
                 <td className="r">{row.turns.toLocaleString()}</td>

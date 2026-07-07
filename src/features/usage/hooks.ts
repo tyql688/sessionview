@@ -42,11 +42,7 @@ import {
   trendPercent,
   type UsageSortState,
 } from "@/lib/usage";
-import {
-  buildHeatmapGrid,
-  dateRangeForYear,
-  type HeatmapGrid,
-} from "@/features/usage/heatmap";
+import { buildHeatmapGrid, dateRangeForYear, type HeatmapGrid } from "@/features/usage/heatmap";
 import { formatLocalDateTime, toLocalISODate } from "@/lib/formatters";
 import { errorMessage } from "@/lib/errors";
 import type {
@@ -67,7 +63,7 @@ import {
 } from "@/features/usage/formatters";
 import type { ProviderChipInfo } from "@/features/usage/Toolbar";
 
-// --- Async resource helper (mirrors Solid's createResource) -------------------
+// --- Async resource helper ----------------------------------------------------
 
 interface ResourceState<T> {
   data: T | undefined;
@@ -80,16 +76,12 @@ interface ResourceActions {
 }
 
 /**
- * Fetches `fetcher(source)` whenever `source` changes to a non-null value,
- * mirroring Solid's `createResource(source, fetcher)`: a null source skips the
- * fetch and retains the last value. `refetch()` re-runs against the current
- * source and resolves when the fetch settles. Callers memoize `source` so its
- * identity is the refetch trigger, exactly like the tracked Solid signal.
+ * Fetches `fetcher(source)` whenever `source` changes to a non-null value. A
+ * null source skips the fetch and retains the last value. `refetch()` re-runs
+ * against the current source and resolves when the fetch settles. Callers
+ * memoize `source` so its identity is the refetch trigger.
  */
-function useResource<S, T>(
-  source: S | null,
-  fetcher: (source: S) => Promise<T>,
-): [ResourceState<T>, ResourceActions] {
+function useResource<S, T>(source: S | null, fetcher: (source: S) => Promise<T>): [ResourceState<T>, ResourceActions] {
   const [state, setState] = useState<ResourceState<T>>(() => ({
     data: undefined,
     loading: source !== null,
@@ -159,8 +151,7 @@ export function useProviderSelection() {
     [scannedProviderSnapshots],
   );
   const providerSnapshotMap = useMemo(
-    () =>
-      new Map(providerSnapshots.map((snapshot) => [snapshot.key, snapshot])),
+    () => new Map(providerSnapshots.map((snapshot) => [snapshot.key, snapshot])),
     [providerSnapshots],
   );
 
@@ -179,9 +170,7 @@ export function useProviderSelection() {
     [scannedProviderKeys, selectedProviders],
   );
   const allProvidersSelected = useMemo(
-    () =>
-      scannedProviderKeys.length > 0 &&
-      selectedProviderKeys.length === scannedProviderKeys.length,
+    () => scannedProviderKeys.length > 0 && selectedProviderKeys.length === scannedProviderKeys.length,
     [scannedProviderKeys, selectedProviderKeys],
   );
 
@@ -242,8 +231,7 @@ export function useUsageResources(selectedProviderKeys: string[]) {
   const calendarMetric = useCalendarMetric();
   const calendarYear = useCalendarYear();
 
-  const [activeMaintenanceJob, setActiveMaintenanceJob] =
-    useState<MaintenanceJob | null>(null);
+  const [activeMaintenanceJob, setActiveMaintenanceJob] = useState<MaintenanceJob | null>(null);
 
   const statsSource = useMemo<StatsQuery | null>(
     () =>
@@ -264,12 +252,7 @@ export function useUsageResources(selectedProviderKeys: string[]) {
       }
       // A custom date window overrides the preset day count.
       if (params.custom) {
-        return getUsageStats(
-          params.providers,
-          null,
-          params.custom.start,
-          params.custom.end,
-        );
+        return getUsageStats(params.providers, null, params.custom.start, params.custom.end);
       }
       return getUsageStats(params.providers, params.range);
     },
@@ -279,15 +262,9 @@ export function useUsageResources(selectedProviderKeys: string[]) {
   // filter that drives the stats above. The window is derived once here so the
   // fetched range and the laid-out grid can never disagree (e.g. across a
   // midnight tick if today were read twice). Refetches on provider/window change.
-  const calendarWindow = useMemo(
-    () => dateRangeForYear(calendarYear, toLocalISODate()),
-    [calendarYear],
-  );
+  const calendarWindow = useMemo(() => dateRangeForYear(calendarYear, toLocalISODate()), [calendarYear]);
   const calendarSource = useMemo<CalendarQuery | null>(
-    () =>
-      didInitProviders
-        ? { providers: selectedProviderKeys, window: calendarWindow }
-        : null,
+    () => (didInitProviders ? { providers: selectedProviderKeys, window: calendarWindow } : null),
     [didInitProviders, selectedProviderKeys, calendarWindow],
   );
   const [calendar, { refetch: refetchCalendar }] = useResource(
@@ -296,11 +273,7 @@ export function useUsageResources(selectedProviderKeys: string[]) {
       if (params.providers.length === 0) {
         return { days: [], available_years: [] };
       }
-      return getActivityCalendar(
-        params.providers,
-        params.window.start,
-        params.window.end,
-      );
+      return getActivityCalendar(params.providers, params.window.start, params.window.end);
     },
   );
 
@@ -310,27 +283,14 @@ export function useUsageResources(selectedProviderKeys: string[]) {
     }
   }, [calendar.error]);
 
-  const availableYears = useMemo(
-    () => calendar.data?.available_years ?? [],
-    [calendar.data],
-  );
+  const availableYears = useMemo(() => calendar.data?.available_years ?? [], [calendar.data]);
   const heatmapGrid = useMemo<HeatmapGrid>(() => {
     const { start, end } = calendarWindow;
-    return buildHeatmapGrid(
-      calendar.data?.days ?? [],
-      calendarMetric,
-      start,
-      end,
-    );
+    return buildHeatmapGrid(calendar.data?.days ?? [], calendarMetric, start, end);
   }, [calendarWindow, calendar.data, calendarMetric]);
 
-  const [sessionCount, { refetch: refetchSessionCount }] = useResource(
-    true,
-    () => getSessionCount(),
-  );
-  const [indexStats, { refetch: refetchIndexStats }] = useResource(true, () =>
-    getIndexStats(),
-  );
+  const [sessionCount, { refetch: refetchSessionCount }] = useResource(true, () => getSessionCount());
+  const [indexStats, { refetch: refetchIndexStats }] = useResource(true, () => getIndexStats());
   const [pricingStatus, { refetch: refetchPricingStatus }] = useResource(
     true,
     (): Promise<PricingCatalogStatus> => getPricingCatalogStatus(),
@@ -355,8 +315,7 @@ export function useUsageResources(selectedProviderKeys: string[]) {
 
     const handleUsageDataChangedIfStale = () => {
       if (document.visibilityState === "hidden") return;
-      const usageRefreshedAt =
-        indexStatsRef.current.data?.usage_last_refreshed_at;
+      const usageRefreshedAt = indexStatsRef.current.data?.usage_last_refreshed_at;
       if (!usageRefreshedAt) return;
       const parsed = Date.parse(usageRefreshedAt);
       if (!Number.isNaN(parsed) && Date.now() - parsed < 5 * 60 * 1000) return;
@@ -365,10 +324,7 @@ export function useUsageResources(selectedProviderKeys: string[]) {
 
     window.addEventListener("usage-data-changed", handleUsageDataChanged);
     window.addEventListener("focus", handleUsageDataChangedIfStale);
-    document.addEventListener(
-      "visibilitychange",
-      handleUsageDataChangedIfStale,
-    );
+    document.addEventListener("visibilitychange", handleUsageDataChangedIfStale);
 
     let disposed = false;
     let unlistenMaintenance: UnlistenFn | undefined;
@@ -394,19 +350,10 @@ export function useUsageResources(selectedProviderKeys: string[]) {
       disposed = true;
       window.removeEventListener("usage-data-changed", handleUsageDataChanged);
       window.removeEventListener("focus", handleUsageDataChangedIfStale);
-      document.removeEventListener(
-        "visibilitychange",
-        handleUsageDataChangedIfStale,
-      );
+      document.removeEventListener("visibilitychange", handleUsageDataChangedIfStale);
       unlistenMaintenance?.();
     };
-  }, [
-    refetchStats,
-    refetchCalendar,
-    refetchSessionCount,
-    refetchPricingStatus,
-    refetchIndexStats,
-  ]);
+  }, [refetchStats, refetchCalendar, refetchSessionCount, refetchPricingStatus, refetchIndexStats]);
 
   return {
     stats,
@@ -456,79 +403,47 @@ export function useUsageDerived(deps: UsageDerivedDeps) {
   const customRange = useCustomRange();
   const rangeDays = useRangeDays();
 
-  // The zustand sort setters take a plain value (not the Solid signal's
-  // functional-update form), so the current sort is threaded in to compute the
-  // toggle. Behavior is unchanged.
-  const makeSortHandler =
-    (current: UsageSortState, setter: (next: UsageSortState) => void) =>
-    (col: string) => {
-      setter({ col, asc: current.col === col ? !current.asc : false });
-    };
+  // The zustand sort setters take a plain value, so the current sort is
+  // threaded in to compute the toggle.
+  const makeSortHandler = (current: UsageSortState, setter: (next: UsageSortState) => void) => (col: string) => {
+    setter({ col, asc: current.col === col ? !current.asc : false });
+  };
 
   const sortedModels = useMemo(() => {
     const data = stats.data?.model_costs ?? [];
     const { col, asc } = modelSort;
-    return [...data].sort((a, b) =>
-      compareUsageValues(
-        a[col as keyof ModelCost],
-        b[col as keyof ModelCost],
-        asc,
-      ),
-    );
+    return [...data].sort((a, b) => compareUsageValues(a[col as keyof ModelCost], b[col as keyof ModelCost], asc));
   }, [stats.data, modelSort]);
 
   const sortedProjects = useMemo(() => {
     const data = stats.data?.project_costs ?? [];
     const { col, asc } = projectSort;
-    return [...data].sort((a, b) =>
-      compareUsageValues(
-        a[col as keyof ProjectCost],
-        b[col as keyof ProjectCost],
-        asc,
-      ),
-    );
+    return [...data].sort((a, b) => compareUsageValues(a[col as keyof ProjectCost], b[col as keyof ProjectCost], asc));
   }, [stats.data, projectSort]);
 
   const sortedSessions = useMemo(() => {
     const data = stats.data?.recent_sessions ?? [];
     const { col, asc } = sessionSort;
     return [...data].sort((a, b) =>
-      compareUsageValues(
-        a[col as keyof SessionCostRow],
-        b[col as keyof SessionCostRow],
-        asc,
-      ),
+      compareUsageValues(a[col as keyof SessionCostRow], b[col as keyof SessionCostRow], asc),
     );
   }, [stats.data, sessionSort]);
 
-  const visibleProjects = useMemo(
-    () => sortedProjects.slice(0, projectLimit),
-    [sortedProjects, projectLimit],
-  );
-  const visibleSessions = useMemo(
-    () => sortedSessions.slice(0, sessionLimit),
-    [sortedSessions, sessionLimit],
-  );
+  const visibleProjects = useMemo(() => sortedProjects.slice(0, projectLimit), [sortedProjects, projectLimit]);
+  const visibleSessions = useMemo(() => sortedSessions.slice(0, sessionLimit), [sortedSessions, sessionLimit]);
 
-  const formatModelName = (model: string): string =>
-    model.trim().length > 0 ? model : t("common.unknown");
+  const formatModelName = (model: string): string => (model.trim().length > 0 ? model : t("common.unknown"));
   const formatProjectName = (project: string, projectPath: string): string => {
     if (project.trim().length > 0) return project;
     const name = projectPath.split(/[\\/]/).filter(Boolean).at(-1);
     return name || t("common.unknown");
   };
-  const formatProjectPath = (projectPath: string): string =>
-    formatProjectPathRaw(projectPath, t("common.unknown"));
+  const formatProjectPath = (projectPath: string): string => formatProjectPathRaw(projectPath, t("common.unknown"));
 
   const totalTokens = useMemo(() => totalUsageTokens(stats.data), [stats.data]);
 
   const dailyChartData = useMemo(
-    () =>
-      buildDailyChartData(
-        stats.data?.daily_usage ?? [],
-        selectedProviderKeys,
-        chartMetric,
-      ),
+    () => buildDailyChartData(stats.data?.daily_usage ?? [], selectedProviderKeys, chartMetric),
     [stats.data, selectedProviderKeys, chartMetric],
   );
 
@@ -555,12 +470,7 @@ export function useUsageDerived(deps: UsageDerivedDeps) {
     const data = stats.data;
     if (!data || data.total_turns > 0) return false;
     if (selectedProviderKeys.length === 0) return false;
-    return (
-      rangeDays === null &&
-      customRange === null &&
-      allProvidersSelected &&
-      (sessionCount.data ?? 0) > 0
-    );
+    return rangeDays === null && customRange === null && allProvidersSelected && (sessionCount.data ?? 0) > 0;
   })();
 
   const emptyMessage = ((): string => {
@@ -574,9 +484,7 @@ export function useUsageDerived(deps: UsageDerivedDeps) {
   const formattedPricingUpdatedAt = ((): string => {
     if (pricingStatus.error) return t("error.message");
     const updatedAt = pricingStatus.data?.updated_at;
-    return updatedAt
-      ? formatLocalDateTime(updatedAt)
-      : t("settings.pricingNotFetched");
+    return updatedAt ? formatLocalDateTime(updatedAt) : t("settings.pricingNotFetched");
   })();
 
   const formattedUsageUpdatedAt = ((): string => {
@@ -585,53 +493,34 @@ export function useUsageDerived(deps: UsageDerivedDeps) {
     return updatedAt ? formatLocalDateTime(updatedAt) : t("usage.notRefreshed");
   })();
 
-  const pricingStatusError = pricingStatus.error
-    ? errorMessage(pricingStatus.error)
-    : null;
+  const pricingStatusError = pricingStatus.error ? errorMessage(pricingStatus.error) : null;
 
-  const indexStatsError = indexStats.error
-    ? errorMessage(indexStats.error)
-    : null;
+  const indexStatsError = indexStats.error ? errorMessage(indexStats.error) : null;
 
   const pricingModelCountLabel = ((): string => {
     if (pricingStatus.error) return t("error.message");
-    if (pricingStatus.loading && !pricingStatus.data)
-      return t("common.loading");
+    if (pricingStatus.loading && !pricingStatus.data) return t("common.loading");
     return String(pricingStatus.data?.model_count ?? 0);
   })();
 
   const maintenanceStatusText = ((): string => {
-    if (activeMaintenanceJob === "refresh_usage")
-      return t("usage.refreshUsageRunning");
-    if (activeMaintenanceJob === "rebuild_index")
-      return t("usage.rebuildRunning");
+    if (activeMaintenanceJob === "refresh_usage") return t("usage.refreshUsageRunning");
+    if (activeMaintenanceJob === "rebuild_index") return t("usage.rebuildRunning");
     return t("usage.usageReady");
   })();
 
-  const totalCostTrend = trendPercent(
-    stats.data?.total_cost ?? 0,
-    stats.data?.prev_period,
-    "total_cost",
-  );
+  const totalCostTrend = trendPercent(stats.data?.total_cost ?? 0, stats.data?.prev_period, "total_cost");
 
   const summaryStats = [
     {
       label: t("usage.sessions"),
       value: (stats.data?.total_sessions ?? 0).toLocaleString(),
-      trend: trendPercent(
-        stats.data?.total_sessions ?? 0,
-        stats.data?.prev_period,
-        "total_sessions",
-      ),
+      trend: trendPercent(stats.data?.total_sessions ?? 0, stats.data?.prev_period, "total_sessions"),
     },
     {
       label: t("usage.turns"),
       value: (stats.data?.total_turns ?? 0).toLocaleString(),
-      trend: trendPercent(
-        stats.data?.total_turns ?? 0,
-        stats.data?.prev_period,
-        "total_turns",
-      ),
+      trend: trendPercent(stats.data?.total_turns ?? 0, stats.data?.prev_period, "total_turns"),
     },
     {
       label: t("usage.tokens"),
@@ -644,34 +533,22 @@ export function useUsageDerived(deps: UsageDerivedDeps) {
     {
       label: t("usage.input"),
       value: fmtTokens(stats.data?.total_input_tokens ?? 0),
-      share:
-        totalTokens > 0
-          ? fmtPct((stats.data?.total_input_tokens ?? 0) / totalTokens)
-          : "0%",
+      share: totalTokens > 0 ? fmtPct((stats.data?.total_input_tokens ?? 0) / totalTokens) : "0%",
     },
     {
       label: t("usage.output"),
       value: fmtTokens(stats.data?.total_output_tokens ?? 0),
-      share:
-        totalTokens > 0
-          ? fmtPct((stats.data?.total_output_tokens ?? 0) / totalTokens)
-          : "0%",
+      share: totalTokens > 0 ? fmtPct((stats.data?.total_output_tokens ?? 0) / totalTokens) : "0%",
     },
     {
       label: t("usage.cacheRead"),
       value: fmtTokens(stats.data?.total_cache_read_tokens ?? 0),
-      share:
-        totalTokens > 0
-          ? fmtPct((stats.data?.total_cache_read_tokens ?? 0) / totalTokens)
-          : "0%",
+      share: totalTokens > 0 ? fmtPct((stats.data?.total_cache_read_tokens ?? 0) / totalTokens) : "0%",
     },
     {
       label: t("usage.cacheWrite"),
       value: fmtTokens(stats.data?.total_cache_write_tokens ?? 0),
-      share:
-        totalTokens > 0
-          ? fmtPct((stats.data?.total_cache_write_tokens ?? 0) / totalTokens)
-          : "0%",
+      share: totalTokens > 0 ? fmtPct((stats.data?.total_cache_write_tokens ?? 0) / totalTokens) : "0%",
     },
   ];
 

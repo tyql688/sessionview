@@ -1,8 +1,5 @@
 import type { SessionRef } from "@/lib/types";
-import {
-  dispatchSessionCommand,
-  SESSION_COMMAND_EVENTS,
-} from "@/lib/session-command-events";
+import { dispatchSessionCommand, SESSION_COMMAND_EVENTS } from "@/lib/session-command-events";
 
 export interface KeyboardDeps {
   activeTabId: () => string | null;
@@ -17,15 +14,10 @@ export interface KeyboardDeps {
   splitToRight: (sessionId: string) => void;
   focusAdjacentGroup: (direction: "left" | "right") => void;
   startRebuildIndex: () => void;
-  syncFromDisk: (opts?: {
-    showSpinner?: boolean;
-    changedPaths?: string[];
-  }) => void;
+  syncFromDisk: (opts?: { showSpinner?: boolean; changedPaths?: string[] }) => void;
 }
 
-export function createKeyboardHandler(
-  deps: KeyboardDeps,
-): (e: KeyboardEvent) => void {
+export function createKeyboardHandler(deps: KeyboardDeps): (e: KeyboardEvent) => void {
   return (e: KeyboardEvent) => {
     const mod = e.metaKey || e.ctrlKey;
 
@@ -86,10 +78,7 @@ export function createKeyboardHandler(
     }
 
     // Cmd+] or Ctrl+Tab: Next tab
-    if (
-      (e.metaKey && e.key === "]") ||
-      (e.ctrlKey && e.key === "Tab" && !e.shiftKey)
-    ) {
+    if ((e.metaKey && e.key === "]") || (e.ctrlKey && e.key === "Tab" && !e.shiftKey)) {
       e.preventDefault();
       const tabs = deps.openTabs();
       const currentId = deps.activeTabId();
@@ -102,10 +91,7 @@ export function createKeyboardHandler(
     }
 
     // Cmd+[ or Ctrl+Shift+Tab: Previous tab
-    if (
-      (e.metaKey && e.key === "[") ||
-      (e.ctrlKey && e.key === "Tab" && e.shiftKey)
-    ) {
+    if ((e.metaKey && e.key === "[") || (e.ctrlKey && e.key === "Tab" && e.shiftKey)) {
       e.preventDefault();
       const tabs = deps.openTabs();
       const currentId = deps.activeTabId();

@@ -18,10 +18,7 @@ const cache = new Map<string, Promise<string>>();
  *
  * If the loader rejects the entry is removed so a later call can retry.
  */
-export function cachedLoad(
-  key: string,
-  loader: () => Promise<string>,
-): Promise<string> {
+export function cachedLoad(key: string, loader: () => Promise<string>): Promise<string> {
   const existing = cache.get(key);
   if (existing) return existing;
 

@@ -91,8 +91,7 @@
 
 /* Blockquote */
 .timeline-markdown [data-streamdown="blockquote"] {
-  border-left: 3px solid
-    color-mix(in srgb, var(--text-tertiary) 55%, transparent);
+  border-left: 3px solid color-mix(in srgb, var(--text-tertiary) 55%, transparent);
   padding-left: 10px;
   color: var(--text-secondary);
 }
@@ -173,12 +172,8 @@
   position: relative;
 }
 
-.timeline-markdown
-  [data-streamdown="code-block"]
-  > div:has(> [data-streamdown="code-block-actions"]),
-.timeline-markdown
-  [data-streamdown="mermaid-block"]
-  > div:has(> [data-streamdown="mermaid-block-actions"]) {
+.timeline-markdown [data-streamdown="code-block"] > div:has(> [data-streamdown="code-block-actions"]),
+.timeline-markdown [data-streamdown="mermaid-block"] > div:has(> [data-streamdown="mermaid-block-actions"]) {
   position: absolute;
   top: 3px;
   right: 8px;
@@ -224,12 +219,8 @@
   height: 14px;
 }
 
-.timeline-markdown
-  [data-streamdown="code-block"]:hover
-  [data-streamdown="code-block-actions"],
-.timeline-markdown
-  [data-streamdown="mermaid-block"]:hover
-  [data-streamdown="mermaid-block-actions"] {
+.timeline-markdown [data-streamdown="code-block"]:hover [data-streamdown="code-block-actions"],
+.timeline-markdown [data-streamdown="mermaid-block"]:hover [data-streamdown="mermaid-block-actions"] {
   opacity: 1;
 }
 
@@ -277,8 +268,7 @@
 
 /* Mermaid pan-zoom cluster: bottom-right, horizontal — out of the diagram's
  * reading path. */
-.timeline-markdown [data-streamdown="mermaid-block"]
-  div[class~="absolute"][class~="flex-col"] {
+.timeline-markdown [data-streamdown="mermaid-block"] div[class~="absolute"][class~="flex-col"] {
   inset: auto 8px 8px auto;
   flex-direction: row;
 }

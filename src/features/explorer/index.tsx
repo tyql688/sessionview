@@ -25,10 +25,7 @@ import {
 } from "@/stores/settings";
 import { ContextMenu } from "@/components/ContextMenu";
 import { InputDialog } from "@/components/InputDialog";
-import {
-  TreeNodeComponent,
-  collectSessionNodes,
-} from "@/features/explorer/TreeNode";
+import { TreeNodeComponent, collectSessionNodes } from "@/features/explorer/TreeNode";
 import {
   toggleSelected,
   clearSelection,
@@ -44,11 +41,7 @@ import {
   groupTreeByDirectory,
   buildSessionRef,
 } from "@/features/explorer/hooks";
-import {
-  buildSessionMenuItems,
-  buildSelectionMenuItems,
-  buildNodeMenuItems,
-} from "@/features/explorer/ContextMenus";
+import { buildSessionMenuItems, buildSelectionMenuItems, buildNodeMenuItems } from "@/features/explorer/ContextMenus";
 
 function ExplorerSkeleton() {
   return (
@@ -60,10 +53,7 @@ function ExplorerSkeleton() {
             <div className="skeleton skeleton-tree-text skeleton-tree-text-sm" />
           </div>
           {Array.from({ length: 4 }).map((_, j) => (
-            <div
-              key={j}
-              className="skeleton-tree-item skeleton-tree-item-indent"
-            >
+            <div key={j} className="skeleton-tree-item skeleton-tree-item-indent">
               <div className="skeleton skeleton-tree-text" />
             </div>
           ))}
@@ -107,20 +97,13 @@ export function Explorer(props: {
   // O(1) session ID → project path lookup, rebuilt when props.tree changes
   const sessionProjectPathMap = useMemo(() => {
     const map = new Map<string, string>();
-    function walk(
-      nodes: TreeNode[],
-      providerHint: string,
-      projectHint: string,
-    ) {
+    function walk(nodes: TreeNode[], providerHint: string, projectHint: string) {
       for (const node of nodes) {
         if (node.node_type === "session") {
           map.set(node.id, projectHint);
         }
         if (node.children && node.children.length > 0) {
-          const nextProvider =
-            node.node_type === "provider"
-              ? (node.provider ?? node.id)
-              : providerHint;
+          const nextProvider = node.node_type === "provider" ? (node.provider ?? node.id) : providerHint;
           const nextProject =
             node.node_type === "project" && !providerHint
               ? ""
@@ -215,11 +198,7 @@ export function Explorer(props: {
 
   // --- Click handlers ---
 
-  function handleSessionClick(
-    e: React.MouseEvent,
-    node: TreeNode,
-    parentProjectLabel: string,
-  ) {
+  function handleSessionClick(e: React.MouseEvent, node: TreeNode, parentProjectLabel: string) {
     if (e.metaKey || e.ctrlKey) {
       toggleSelected(node.id);
       return;
@@ -228,23 +207,14 @@ export function Explorer(props: {
     props.onPreviewSession(buildSessionRef(node, parentProjectLabel));
   }
 
-  function handleSessionDblClick(
-    _e: React.MouseEvent,
-    node: TreeNode,
-    parentProjectLabel: string,
-  ) {
+  function handleSessionDblClick(_e: React.MouseEvent, node: TreeNode, parentProjectLabel: string) {
     props.onOpenSession(buildSessionRef(node, parentProjectLabel));
   }
 
-  // Persist across renders (Solid ran the body once; React runs it every render).
-  // Persist across renders (Solid ran the body once; React runs it every render).
+  // Persist command lookups across renders.
   const resumeCommandCacheRef = useRef(new Map<string, string | null>());
 
-  async function handleSessionContextMenu(
-    e: React.MouseEvent,
-    node: TreeNode,
-    parentProjectLabel: string,
-  ) {
+  async function handleSessionContextMenu(e: React.MouseEvent, node: TreeNode, parentProjectLabel: string) {
     setNodeMenu(null);
     setSelectionMenu(null);
     const resumeCommandCache = resumeCommandCacheRef.current;
@@ -291,9 +261,7 @@ export function Explorer(props: {
     const result = await trashSessionsBatch(sessions.map((s) => s.id));
     props.onRefreshTree?.();
     if (result.failed > 0) {
-      toastError(
-        `${result.failed}/${result.succeeded + result.failed} ${t("toast.trashFailed")}`,
-      );
+      toastError(`${result.failed}/${result.succeeded + result.failed} ${t("toast.trashFailed")}`);
     }
     if (result.succeeded > 0) {
       toast(`${result.succeeded} ${t("toast.trashed")}`);
@@ -311,9 +279,7 @@ export function Explorer(props: {
     clearSelection();
     props.onRefreshTree?.();
     if (result.failed > 0) {
-      toastError(
-        `${result.failed}/${result.succeeded + result.failed} ${t("toast.trashFailed")}`,
-      );
+      toastError(`${result.failed}/${result.succeeded + result.failed} ${t("toast.trashFailed")}`);
     } else {
       toast(t("toast.trashed"));
     }
@@ -423,10 +389,7 @@ export function Explorer(props: {
     handle.classList.add("active");
 
     function onMove(ev: MouseEvent) {
-      const w = Math.max(
-        160,
-        Math.min(startW + ev.clientX - startX, window.innerWidth * 0.5),
-      );
+      const w = Math.max(160, Math.min(startW + ev.clientX - startX, window.innerWidth * 0.5));
       el!.style.width = `${w}px`;
     }
     function onUp() {
@@ -475,12 +438,7 @@ export function Explorer(props: {
             </ToggleGroupItem>
           </ToggleGroup>
           {props.activeSessionId && (
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              title={t("explorer.locateSession")}
-              onClick={revealActiveSession}
-            >
+            <Button variant="ghost" size="icon-xs" title={t("explorer.locateSession")} onClick={revealActiveSession}>
               <Crosshair className="size-3.5" aria-hidden="true" />
             </Button>
           )}
@@ -515,21 +473,9 @@ export function Explorer(props: {
         ))}
       </div>
 
-      <ContextMenu
-        items={sessionMenuItems()}
-        position={sessionMenu?.pos ?? null}
-        onClose={closeAllMenus}
-      />
-      <ContextMenu
-        items={selectionMenuItems()}
-        position={selectionMenu}
-        onClose={closeAllMenus}
-      />
-      <ContextMenu
-        items={nodeMenuItems()}
-        position={nodeMenu?.pos ?? null}
-        onClose={closeAllMenus}
-      />
+      <ContextMenu items={sessionMenuItems()} position={sessionMenu?.pos ?? null} onClose={closeAllMenus} />
+      <ContextMenu items={selectionMenuItems()} position={selectionMenu} onClose={closeAllMenus} />
+      <ContextMenu items={nodeMenuItems()} position={nodeMenu?.pos ?? null} onClose={closeAllMenus} />
 
       <InputDialog
         open={renameTarget !== null}

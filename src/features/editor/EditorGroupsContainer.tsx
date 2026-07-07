@@ -1,16 +1,6 @@
-import {
-  type DragEvent as ReactDragEvent,
-  Fragment,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { type DragEvent as ReactDragEvent, Fragment, useEffect, useRef, useState } from "react";
 import type { SessionMeta, SessionRef, TreeNode } from "@/lib/types";
-import {
-  getChildSessionCounts,
-  invokeWithFallback,
-  listRecentSessions,
-} from "@/lib/tauri";
+import { getChildSessionCounts, invokeWithFallback, listRecentSessions } from "@/lib/tauri";
 import { isPathBlocked } from "@/stores/settings";
 import { errorMessage } from "@/lib/errors";
 import {
@@ -40,12 +30,9 @@ export function EditorGroupsContainer(props: {
   const activeGroupId = useActiveGroupId();
   const [dropActive, setDropActive] = useState(false);
   const [recentVersion, setRecentVersion] = useState(0);
-  const [recentSessions, setRecentSessions] = useState<
-    SessionMeta[] | undefined
-  >(undefined);
+  const [recentSessions, setRecentSessions] = useState<SessionMeta[] | undefined>(undefined);
   const [recentSessionsLoading, setRecentSessionsLoading] = useState(true);
-  const [recentSessionsErrorRaw, setRecentSessionsErrorRaw] =
-    useState<unknown>(null);
+  const [recentSessionsErrorRaw, setRecentSessionsErrorRaw] = useState<unknown>(null);
   const [childCounts, setChildCounts] = useState<Record<string, number>>({});
 
   // The welcome page shows WELCOME_RECENT_ROWS sessions, but blocked-path and
@@ -62,9 +49,7 @@ export function EditorGroupsContainer(props: {
       .then((list) => {
         if (cancelled) return;
         setRecentSessions(
-          list
-            .filter((s) => !isPathBlocked(s.project_path) && !s.is_sidechain)
-            .slice(0, WELCOME_RECENT_ROWS),
+          list.filter((s) => !isPathBlocked(s.project_path) && !s.is_sidechain).slice(0, WELCOME_RECENT_ROWS),
         );
         setRecentSessionsLoading(false);
       })
@@ -78,9 +63,7 @@ export function EditorGroupsContainer(props: {
     };
   }, [recentVersion]);
 
-  const recentSessionsError = recentSessionsErrorRaw
-    ? errorMessage(recentSessionsErrorRaw)
-    : null;
+  const recentSessionsError = recentSessionsErrorRaw ? errorMessage(recentSessionsErrorRaw) : null;
 
   useEffect(() => {
     const sessions = recentSessions;
@@ -101,8 +84,8 @@ export function EditorGroupsContainer(props: {
     };
   }, [recentSessions]);
 
-  // Mirror Solid's `on(..., { defer: true })`: skip the initial run and only
-  // bump the recent-sessions version when the tree actually changes.
+  // Skip the initial run and only bump the recent-sessions version when the
+  // tree actually changes.
   const treeMounted = useRef(false);
   useEffect(() => {
     if (!treeMounted.current) {
@@ -118,9 +101,7 @@ export function EditorGroupsContainer(props: {
     const right = gs[leftIdx + 1];
     if (!left || !right) return;
 
-    const container = document.querySelector(
-      ".editor-groups-container",
-    ) as HTMLElement;
+    const container = document.querySelector(".editor-groups-container") as HTMLElement;
     if (!container) return;
     const totalWidth = container.clientWidth;
     const deltaPct = (deltaX / totalWidth) * 100;
@@ -158,9 +139,7 @@ export function EditorGroupsContainer(props: {
     e.preventDefault();
     setDropActive(false);
     try {
-      const data: unknown = JSON.parse(
-        e.dataTransfer?.getData("text/plain") ?? "{}",
-      );
+      const data: unknown = JSON.parse(e.dataTransfer?.getData("text/plain") ?? "{}");
       const payload = data as { sessionId?: unknown };
       if (typeof payload.sessionId === "string") {
         createGroupFromDrop(payload.sessionId);
@@ -183,12 +162,7 @@ export function EditorGroupsContainer(props: {
     >
       {groups.map((group, idx) => (
         <Fragment key={group.id}>
-          {idx > 0 && (
-            <SplitHandle
-              onResize={(dx) => handleResize(idx - 1, dx)}
-              onDoubleClick={equalizeWidths}
-            />
-          )}
+          {idx > 0 && <SplitHandle onResize={(dx) => handleResize(idx - 1, dx)} onDoubleClick={equalizeWidths} />}
           <EditorArea
             groupId={group.id}
             tabs={group.tabs}
@@ -213,9 +187,7 @@ export function EditorGroupsContainer(props: {
           />
         </Fragment>
       ))}
-      <div
-        className={`editor-groups-drop-right${dropActive ? " active" : ""}`}
-      />
+      <div className={`editor-groups-drop-right${dropActive ? " active" : ""}`} />
     </div>
   );
 }

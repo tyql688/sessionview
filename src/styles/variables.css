@@ -69,11 +69,7 @@
   --code-text: #24292e;
   --inline-code-bg: rgba(0, 0, 0, 0.06);
   --inline-code-text: #d63384;
-  --msg-user-bg: linear-gradient(
-    135deg,
-    rgba(0, 122, 255, 0.08),
-    rgba(88, 86, 214, 0.06)
-  );
+  --msg-user-bg: linear-gradient(135deg, rgba(0, 122, 255, 0.08), rgba(88, 86, 214, 0.06));
   --msg-user-border: rgba(0, 122, 255, 0.12);
   --msg-user-text: #1d1d1f;
   --msg-user-muted: #6e6e73;
@@ -97,11 +93,7 @@
   --msg-user-table-row-hover: rgba(0, 122, 255, 0.04);
   --msg-bubble-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
   --msg-user-shadow: 0 8px 20px rgba(0, 122, 255, 0.08);
-  --msg-command-bg: linear-gradient(
-    135deg,
-    rgba(16, 185, 129, 0.12),
-    rgba(5, 150, 105, 0.08)
-  );
+  --msg-command-bg: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(5, 150, 105, 0.08));
   --msg-command-border: rgba(16, 185, 129, 0.24);
   --msg-command-shadow: 0 8px 20px rgba(16, 185, 129, 0.08);
   --msg-assistant-bg: #f3f5f9;
@@ -121,8 +113,7 @@
   --code-token-deletion: #b31d28;
   --code-token-deletion-bg: #ffeef0;
   --context-menu-bg: #ffffff;
-  --context-menu-shadow:
-    0 4px 16px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.08);
+  --context-menu-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.08);
   --modal-bg: #ffffff;
   --bg-primary: #ffffff;
   --sidebar-width: 260px;
@@ -194,11 +185,7 @@
   --code-text: #adbac7;
   --inline-code-bg: rgba(255, 255, 255, 0.1);
   --inline-code-text: #f0abfc;
-  --msg-user-bg: linear-gradient(
-    135deg,
-    rgba(10, 132, 255, 0.12),
-    rgba(88, 86, 214, 0.08)
-  );
+  --msg-user-bg: linear-gradient(135deg, rgba(10, 132, 255, 0.12), rgba(88, 86, 214, 0.08));
   --msg-user-border: rgba(10, 132, 255, 0.2);
   --msg-user-text: #ffffff;
   --msg-user-muted: rgba(255, 255, 255, 0.72);
@@ -222,11 +209,7 @@
   --msg-user-table-row-hover: rgba(255, 255, 255, 0.06);
   --msg-bubble-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
   --msg-user-shadow: 0 12px 28px rgba(10, 132, 255, 0.14);
-  --msg-command-bg: linear-gradient(
-    135deg,
-    rgba(52, 211, 153, 0.16),
-    rgba(16, 185, 129, 0.08)
-  );
+  --msg-command-bg: linear-gradient(135deg, rgba(52, 211, 153, 0.16), rgba(16, 185, 129, 0.08));
   --msg-command-border: rgba(52, 211, 153, 0.28);
   --msg-command-shadow: 0 12px 28px rgba(16, 185, 129, 0.12);
   --msg-assistant-bg: #2a2c32;
@@ -246,8 +229,7 @@
   --code-token-deletion: #ffd8d3;
   --code-token-deletion-bg: #78191b;
   --context-menu-bg: #2c2c2e;
-  --context-menu-shadow:
-    0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.3);
+  --context-menu-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.3);
   --modal-bg: #2c2c2e;
   --bg-primary: #1e1e1e;
   --scrollbar-thumb: rgba(255, 255, 255, 0.12);

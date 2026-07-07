@@ -51,11 +51,7 @@ export function formatTimestamp(epoch: number, locale?: string): string {
  * timestamp — this never fabricates one. */
 export function formatTreeTime(epoch: number, now: Date = new Date()): string {
   const d = new Date(epoch * 1000);
-  if (
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  ) {
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) {
     const hh = String(d.getHours()).padStart(2, "0");
     const mm = String(d.getMinutes()).padStart(2, "0");
     return `${hh}:${mm}`;

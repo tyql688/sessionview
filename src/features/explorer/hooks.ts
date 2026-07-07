@@ -46,10 +46,7 @@ export function filterOrphanSubagents(tree: TreeNode[]): TreeNode[] {
       .map((node) => {
         const children = prune(node.children);
         // Strip sidechain children from session nodes
-        const filtered =
-          node.node_type === "session"
-            ? children.filter((c) => !c.is_sidechain)
-            : children;
+        const filtered = node.node_type === "session" ? children.filter((c) => !c.is_sidechain) : children;
         return {
           ...node,
           children: filtered,
@@ -78,10 +75,7 @@ export function filterOrphanSubagents(tree: TreeNode[]): TreeNode[] {
  * project path collect under a trailing "no project" group labeled by
  * `noProjectLabel`.
  */
-export function groupTreeByDirectory(
-  tree: TreeNode[],
-  noProjectLabel: string,
-): TreeNode[] {
+export function groupTreeByDirectory(tree: TreeNode[], noProjectLabel: string): TreeNode[] {
   interface DirBucket {
     path: string;
     label: string;
@@ -105,24 +99,19 @@ export function groupTreeByDirectory(
         bucketFor(projectPath, projectLabel).sessions.push(node);
         continue;
       }
-      const nextPath =
-        node.node_type === "project" ? (node.project_path ?? "") : projectPath;
-      const nextLabel =
-        node.node_type === "project" ? node.label : projectLabel;
+      const nextPath = node.node_type === "project" ? (node.project_path ?? "") : projectPath;
+      const nextLabel = node.node_type === "project" ? node.label : projectLabel;
       walk(node.children, nextPath, nextLabel);
     }
   }
   walk(tree, "", noProjectLabel);
 
-  const newestOf = (sessions: TreeNode[]) =>
-    sessions.reduce((max, s) => Math.max(max, s.updated_at ?? 0), 0);
+  const newestOf = (sessions: TreeNode[]) => sessions.reduce((max, s) => Math.max(max, s.updated_at ?? 0), 0);
 
   const groups = [...buckets.values()]
     .filter((bucket) => bucket.sessions.length > 0)
     .map((bucket) => {
-      const sessions = [...bucket.sessions].sort(
-        (a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0),
-      );
+      const sessions = [...bucket.sessions].sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0));
       return {
         id: `dir:${bucket.path || "none"}`,
         label: bucket.path ? bucket.label : noProjectLabel,
@@ -143,10 +132,7 @@ export function groupTreeByDirectory(
   return groups;
 }
 
-export function buildSessionRef(
-  node: TreeNode,
-  parentProjectLabel: string,
-): SessionRef {
+export function buildSessionRef(node: TreeNode, parentProjectLabel: string): SessionRef {
   return {
     id: node.id,
     provider: (node.provider ?? "claude") as Provider,

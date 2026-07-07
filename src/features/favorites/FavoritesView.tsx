@@ -8,9 +8,7 @@ import { errorMessage } from "@/lib/errors";
 import { useFavoriteVersion } from "@/features/favorites/favorites";
 import { TreeNodeComponent } from "@/features/explorer/TreeNode";
 
-export function FavoritesView(props: {
-  onOpenSession: (s: SessionRef) => void;
-}) {
+export function FavoritesView(props: { onOpenSession: (s: SessionRef) => void }) {
   const { t } = useI18n();
   const [favorites, setFavorites] = useState<SessionMeta[]>([]);
   const [loading, setLoading] = useState(true);
@@ -20,10 +18,7 @@ export function FavoritesView(props: {
 
   const noProjectLabel = t("explorer.noProject");
 
-  const tree = useMemo(
-    () => buildFavoritesTree(favorites, noProjectLabel),
-    [favorites, noProjectLabel],
-  );
+  const tree = useMemo(() => buildFavoritesTree(favorites, noProjectLabel), [favorites, noProjectLabel]);
 
   function autoExpand(nodes: TreeNode[]) {
     const ids = new Set<string>();
@@ -51,15 +46,14 @@ export function FavoritesView(props: {
     }
   }
 
-  // Initial load (mirrors Solid `onMount(refresh)`).
+  // Initial load.
   useEffect(() => {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Re-fetch when favorite version changes (e.g. toggled from Explorer or
-  // SessionView). Mirrors Solid `on(favoriteVersion, ...)`: fires only on
-  // version change, and only after the initial load has completed.
+  // SessionView), and only after the initial load has completed.
   useEffect(() => {
     if (initializedRef.current) void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -96,9 +90,7 @@ export function FavoritesView(props: {
     <div className="favorites-view">
       <div className="explorer-header">
         <span>{t("favorites.title")}</span>
-        {favorites.length > 0 && (
-          <span className="count-badge">{favorites.length}</span>
-        )}
+        {favorites.length > 0 && <span className="count-badge">{favorites.length}</span>}
       </div>
       {loading && (
         <div className="loading-center">
@@ -107,14 +99,7 @@ export function FavoritesView(props: {
       )}
       {!loading && favorites.length === 0 && (
         <div className="empty-state">
-          <svg
-            width="32"
-            height="32"
-            fill="none"
-            stroke="var(--text-tertiary)"
-            strokeWidth="1.5"
-            viewBox="0 0 24 24"
-          >
+          <svg width="32" height="32" fill="none" stroke="var(--text-tertiary)" strokeWidth="1.5" viewBox="0 0 24 24">
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
           </svg>
           <p className="empty-state-text">{t("favorites.empty")}</p>

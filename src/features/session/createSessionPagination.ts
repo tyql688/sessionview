@@ -2,11 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { flushSync } from "react-dom";
 import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
-import {
-  cancelSessionLoad,
-  getSessionMessagesWindow,
-  isLoadCanceledError,
-} from "@/lib/tauri";
+import { cancelSessionLoad, getSessionMessagesWindow, isLoadCanceledError } from "@/lib/tauri";
 import type { Message, SessionMeta, TokenTotals } from "@/lib/types";
 import { findFirstMatchingEntryIndex } from "@/features/session/search-utils";
 import type { ProcessedEntry } from "@/features/session/hooks";
@@ -77,9 +73,7 @@ export interface CreateSessionPaginationResult {
  * synchronous flush. Only a committed in-session search loads the complete
  * session (counting must cover every message).
  */
-export function useSessionPagination(
-  opts: CreateSessionPaginationOptions,
-): CreateSessionPaginationResult {
+export function useSessionPagination(opts: CreateSessionPaginationOptions): CreateSessionPaginationResult {
   const [totalMessages, setTotalMessages] = useState(0);
   const { windowStart, setWindowStart } = opts;
 
@@ -117,11 +111,9 @@ export function useSessionPagination(
     return () => {
       const request = activeWindowRequestRef.current;
       if (request) {
-        void cancelSessionLoad(request.sessionId, request.requestId).catch(
-          (error) => {
-            console.warn("cancelSessionLoad failed:", error);
-          },
-        );
+        void cancelSessionLoad(request.sessionId, request.requestId).catch((error) => {
+          console.warn("cancelSessionLoad failed:", error);
+        });
       }
     };
   }, [opts.sessionId]);
@@ -157,12 +149,7 @@ export function useSessionPagination(
   /** Prepend an older page and keep the viewport glued to the rows the user
    * was reading: the flushSync commit grows the spacer above the viewport,
    * and the scroll offset moves by exactly that growth before paint. */
-  function prependMessages(older: {
-    messages: Message[];
-    start: number;
-    total: number;
-    token_totals: TokenTotals;
-  }) {
+  function prependMessages(older: { messages: Message[]; start: number; total: number; token_totals: TokenTotals }) {
     const scroller = scrollElementRef.current;
     const prevTotalSize = virtualizer.getTotalSize();
     const prevScrollTop = scroller?.scrollTop ?? 0;
@@ -189,12 +176,7 @@ export function useSessionPagination(
     const newStart = Math.max(0, windowStartRef.current - TAIL_BATCH);
     const span = windowStartRef.current - newStart;
     try {
-      const older = await getSessionMessagesWindow(
-        request.sessionId,
-        newStart,
-        span,
-        request.requestId,
-      );
+      const older = await getSessionMessagesWindow(request.sessionId, newStart, span, request.requestId);
       if (request.sessionId !== sessionIdRef.current) return false;
       prependMessages(older);
       return older.messages.length > 0;
@@ -216,12 +198,7 @@ export function useSessionPagination(
     const request = beginWindowRequest("newer");
     windowFetchInFlightRef.current = true;
     try {
-      const newer = await getSessionMessagesWindow(
-        request.sessionId,
-        end,
-        TAIL_BATCH,
-        request.requestId,
-      );
+      const newer = await getSessionMessagesWindow(request.sessionId, end, TAIL_BATCH, request.requestId);
       if (request.sessionId !== sessionIdRef.current) return false;
       // Appending below the viewport never moves visible content in a
       // top-down layout — no flushSync, no scroll compensation needed.
@@ -259,13 +236,7 @@ export function useSessionPagination(
     if (entryCount - 1 - lastRenderedIndex > PREFETCH_ROW_RUNWAY) return;
     void loadNewerTail();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    lastRenderedIndex,
-    entryCount,
-    windowStart,
-    opts.loadedCount,
-    totalMessages,
-  ]);
+  }, [lastRenderedIndex, entryCount, windowStart, opts.loadedCount, totalMessages]);
 
   function revealEntry(entryIndex: number) {
     const total = filteredEntriesRef.current.length;
@@ -285,12 +256,7 @@ export function useSessionPagination(
     windowFetchInFlightRef.current = true;
     try {
       const start = Math.max(0, messageIndex - Math.floor(INITIAL_TAIL / 2));
-      const window = await getSessionMessagesWindow(
-        request.sessionId,
-        start,
-        INITIAL_TAIL,
-        request.requestId,
-      );
+      const window = await getSessionMessagesWindow(request.sessionId, start, INITIAL_TAIL, request.requestId);
       if (request.sessionId !== sessionIdRef.current) return false;
       // flushSync so the entry lookup below sees the new window.
       flushSync(() => {
@@ -324,10 +290,7 @@ export function useSessionPagination(
     }
 
     const entries = filteredEntriesRef.current;
-    let entryIndex = entries.findIndex(
-      (entry) =>
-        entry.type === "message" && entry.messageIndex === messageIndex,
-    );
+    let entryIndex = entries.findIndex((entry) => entry.type === "message" && entry.messageIndex === messageIndex);
     if (entryIndex < 0) {
       // The exact message may be folded into a merged-tool row or filtered
       // out; land on the first entry at or after it instead of failing.
@@ -360,44 +323,28 @@ export function useSessionPagination(
     windowFetchInFlightRef.current = true;
     try {
       if (end >= total) {
-        const older = await getSessionMessagesWindow(
-          request.sessionId,
-          0,
-          start,
-          request.requestId,
-        );
+        const older = await getSessionMessagesWindow(request.sessionId, 0, start, request.requestId);
         if (request.sessionId !== sessionIdRef.current) return false;
         prependMessages(older);
         return older.start === 0;
       }
 
-      const complete = await getSessionMessagesWindow(
-        request.sessionId,
-        0,
-        total,
-        request.requestId,
-      );
+      const complete = await getSessionMessagesWindow(request.sessionId, 0, total, request.requestId);
       if (request.sessionId !== sessionIdRef.current) return false;
       const scroller = scrollElementRef.current;
       const prevFirstKey = filteredEntriesRef.current[0]?.key;
       const prevScrollTop = scroller?.scrollTop ?? 0;
       flushSync(() => {
-        opts.setMeta((prev) =>
-          opts.withTokenTotals(prev, complete.token_totals),
-        );
+        opts.setMeta((prev) => opts.withTokenTotals(prev, complete.token_totals));
         opts.setMessages(complete.messages);
         setWindowStart(complete.start);
         setTotalMessages(complete.total);
       });
       if (scroller && prevFirstKey !== undefined) {
-        const anchorIndex = filteredEntriesRef.current.findIndex(
-          (entry) => entry.key === prevFirstKey,
-        );
+        const anchorIndex = filteredEntriesRef.current.findIndex((entry) => entry.key === prevFirstKey);
         if (anchorIndex > 0) {
           virtualizer.getTotalSize(); // force a fresh measurements pass
-          const anchorStart =
-            virtualizer.measurementsCache[anchorIndex]?.start ??
-            anchorIndex * ESTIMATED_ROW_PX;
+          const anchorStart = virtualizer.measurementsCache[anchorIndex]?.start ?? anchorIndex * ESTIMATED_ROW_PX;
           scroller.scrollTop = prevScrollTop + anchorStart;
         }
       }
@@ -412,21 +359,13 @@ export function useSessionPagination(
     }
   }
 
-  async function resolveCompleteSearchMatch(
-    term: string,
-  ): Promise<number | null> {
-    if (
-      windowStartRef.current > 0 ||
-      windowStartRef.current + loadedCountRef.current < totalMessagesRef.current
-    ) {
+  async function resolveCompleteSearchMatch(term: string): Promise<number | null> {
+    if (windowStartRef.current > 0 || windowStartRef.current + loadedCountRef.current < totalMessagesRef.current) {
       const loadedCompleteWindow = await ensureCompleteWindowForSearch();
       if (!loadedCompleteWindow) return null;
     }
 
-    const matchIndex = findFirstMatchingEntryIndex(
-      filteredEntriesRef.current,
-      term,
-    );
+    const matchIndex = findFirstMatchingEntryIndex(filteredEntriesRef.current, term);
     return matchIndex >= 0 ? matchIndex : null;
   }
 

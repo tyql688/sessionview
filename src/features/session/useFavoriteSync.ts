@@ -1,15 +1,8 @@
 import { useEffect, useState } from "react";
-import {
-  invokeWithFallback,
-  isFavorite,
-  toggleFavorite as invokeToggleFavorite,
-} from "@/lib/tauri";
+import { invokeWithFallback, isFavorite, toggleFavorite as invokeToggleFavorite } from "@/lib/tauri";
 import { useI18n } from "@/i18n/index";
 import { toast, toastError } from "@/stores/toast";
-import {
-  bumpFavoriteVersion,
-  useFavoriteVersion,
-} from "@/features/favorites/favorites";
+import { bumpFavoriteVersion, useFavoriteVersion } from "@/features/favorites/favorites";
 
 export interface UseFavoriteSyncResult {
   starred: boolean | null;
@@ -30,16 +23,12 @@ export function useFavoriteSync(sessionId: string): UseFavoriteSyncResult {
   useEffect(() => {
     void (async () => {
       const id = sessionId;
-      const fav = await invokeWithFallback(
-        isFavorite(id),
-        starred,
-        `refresh favorite state for session ${id}`,
-      );
+      const fav = await invokeWithFallback(isFavorite(id), starred, `refresh favorite state for session ${id}`);
       setStarred(fav);
     })();
-    // Mirrors Solid `on(() => favoriteVersion(), ...)`: re-check only when the
-    // version bumps. `sessionId`/`starred` are read but intentionally not deps
-    // (SessionView remounts on session id change).
+    // Re-check only when the global favorite version bumps.
+    // `sessionId`/`starred` are read but intentionally not deps because
+    // SessionView remounts on session id change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [favoriteVersion]);
 

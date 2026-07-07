@@ -8,10 +8,7 @@ import { toastError } from "@/stores/toast";
 /** How long a copy button shows its "copied ✓" state before resetting. */
 export const COPY_FEEDBACK_MS = 1500;
 
-export function CopyMessageButton(props: {
-  content: string;
-  copyText?: string;
-}) {
+export function CopyMessageButton(props: { content: string; copyText?: string }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
 
@@ -53,20 +50,13 @@ export function TokenUsageDisplay(props: { usage: TokenUsage }) {
   const created = props.usage.cache_creation_input_tokens;
   return (
     <div className="msg-token-usage">
-      <span title={t("common.inputTokens")}>
-        ↑{fmt(props.usage.input_tokens)}
-      </span>
+      <span title={t("common.inputTokens")}>↑{fmt(props.usage.input_tokens)}</span>
       <span className="msg-token-sep">·</span>
-      <span title={t("common.outputTokens")}>
-        ↓{fmt(props.usage.output_tokens)}
-      </span>
+      <span title={t("common.outputTokens")}>↓{fmt(props.usage.output_tokens)}</span>
       {cached > 0 && (
         <>
           <span className="msg-token-sep">·</span>
-          <span
-            className="msg-token-cached"
-            title={t("common.cacheReadTokens")}
-          >
+          <span className="msg-token-cached" title={t("common.cacheReadTokens")}>
             {t("common.cacheRead")} {fmt(cached)}
           </span>
         </>
@@ -74,10 +64,7 @@ export function TokenUsageDisplay(props: { usage: TokenUsage }) {
       {created > 0 && (
         <>
           <span className="msg-token-sep">·</span>
-          <span
-            className="msg-token-cache-write"
-            title={t("common.cacheWriteTokens")}
-          >
+          <span className="msg-token-cache-write" title={t("common.cacheWriteTokens")}>
             {t("common.cacheWrite")} {fmt(created)}
           </span>
         </>

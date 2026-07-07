@@ -9,9 +9,7 @@ export function KeyboardSettings() {
       <div className="settings-section-title">{t("keyboard.title")}</div>
 
       <div className="settings-shortcuts-group">
-        <div className="settings-shortcuts-label">
-          {t("keyboard.navigation")}
-        </div>
+        <div className="settings-shortcuts-label">{t("keyboard.navigation")}</div>
         <div className="settings-shortcut-row">
           <span>{t("keyboard.search")}</span>
           <kbd>{isMac ? "\u2318" : "Ctrl+"}K</kbd>

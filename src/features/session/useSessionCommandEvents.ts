@@ -1,8 +1,5 @@
 import { useEffect, useRef } from "react";
-import {
-  SESSION_COMMAND_EVENTS,
-  type SessionCommandEvent,
-} from "@/lib/session-command-events";
+import { SESSION_COMMAND_EVENTS, type SessionCommandEvent } from "@/lib/session-command-events";
 
 export interface UseSessionCommandEventsOptions {
   active: boolean;
@@ -13,11 +10,9 @@ export interface UseSessionCommandEventsOptions {
   onSessionSearch: () => void;
 }
 
-export function useSessionCommandEvents(
-  opts: UseSessionCommandEventsOptions,
-): void {
+export function useSessionCommandEvents(opts: UseSessionCommandEventsOptions): void {
   // Latest-value ref so the once-mounted document listeners read the current
-  // `active` flag + callbacks (Solid read `opts.*` fresh at event time).
+  // `active` flag + callbacks.
   const optsRef = useRef(opts);
   optsRef.current = opts;
 
@@ -27,26 +22,11 @@ export function useSessionCommandEvents(
     };
 
     const handlers: Array<[SessionCommandEvent, EventListener]> = [
-      [
-        SESSION_COMMAND_EVENTS.resume,
-        () => runIfActive(optsRef.current.onResume),
-      ],
-      [
-        SESSION_COMMAND_EVENTS.exportSession,
-        () => runIfActive(optsRef.current.onExport),
-      ],
-      [
-        SESSION_COMMAND_EVENTS.favorite,
-        () => runIfActive(optsRef.current.onFavorite),
-      ],
-      [
-        SESSION_COMMAND_EVENTS.delete,
-        () => runIfActive(optsRef.current.onDelete),
-      ],
-      [
-        SESSION_COMMAND_EVENTS.sessionSearch,
-        () => runIfActive(optsRef.current.onSessionSearch),
-      ],
+      [SESSION_COMMAND_EVENTS.resume, () => runIfActive(optsRef.current.onResume)],
+      [SESSION_COMMAND_EVENTS.exportSession, () => runIfActive(optsRef.current.onExport)],
+      [SESSION_COMMAND_EVENTS.favorite, () => runIfActive(optsRef.current.onFavorite)],
+      [SESSION_COMMAND_EVENTS.delete, () => runIfActive(optsRef.current.onDelete)],
+      [SESSION_COMMAND_EVENTS.sessionSearch, () => runIfActive(optsRef.current.onSessionSearch)],
     ];
 
     for (const [eventName, handler] of handlers) {

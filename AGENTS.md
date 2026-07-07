@@ -16,9 +16,11 @@ npm run tauri dev             # Dev with hot reload
 npm run tauri build           # Production build
 cd src-tauri && cargo clippy  # Rust lint
 cd src-tauri && cargo test    # Rust tests
-npx tsc --noEmit              # TS type check
-npm run lint                  # ESLint
-npm run format:check          # Prettier check
+npm run typecheck             # TS type check
+npm run lint                  # Biome formatter/linter/import-sort check + ESLint
+npm run format                # Biome format write
+npm run format:check          # Biome format-only check
+npm run knip                  # Release dead-code/dependency audit
 ./scripts/release.sh <version> # Bump, commit, tag, push → triggers CI release
 ```
 
@@ -181,10 +183,10 @@ Resume: Claude `--resume`, Codex `resume`, Antigravity `agy --conversation <id>`
 ## Code Standards
 
 > **Canonical, enforcement-mapped guides:** [`style/ts.md`](style/ts.md) and [`style/rust.md`](style/rust.md).
-> Each rule there lists its **enforcing tool** (tsc / biome / eslint / fmt / clippy / review).
+> Each rule there lists its **enforcing tool** (tsc / biome / eslint / knip / fmt / clippy / review).
 > The section below is the always-loaded condensed copy; when they disagree, `style/*.md` wins.
-> Local tooling: `biome.json`, `eslint.config.js`, `src-tauri/{rustfmt,clippy}.toml`, `lefthook.yml`
-> (pre-commit: biome+eslint on staged files; pre-push: tsc/test/cargo fmt+clippy+test).
+> Local tooling: `biome.json`, `eslint.config.js`, `knip.json`, `src-tauri/{rustfmt,clippy}.toml`, `lefthook.yml`
+> (pre-commit: biome+eslint on staged files; pre-push: frontend check/test + cargo fmt/clippy/test; release: full frontend/Rust checks + Knip).
 
 Code review (human or agent) **rejects** anything that violates the rules below. They're concrete because most "be reasonable" guidelines are unactionable.
 
@@ -219,7 +221,7 @@ Code review (human or agent) **rejects** anything that violates the rules below.
 - **Fixtures vs synthetic**: golden fixtures in `src-tauri/tests/fixtures/<provider>/` for parser regression tests. Synthetic in-test JSON for behavioral edge cases. Don't snapshot megabytes of real data.
 - **Real-data smoke tests** that depend on `~/.<provider>/` files MUST be `#[ignore]` and assert structural invariants, never hardcoded UUIDs (see `tests/cleanup_stale_links.rs` for the pattern).
 - **Add a regression test for every bug fix** — paste the original bad input as a test fixture. PRs without coverage need a written justification in the commit message.
-- Run `cargo test`, `cargo clippy --all-targets`, `npx tsc --noEmit`, `npm test`, `npm run lint`, `npm run format:check` before committing. CI gates on all six.
+- Run `cargo test`, `cargo clippy --all-targets`, `npm run check`, and `npm test` before committing larger changes. Run `npm run knip` before release or after broad frontend refactors; it is a release gate, not a per-push hook. Knip errors block release; type-only unused exports are warnings and should be pruned when nearby code is touched.
 
 ### Security
 

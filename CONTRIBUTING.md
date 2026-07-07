@@ -6,7 +6,7 @@ Thanks for your interest in contributing! This guide will help you get started.
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) (v18+)
+- [Node.js](https://nodejs.org/) (v22.12+)
 - [Rust](https://rustup.rs/) (stable)
 - [Tauri CLI](https://v2.tauri.app/start/prerequisites/)
 
@@ -27,9 +27,11 @@ npm run tauri build           # Production build
 cd src-tauri && cargo test    # Rust tests
 npm test                      # Frontend tests
 cd src-tauri && cargo clippy  # Rust lint
-npx tsc --noEmit              # TypeScript type check
-npm run lint                  # ESLint
-npm run format:check          # Prettier check
+npm run typecheck             # TypeScript type check
+npm run lint                  # Biome formatter/linter/import-sort check + ESLint
+npm run format                # Biome format write
+npm run format:check          # Biome format-only check
+npm run knip                  # Release dead-code/dependency audit
 ```
 
 ## How to Contribute
@@ -53,20 +55,21 @@ npm run format:check          # Prettier check
 4. Ensure all checks pass:
    ```bash
    cd src-tauri && cargo fmt --check && cargo clippy && cargo test
-   npx tsc --noEmit && npm run lint && npm test
+   npm run check && npm test
    ```
+   Run `npm run knip` before releases or broad frontend refactors.
 5. Commit using [conventional commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `refactor:`, etc.)
 6. Open a pull request against `master`
 
 ## Code Style
 
 - **Rust**: `cargo fmt` + `cargo clippy` — no warnings
-- **TypeScript**: strict mode, no `any`, formatted with Prettier
+- **TypeScript**: strict mode, no `any`, formatted with Biome
 - **Commits**: conventional commits format
 - **i18n**: all user-facing strings via `t()`, never hardcoded
 
 ## Project Structure
 
-- `src/` — Solid.js frontend
+- `src/` — React frontend
 - `src-tauri/src/` — Rust backend (providers, commands, database, exporter)
 - See [CLAUDE.md](CLAUDE.md) for detailed layout

@@ -44,9 +44,7 @@ function getActiveGroupId(): string {
   return useEditorGroupsStore.getState().activeGroupId;
 }
 
-function setGroups(
-  update: EditorGroup[] | ((prev: EditorGroup[]) => EditorGroup[]),
-) {
+function setGroups(update: EditorGroup[] | ((prev: EditorGroup[]) => EditorGroup[])) {
   useEditorGroupsStore.setState((state) => ({
     groups: typeof update === "function" ? update(state.groups) : update,
   }));
@@ -79,13 +77,8 @@ function updateGroup(groupId: string, fn: (g: EditorGroup) => EditorGroup) {
 function detachTab(group: EditorGroup, sessionId: string): EditorGroup {
   const tabs = group.tabs.filter((t) => t.id !== sessionId);
   const activeTabId =
-    group.activeTabId === sessionId
-      ? tabs.length > 0
-        ? tabs[tabs.length - 1].id
-        : null
-      : group.activeTabId;
-  const previewTabId =
-    group.previewTabId === sessionId ? null : group.previewTabId;
+    group.activeTabId === sessionId ? (tabs.length > 0 ? tabs[tabs.length - 1].id : null) : group.activeTabId;
+  const previewTabId = group.previewTabId === sessionId ? null : group.previewTabId;
   return { ...group, tabs, activeTabId, previewTabId };
 }
 
@@ -151,12 +144,7 @@ function openPreview(session: SessionRef) {
   const gId = getActiveGroupId();
   updateGroup(gId, (prev) => ({
     ...prev,
-    tabs: [
-      ...(prev.previewTabId
-        ? prev.tabs.filter((t) => t.id !== prev.previewTabId)
-        : prev.tabs),
-      session,
-    ],
+    tabs: [...(prev.previewTabId ? prev.tabs.filter((t) => t.id !== prev.previewTabId) : prev.tabs), session],
     activeTabId: session.id,
     previewTabId: session.id,
   }));
@@ -174,11 +162,7 @@ function closeTab(sessionId: string) {
   if (!g) return;
   const newTabs = g.tabs.filter((t) => t.id !== sessionId);
   const newActive =
-    g.activeTabId === sessionId
-      ? newTabs.length > 0
-        ? newTabs[newTabs.length - 1].id
-        : null
-      : g.activeTabId;
+    g.activeTabId === sessionId ? (newTabs.length > 0 ? newTabs[newTabs.length - 1].id : null) : g.activeTabId;
   const gId = g.id;
   updateGroup(gId, (prev) => ({
     ...prev,
@@ -217,18 +201,12 @@ function closeTabsToRight(fromId: string) {
   const idx = g.tabs.findIndex((t) => t.id === fromId);
   if (idx === -1) return;
   const kept = g.tabs.slice(0, idx + 1);
-  const newActive =
-    g.activeTabId && kept.some((t) => t.id === g.activeTabId)
-      ? g.activeTabId
-      : fromId;
+  const newActive = g.activeTabId && kept.some((t) => t.id === g.activeTabId) ? g.activeTabId : fromId;
   updateGroup(g.id, (prev) => ({
     ...prev,
     tabs: kept,
     activeTabId: newActive,
-    previewTabId:
-      prev.previewTabId && kept.some((t) => t.id === prev.previewTabId)
-        ? prev.previewTabId
-        : null,
+    previewTabId: prev.previewTabId && kept.some((t) => t.id === prev.previewTabId) ? prev.previewTabId : null,
   }));
 }
 
@@ -260,11 +238,7 @@ function splitToRight(sessionId: string) {
       flexBasis: halfBasis,
     }));
     const newGroup = makeGroup([session], halfBasis);
-    setGroups((prev) => [
-      ...prev.slice(0, sourceIdx + 1),
-      newGroup,
-      ...prev.slice(sourceIdx + 1),
-    ]);
+    setGroups((prev) => [...prev.slice(0, sourceIdx + 1), newGroup, ...prev.slice(sourceIdx + 1)]);
     setActiveGroupId(newGroup.id);
   } else {
     // at max groups, move to rightmost
@@ -282,11 +256,7 @@ function splitToRight(sessionId: string) {
   removeGroupIfEmpty(sourceGroup.id);
 }
 
-function moveTabToGroup(
-  sessionId: string,
-  targetGroupId: string,
-  insertIndex?: number,
-) {
+function moveTabToGroup(sessionId: string, targetGroupId: string, insertIndex?: number) {
   const sourceGroup = findGroupBySession(sessionId);
   if (!sourceGroup) return;
   if (sourceGroup.id === targetGroupId) {
@@ -294,11 +264,7 @@ function moveTabToGroup(
     if (insertIndex === undefined) return;
     const tab = sourceGroup.tabs.find((t) => t.id === sessionId)!;
     const without = sourceGroup.tabs.filter((t) => t.id !== sessionId);
-    const reordered = [
-      ...without.slice(0, insertIndex),
-      tab,
-      ...without.slice(insertIndex),
-    ];
+    const reordered = [...without.slice(0, insertIndex), tab, ...without.slice(insertIndex)];
     updateGroup(sourceGroup.id, (g) => ({ ...g, tabs: reordered }));
     return;
   }
@@ -309,11 +275,7 @@ function moveTabToGroup(
   updateGroup(targetGroupId, (g) => {
     const tabs =
       insertIndex !== undefined
-        ? [
-            ...g.tabs.slice(0, insertIndex),
-            session,
-            ...g.tabs.slice(insertIndex),
-          ]
+        ? [...g.tabs.slice(0, insertIndex), session, ...g.tabs.slice(insertIndex)]
         : [...g.tabs, session];
     return { ...g, tabs, activeTabId: session.id };
   });
@@ -396,10 +358,8 @@ function _reset() {
 
 // Reactive hooks for components.
 export const useGroups = () => useEditorGroupsStore((s) => s.groups);
-export const useActiveGroupId = () =>
-  useEditorGroupsStore((s) => s.activeGroupId);
-export const useActiveGroup = () =>
-  useEditorGroupsStore((s) => s.groups.find((g) => g.id === s.activeGroupId));
+export const useActiveGroupId = () => useEditorGroupsStore((s) => s.activeGroupId);
+export const useActiveGroup = () => useEditorGroupsStore((s) => s.groups.find((g) => g.id === s.activeGroupId));
 
 export {
   getGroups,

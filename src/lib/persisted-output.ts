@@ -51,10 +51,7 @@ export function extractPersistedOutputPaths(content: string): string[] {
 /// present in `replacements` with the corresponding resolved content.
 /// Tags without a matched replacement are left untouched, so partially
 /// resolved content stays readable.
-export function substitutePersistedOutputs(
-  content: string,
-  replacements: Map<string, string>,
-): string {
+export function substitutePersistedOutputs(content: string, replacements: Map<string, string>): string {
   if (!content.includes(TAG_START)) return content;
   let result = "";
   let cursor = 0;

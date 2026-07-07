@@ -18,8 +18,8 @@ pre-commit:
 pre-push:
   parallel: false
   commands:
-    tsc:
-      run: npx tsc --noEmit
+    frontend-check:
+      run: npm run check
     frontend-tests:
       run: npm test
     rust-fmt:

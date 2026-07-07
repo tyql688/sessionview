@@ -6,10 +6,7 @@ function normalizeSessionSearch(term: string): string {
   return term.trim().toLocaleLowerCase();
 }
 
-function entryMatchesSearch(
-  entry: ProcessedEntry,
-  normalizedTerm: string,
-): boolean {
+function entryMatchesSearch(entry: ProcessedEntry, normalizedTerm: string): boolean {
   if (!normalizedTerm) return false;
   // `searchHaystack` is lowercased once at normalize time; using it directly
   // skips a `toLocaleLowerCase()` per entry per keystroke, which dominates
@@ -17,10 +14,7 @@ function entryMatchesSearch(
   return entry.searchHaystack.includes(normalizedTerm);
 }
 
-export function findFirstMatchingEntryIndex(
-  entries: ProcessedEntry[],
-  term: string,
-): number {
+export function findFirstMatchingEntryIndex(entries: ProcessedEntry[], term: string): number {
   const normalizedTerm = normalizeSessionSearch(term);
   if (!normalizedTerm) return -1;
 
@@ -56,30 +50,19 @@ function supportsHighlightApi(): boolean {
  * scanned; match counting and navigation run on entry data instead
  * (`buildMatchLocations`), so the DOM walk stays a cheap paint-only pass.
  */
-export function collectSearchRanges(
-  container: HTMLElement | undefined,
-  term: string,
-): Range[] {
+export function collectSearchRanges(container: HTMLElement | undefined, term: string): Range[] {
   const normalized = normalizeSessionSearch(term);
   if (!container || !normalized) return [];
 
   const ranges: Range[] = [];
   for (const scope of container.querySelectorAll("[data-searchable]")) {
     const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
-    for (
-      let node = walker.nextNode();
-      node !== null;
-      node = walker.nextNode()
-    ) {
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
       const text = node.textContent;
       if (!text) continue;
       const lower = text.toLocaleLowerCase();
       let from = 0;
-      for (
-        let at = lower.indexOf(normalized, from);
-        at !== -1;
-        at = lower.indexOf(normalized, from)
-      ) {
+      for (let at = lower.indexOf(normalized, from); at !== -1; at = lower.indexOf(normalized, from)) {
         const range = document.createRange();
         range.setStart(node, at);
         range.setEnd(node, at + normalized.length);
@@ -96,20 +79,13 @@ export function collectSearchRanges(
  * is the entry index the occurrence lives in. Counting runs on entry data —
  * not the DOM — so totals cover the whole loaded session even though the
  * virtualizer only mounts the rows near the viewport. */
-export function buildMatchLocations(
-  entries: ProcessedEntry[],
-  term: string,
-): number[] {
+export function buildMatchLocations(entries: ProcessedEntry[], term: string): number[] {
   const normalized = normalizeSessionSearch(term);
   if (!normalized) return [];
   const locations: number[] = [];
   entries.forEach((entry, entryIndex) => {
     const haystack = entry.searchHaystack;
-    for (
-      let at = haystack.indexOf(normalized);
-      at !== -1;
-      at = haystack.indexOf(normalized, at + normalized.length)
-    ) {
+    for (let at = haystack.indexOf(normalized); at !== -1; at = haystack.indexOf(normalized, at + normalized.length)) {
       locations.push(entryIndex);
     }
   });
@@ -143,9 +119,7 @@ export function paintVisibleHighlights(
   const ranges = collectSearchRanges(container, term);
   let activeIndex: number | null = null;
   if (active && container) {
-    const entryEl = container.querySelector(
-      `[data-entry-key="${CSS.escape(active.entryKey)}"]`,
-    );
+    const entryEl = container.querySelector(`[data-entry-key="${CSS.escape(active.entryKey)}"]`);
     if (entryEl) {
       const inEntry = ranges
         .map((range, index) => ({ range, index }))
@@ -163,18 +137,12 @@ export function paintVisibleHighlights(
 
 /** Paint the collected ranges; `activeIndex` gets the distinct active style.
  * No-op when the Highlight API is unavailable (e.g. happy-dom in tests). */
-export function applySearchHighlight(
-  ranges: Range[],
-  activeIndex: number | null,
-): void {
+export function applySearchHighlight(ranges: Range[], activeIndex: number | null): void {
   if (!supportsHighlightApi()) return;
   const rest = ranges.filter((_, i) => i !== activeIndex);
   CSS.highlights.set(HIGHLIGHT_NAME, new Highlight(...rest));
   if (activeIndex !== null && ranges[activeIndex]) {
-    CSS.highlights.set(
-      ACTIVE_HIGHLIGHT_NAME,
-      new Highlight(ranges[activeIndex]),
-    );
+    CSS.highlights.set(ACTIVE_HIGHLIGHT_NAME, new Highlight(ranges[activeIndex]));
   } else {
     CSS.highlights.delete(ACTIVE_HIGHLIGHT_NAME);
   }

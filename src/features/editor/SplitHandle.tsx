@@ -1,9 +1,6 @@
 import { type PointerEvent as ReactPointerEvent, useState } from "react";
 
-export function SplitHandle(props: {
-  onResize: (deltaX: number) => void;
-  onDoubleClick: () => void;
-}) {
+export function SplitHandle(props: { onResize: (deltaX: number) => void; onDoubleClick: () => void }) {
   const [active, setActive] = useState(false);
 
   function onPointerDown(e: ReactPointerEvent<HTMLDivElement>) {

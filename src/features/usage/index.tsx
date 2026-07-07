@@ -36,11 +36,7 @@ import { TopModels } from "@/features/usage/TopModels";
 import { ModelTable } from "@/features/usage/ModelTable";
 import { ProjectTable } from "@/features/usage/ProjectTable";
 import { SessionTable } from "@/features/usage/SessionTable";
-import {
-  useProviderSelection,
-  useUsageResources,
-  useUsageDerived,
-} from "@/features/usage/hooks";
+import { useProviderSelection, useUsageResources, useUsageDerived } from "@/features/usage/hooks";
 
 export function UsagePanel() {
   const { t } = useI18n();
@@ -123,11 +119,7 @@ export function UsagePanel() {
 
   const fmtChartValue = makeFmtChartValue(() => chartMetric);
 
-  const hoveredDaySummary = buildHoveredDaySummary(
-    hoveredDate,
-    dailyChartData,
-    providerInfo,
-  );
+  const hoveredDaySummary = buildHoveredDaySummary(hoveredDate, dailyChartData, providerInfo);
 
   async function handleRefreshUsage() {
     try {
@@ -227,11 +219,7 @@ export function UsagePanel() {
                 fmtChartValue={fmtChartValue}
                 providerInfo={providerInfo}
               />
-              <TopModels
-                topModels={topModels}
-                maxTopModelCost={maxTopModelCost}
-                formatModelName={formatModelName}
-              />
+              <TopModels topModels={topModels} maxTopModelCost={maxTopModelCost} formatModelName={formatModelName} />
             </div>
 
             <ModelTable

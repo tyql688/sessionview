@@ -1,9 +1,6 @@
 import type { SessionMeta, TrashMeta, TreeNode, Provider } from "@/lib/types";
 import { PROVIDERS } from "@/lib/types";
-import {
-  getProviderLabel,
-  getProviderSortOrder,
-} from "@/stores/providerSnapshots";
+import { getProviderLabel, getProviderSortOrder } from "@/stores/providerSnapshots";
 
 // Derived from the canonical PROVIDERS list — the previous hand-written copy
 // was missing "pi", silently dropping Pi sessions from provider grouping.
@@ -48,13 +45,9 @@ function providerGroupKey(provider: Provider, variantName?: string): string {
   return variantName ? `cc-mirror:${variantName}` : "cc-mirror";
 }
 
-function sortProviderGroups<T>(
-  entries: [string, ProviderGroup<T>][],
-): [string, ProviderGroup<T>][] {
+function sortProviderGroups<T>(entries: [string, ProviderGroup<T>][]): [string, ProviderGroup<T>][] {
   return entries.sort(([, left], [, right]) => {
-    const orderDiff =
-      getProviderSortOrder(left.provider) -
-      getProviderSortOrder(right.provider);
+    const orderDiff = getProviderSortOrder(left.provider) - getProviderSortOrder(right.provider);
     if (orderDiff !== 0) {
       return orderDiff;
     }
@@ -62,14 +55,8 @@ function sortProviderGroups<T>(
   });
 }
 
-export function buildFavoritesTree(
-  sessions: SessionMeta[],
-  noProjectLabel: string,
-): TreeNode[] {
-  const providerMap = new Map<
-    string,
-    ProviderGroup<{ label: string; sessions: SessionMeta[] }>
-  >();
+export function buildFavoritesTree(sessions: SessionMeta[], noProjectLabel: string): TreeNode[] {
+  const providerMap = new Map<string, ProviderGroup<{ label: string; sessions: SessionMeta[] }>>();
 
   for (const session of sessions) {
     const provider = session.provider || "claude";
@@ -93,9 +80,7 @@ export function buildFavoritesTree(
   }
 
   const tree: TreeNode[] = [];
-  for (const [providerKey, group] of sortProviderGroups([
-    ...providerMap.entries(),
-  ])) {
+  for (const [providerKey, group] of sortProviderGroups([...providerMap.entries()])) {
     const projectNodes: TreeNode[] = [];
     for (const [projectKey, projectGroup] of group.projectMap) {
       const sessionNodes: TreeNode[] = projectGroup.sessions.map((session) => ({
@@ -129,23 +114,17 @@ export function buildFavoritesTree(
   return tree;
 }
 
-export function buildTrashTree(
-  items: TrashMeta[],
-  labels: { unknown: string; untitled: string },
-): TreeNode[] {
+export function buildTrashTree(items: TrashMeta[], labels: { unknown: string; untitled: string }): TreeNode[] {
   const providerMap = new Map<string, ProviderGroup<TrashMeta[]>>();
 
   for (const item of items) {
     const provider = parseProviderKey(item.provider || "claude");
     if (!provider) {
-      console.warn(
-        `skipping trash entry ${item.id} with unsupported provider ${item.provider}`,
-      );
+      console.warn(`skipping trash entry ${item.id} with unsupported provider ${item.provider}`);
       continue;
     }
     const key = providerGroupKey(provider, item.variant_name);
-    const project =
-      item.project_name?.trim() || projectFromTrashPath(item, labels.unknown);
+    const project = item.project_name?.trim() || projectFromTrashPath(item, labels.unknown);
 
     if (!providerMap.has(key)) {
       providerMap.set(key, {
@@ -163,9 +142,7 @@ export function buildTrashTree(
   }
 
   const tree: TreeNode[] = [];
-  for (const [providerKey, group] of sortProviderGroups([
-    ...providerMap.entries(),
-  ])) {
+  for (const [providerKey, group] of sortProviderGroups([...providerMap.entries()])) {
     const projectNodes: TreeNode[] = [];
     for (const [project, sessions] of group.projectMap) {
       const sessionNodes: TreeNode[] = sessions.map((item) => ({

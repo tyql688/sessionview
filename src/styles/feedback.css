@@ -25,12 +25,7 @@
 
 /* Skeleton Loading */
 .skeleton {
-  background: linear-gradient(
-    90deg,
-    var(--bg-tab-hover) 25%,
-    var(--border-subtle) 50%,
-    var(--bg-tab-hover) 75%
-  );
+  background: linear-gradient(90deg, var(--bg-tab-hover) 25%, var(--border-subtle) 50%, var(--bg-tab-hover) 75%);
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.5s ease-in-out infinite;
   border-radius: 4px;

@@ -21,10 +21,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function optionalString(
-  detail: Record<string, unknown>,
-  key: keyof OpenSubagentDetail,
-): string | undefined {
+function optionalString(detail: Record<string, unknown>, key: keyof OpenSubagentDetail): string | undefined {
   const value = detail[key];
   return typeof value === "string" ? value : undefined;
 }
@@ -42,18 +39,12 @@ export function openSubagentDetailFromEvent(event: Event): OpenSubagentDetail {
   };
 }
 
-export function candidateParentSessionIds(
-  detail: OpenSubagentDetail,
-  activeParentSessionIds: string[],
-): string[] {
+export function candidateParentSessionIds(detail: OpenSubagentDetail, activeParentSessionIds: string[]): string[] {
   if (detail.parentSessionId) return [detail.parentSessionId];
   return activeParentSessionIds.filter((id) => id.length > 0);
 }
 
-export async function openSubagent(
-  detail: OpenSubagentDetail,
-  deps: OpenSubagentDeps,
-): Promise<void> {
+export async function openSubagent(detail: OpenSubagentDetail, deps: OpenSubagentDeps): Promise<void> {
   // Lazy read: an explicit parentSessionId must not touch the active-tab
   // lookup (covered by tests asserting zero active-parent reads).
   const parentIds = detail.parentSessionId
@@ -65,9 +56,7 @@ export async function openSubagent(
     try {
       const children = await deps.getChildSessions(parentId);
       anyParentResolved = true;
-      const match = children.find((candidate) =>
-        matchesSubagentSession(candidate, parentId, detail),
-      );
+      const match = children.find((candidate) => matchesSubagentSession(candidate, parentId, detail));
       if (match) {
         deps.openSession(match);
         return;
@@ -85,9 +74,7 @@ export async function openSubagent(
   deps.onNotFound();
 }
 
-export function createOpenSubagentHandler(
-  deps: OpenSubagentDeps,
-): (event: Event) => void {
+export function createOpenSubagentHandler(deps: OpenSubagentDeps): (event: Event) => void {
   return (event) => {
     void openSubagent(openSubagentDetailFromEvent(event), deps);
   };

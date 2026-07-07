@@ -12,9 +12,7 @@ export function IndexSettings(props: { onIndexChanged: () => void }) {
   const { t } = useI18n();
   const [showClearIndexConfirm, setShowClearIndexConfirm] = useState(false);
 
-  const [indexStats, setIndexStats] = useState<IndexStats | undefined>(
-    undefined,
-  );
+  const [indexStats, setIndexStats] = useState<IndexStats | undefined>(undefined);
   const [statsError, setStatsError] = useState<unknown>(null);
 
   const refetchStats = useCallback(async () => {
@@ -49,41 +47,29 @@ export function IndexSettings(props: { onIndexChanged: () => void }) {
     <div className="settings-section">
       <div className="settings-section-title">{t("settings.index")}</div>
 
-      {indexStatsError && (
-        <div className="session-error">{indexStatsError}</div>
-      )}
+      {indexStatsError && <div className="session-error">{indexStatsError}</div>}
 
       <div className="settings-row">
         <div className="settings-label">{t("settings.totalSessions")}</div>
-        <span className="settings-stat">
-          {indexStats ? indexStats.session_count.toLocaleString() : "—"}
-        </span>
+        <span className="settings-stat">{indexStats ? indexStats.session_count.toLocaleString() : "—"}</span>
       </div>
 
       <div className="settings-row">
         <div className="settings-label">{t("settings.dbSize")}</div>
-        <span className="settings-stat">
-          {indexStats ? formatFileSize(indexStats.db_size_bytes) : "—"}
-        </span>
+        <span className="settings-stat">{indexStats ? formatFileSize(indexStats.db_size_bytes) : "—"}</span>
       </div>
 
       <div className="settings-row settings-row-spaced">
         <Button variant="outline" size="sm" onClick={handleRebuildIndex}>
           {t("settings.rebuildIndex")}
         </Button>
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={() => setShowClearIndexConfirm(true)}
-        >
+        <Button variant="destructive" size="sm" onClick={() => setShowClearIndexConfirm(true)}>
           {t("settings.clearIndex")}
         </Button>
       </div>
 
       <div className="settings-help-text">{t("settings.rebuildIndexNote")}</div>
-      <div className="settings-help-text">
-        {t("settings.rebuildShortcutNote")}
-      </div>
+      <div className="settings-help-text">{t("settings.rebuildShortcutNote")}</div>
 
       <ConfirmDialog
         open={showClearIndexConfirm}

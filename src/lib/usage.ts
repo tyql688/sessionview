@@ -1,9 +1,4 @@
-import type {
-  DailyUsage,
-  PrevPeriodTotals,
-  ProviderSnapshot,
-  UsageStats,
-} from "@/lib/types";
+import type { DailyUsage, PrevPeriodTotals, ProviderSnapshot, UsageStats } from "@/lib/types";
 
 export type UsageSortState = { col: string; asc: boolean };
 export type ChartMetric = "tokens" | "cost";
@@ -51,19 +46,11 @@ export function makeEmptyUsageStats(): UsageStats {
   };
 }
 
-export function filterScannedProviderSnapshots(
-  snapshots: ProviderSnapshot[],
-): ProviderSnapshot[] {
-  return snapshots.filter(
-    (snapshot) => snapshot.exists || snapshot.session_count > 0,
-  );
+export function filterScannedProviderSnapshots(snapshots: ProviderSnapshot[]): ProviderSnapshot[] {
+  return snapshots.filter((snapshot) => snapshot.exists || snapshot.session_count > 0);
 }
 
-export function compareUsageValues(
-  left: unknown,
-  right: unknown,
-  asc: boolean,
-): number {
+export function compareUsageValues(left: unknown, right: unknown, asc: boolean): number {
   if (typeof left === "string" && typeof right === "string") {
     return asc ? left.localeCompare(right) : right.localeCompare(left);
   }
@@ -76,10 +63,7 @@ export function compareUsageValues(
 export function totalUsageTokens(data: UsageStats | undefined): number {
   if (!data) return 0;
   return (
-    data.total_input_tokens +
-    data.total_output_tokens +
-    data.total_cache_read_tokens +
-    data.total_cache_write_tokens
+    data.total_input_tokens + data.total_output_tokens + data.total_cache_read_tokens + data.total_cache_write_tokens
   );
 }
 
@@ -98,10 +82,7 @@ export function buildDailyChartData(
   }
 
   for (const providerMap of byDate.values()) {
-    const total = [...providerMap.values()].reduce(
-      (sum, value) => sum + value,
-      0,
-    );
+    const total = [...providerMap.values()].reduce((sum, value) => sum + value, 0);
     if (total > maxValue) maxValue = total;
   }
 

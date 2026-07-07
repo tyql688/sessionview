@@ -79,21 +79,14 @@ export function Toolbar(props: ToolbarProps) {
     // Keep the window ordered no matter which side the user moved.
     if (next.start > next.end) {
       props.onCustomRangeChange(
-        field === "start"
-          ? { start: next.start, end: next.start }
-          : { start: next.end, end: next.end },
+        field === "start" ? { start: next.start, end: next.start } : { start: next.end, end: next.end },
       );
       return;
     }
     props.onCustomRangeChange(next);
   };
 
-  const activeRangeValue =
-    customRange !== null
-      ? "custom"
-      : props.rangeDays === null
-        ? "all"
-        : String(props.rangeDays);
+  const activeRangeValue = customRange !== null ? "custom" : props.rangeDays === null ? "all" : String(props.rangeDays);
 
   const handleRangeValueChange = (next: string[]) => {
     const value = next[0];
@@ -111,17 +104,13 @@ export function Toolbar(props: ToolbarProps) {
         <div className="usage-toolbar-copy">
           <div className="usage-title-row">
             <h1 className="usage-title">{t("usage.title")}</h1>
-            <span className="usage-subtitle-pill">
-              {props.activeRangeLabel}
-            </span>
+            <span className="usage-subtitle-pill">{props.activeRangeLabel}</span>
           </div>
           <div className="usage-toolbar-subline">
             <span className="usage-subtitle">
               {props.selectedProviderCount} {t("usage.providers")}
             </span>
-            <span
-              className={`usage-status-pill${props.activeMaintenanceJob ? " is-active" : ""}`}
-            >
+            <span className={`usage-status-pill${props.activeMaintenanceJob ? " is-active" : ""}`}>
               <span className="usage-status-dot" />
               <span>{props.maintenanceStatusText}</span>
             </span>
@@ -136,29 +125,19 @@ export function Toolbar(props: ToolbarProps) {
             onValueChange={handleRangeValueChange}
           >
             {ranges.map((range) => {
-              const active =
-                customRange === null && props.rangeDays === range.days;
+              const active = customRange === null && props.rangeDays === range.days;
               const value = range.days === null ? "all" : String(range.days);
               return (
                 <ToggleGroupItem
                   key={value}
                   value={value}
-                  className={cn(
-                    "usage-range-btn h-auto min-w-0",
-                    active && "active",
-                  )}
+                  className={cn("usage-range-btn h-auto min-w-0", active && "active")}
                 >
                   {range.label()}
                 </ToggleGroupItem>
               );
             })}
-            <ToggleGroupItem
-              value="custom"
-              className={cn(
-                "usage-range-btn h-auto min-w-0",
-                customRange && "active",
-              )}
-            >
+            <ToggleGroupItem value="custom" className={cn("usage-range-btn h-auto min-w-0", customRange && "active")}>
               {t("usage.rangeCustom")}
             </ToggleGroupItem>
           </ToggleGroup>
@@ -184,14 +163,10 @@ export function Toolbar(props: ToolbarProps) {
             variant="outline"
             size="sm"
             onClick={props.onRefreshPricing}
-            disabled={
-              props.isRefreshingPricing || props.activeMaintenanceJob !== null
-            }
+            disabled={props.isRefreshingPricing || props.activeMaintenanceJob !== null}
             type="button"
           >
-            {props.isRefreshingPricing
-              ? "..."
-              : t("settings.refreshPricingCatalog")}
+            {props.isRefreshingPricing ? "..." : t("settings.refreshPricingCatalog")}
           </Button>
           <Button
             size="sm"
@@ -199,40 +174,20 @@ export function Toolbar(props: ToolbarProps) {
             disabled={props.activeMaintenanceJob !== null}
             type="button"
           >
-            {props.activeMaintenanceJob === "refresh_usage"
-              ? "..."
-              : t("usage.refreshUsage")}
+            {props.activeMaintenanceJob === "refresh_usage" ? "..." : t("usage.refreshUsage")}
           </Button>
         </div>
       </div>
 
       <div className="usage-toolbar-meta">
-        <span
-          className="usage-meta-pill"
-          title={props.pricingStatusError ?? undefined}
-        >
-          {t("usage.pricingUpdatedShort").replace(
-            "{count}",
-            props.pricingModelCountLabel,
-          )}
+        <span className="usage-meta-pill" title={props.pricingStatusError ?? undefined}>
+          {t("usage.pricingUpdatedShort").replace("{count}", props.pricingModelCountLabel)}
         </span>
-        <span
-          className="usage-meta-pill"
-          title={props.pricingStatusError ?? undefined}
-        >
-          {t("usage.pricingUpdatedAtShort").replace(
-            "{updatedAt}",
-            props.formattedPricingUpdatedAt,
-          )}
+        <span className="usage-meta-pill" title={props.pricingStatusError ?? undefined}>
+          {t("usage.pricingUpdatedAtShort").replace("{updatedAt}", props.formattedPricingUpdatedAt)}
         </span>
-        <span
-          className="usage-meta-pill"
-          title={props.indexStatsError ?? undefined}
-        >
-          {t("usage.usageUpdatedShort").replace(
-            "{updatedAt}",
-            props.formattedUsageUpdatedAt,
-          )}
+        <span className="usage-meta-pill" title={props.indexStatsError ?? undefined}>
+          {t("usage.usageUpdatedShort").replace("{updatedAt}", props.formattedUsageUpdatedAt)}
         </span>
       </div>
 
@@ -249,9 +204,7 @@ export function Toolbar(props: ToolbarProps) {
           type="button"
         >
           <span className="usage-chip-label">{t("usage.allProviders")}</span>
-          <span className="usage-chip-count">
-            {props.scannedProviderKeysCount}
-          </span>
+          <span className="usage-chip-count">{props.scannedProviderKeysCount}</span>
         </Button>
         {props.scannedProviderSnapshots.map((snapshot) => {
           const info = props.providerInfo(snapshot.key);
@@ -262,24 +215,16 @@ export function Toolbar(props: ToolbarProps) {
               key={snapshot.key}
               variant="ghost"
               size="sm"
-              className={cn(
-                "usage-chip active:translate-y-0",
-                active ? "active" : "inactive",
-              )}
+              className={cn("usage-chip active:translate-y-0", active ? "active" : "inactive")}
               aria-pressed={active}
               onClick={() => props.onToggleProvider(snapshot.key)}
               style={{ "--provider-accent": info.color } as CSSProperties}
               title={info.fullLabel}
               type="button"
             >
-              <span
-                className="usage-chip-dot"
-                style={{ background: info.color }}
-              />
+              <span className="usage-chip-dot" style={{ background: info.color }} />
               <span className="usage-chip-label">{info.label}</span>
-              {filteredCount > 0 && (
-                <span className="usage-chip-count">{filteredCount}</span>
-              )}
+              {filteredCount > 0 && <span className="usage-chip-count">{filteredCount}</span>}
             </Button>
           );
         })}

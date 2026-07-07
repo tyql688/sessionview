@@ -4,21 +4,10 @@ import type { Message, Provider } from "@/lib/types";
 import { ProviderIcon, UserIcon } from "@/components/icons";
 import { useI18n } from "@/i18n/index";
 import { parseTimestamp } from "@/lib/formatters";
-import {
-  extractImages,
-  sanitizeMessageForClipboard,
-} from "@/lib/message-content";
-import {
-  ImagePreview,
-  isLocalPath,
-  LocalImage,
-  RemoteImage,
-} from "@/features/session/MessageBubble/ImagePreview";
+import { extractImages, sanitizeMessageForClipboard } from "@/lib/message-content";
+import { ImagePreview, isLocalPath, LocalImage, RemoteImage } from "@/features/session/MessageBubble/ImagePreview";
 import { ThinkingBlock } from "@/features/session/MessageBubble/ThinkingBlock";
-import {
-  CopyMessageButton,
-  TokenUsageDisplay,
-} from "@/features/session/MessageBubble/TokenUsage";
+import { CopyMessageButton, TokenUsageDisplay } from "@/features/session/MessageBubble/TokenUsage";
 import { ToolMessage } from "@/features/session/MessageBubble/ToolMessage";
 
 // The markdown engine (streamdown + shiki/katex/mermaid plugins) is by far
@@ -32,10 +21,7 @@ const Markdown = lazy(() =>
   })),
 );
 
-const SYSTEM_SUBTYPE_CONFIG: Record<
-  string,
-  { icon: string; labelKey: string; cls: string }
-> = {
+const SYSTEM_SUBTYPE_CONFIG: Record<string, { icon: string; labelKey: string; cls: string }> = {
   turn_duration: {
     icon: "\u23F1",
     labelKey: "system.turnDuration",
@@ -120,10 +106,7 @@ function SystemMessage(props: { content: string }) {
         <span className="sys-icon">{config.icon}</span>
         <span className="sys-label">{t(config.labelKey)}</span>
         <span className="sys-detail">{expanded ? "" : summary}</span>
-        <span
-          className={`sys-chevron${expanded ? " sys-chevron-open" : ""}`}
-          aria-hidden="true"
-        >
+        <span className={`sys-chevron${expanded ? " sys-chevron-open" : ""}`} aria-hidden="true">
           {"\u203A"}
         </span>
       </Button>
@@ -132,11 +115,7 @@ function SystemMessage(props: { content: string }) {
   );
 }
 
-export function MessageBubble(props: {
-  message: Message;
-  provider?: Provider;
-  parentSessionId?: string;
-}) {
+export function MessageBubble(props: { message: Message; provider?: Provider; parentSessionId?: string }) {
   const [previewImage, setPreviewImage] = useState<{
     src: string;
     source?: string;
@@ -174,43 +153,31 @@ export function MessageBubble(props: {
     return systemMarkers.some((marker) => c.includes(marker));
   };
 
-  const hasLegacyLocalCommandPrefix = () =>
-    props.message.content.trimStart().startsWith(LEGACY_LOCAL_COMMAND_PREFIX);
+  const hasLegacyLocalCommandPrefix = () => props.message.content.trimStart().startsWith(LEGACY_LOCAL_COMMAND_PREFIX);
 
   const isCommandMessage = () =>
     props.message.message_kind === "command_input" ||
     props.message.message_kind === "command_output" ||
-    ((props.message.role === "user" || props.message.role === "assistant") &&
-      hasLegacyLocalCommandPrefix());
+    ((props.message.role === "user" || props.message.role === "assistant") && hasLegacyLocalCommandPrefix());
 
   const displayContent = useMemo(() => {
     if (!hasLegacyLocalCommandPrefix()) return props.message.content;
-    return props.message.content
-      .trimStart()
-      .slice(LEGACY_LOCAL_COMMAND_PREFIX.length)
-      .trimStart();
+    return props.message.content.trimStart().slice(LEGACY_LOCAL_COMMAND_PREFIX.length).trimStart();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.message.content]);
 
   const rendersMarkdown = () =>
-    props.message.role !== "tool" &&
-    props.message.role !== "system" &&
-    !isEmpty() &&
-    !isSystemContent();
+    props.message.role !== "tool" && props.message.role !== "system" && !isEmpty() && !isSystemContent();
 
   const copyText = useMemo(
-    () =>
-      rendersMarkdown() ? sanitizeMessageForClipboard(displayContent) : "",
+    () => (rendersMarkdown() ? sanitizeMessageForClipboard(displayContent) : ""),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [props.message, displayContent],
   );
   // The backend embeds images as `[Image: source: …]` text placeholders that
   // the markdown renderer doesn't understand — strip them out and render the
   // image strip separately below the prose.
-  const { markdown: displayMarkdown, images } = useMemo(
-    () => extractImages(displayContent),
-    [displayContent],
-  );
+  const { markdown: displayMarkdown, images } = useMemo(() => extractImages(displayContent), [displayContent]);
   const msgTs = useMemo(() => {
     const ts = props.message.timestamp;
     if (!ts) return null;
@@ -234,51 +201,35 @@ export function MessageBubble(props: {
                 {props.message.role === "user" ? (
                   <UserIcon />
                 ) : (
-                  <ProviderIcon
-                    provider={props.provider ?? "claude"}
-                    size={20}
-                  />
+                  <ProviderIcon provider={props.provider ?? "claude"} size={20} />
                 )}
               </div>
               <div
                 className={`msg-bubble msg-bubble-${props.message.role}${isCommandMessage() ? " msg-bubble-command" : ""}`}
               >
-                <Suspense
-                  fallback={
-                    <div className="whitespace-pre-wrap">{displayMarkdown}</div>
-                  }
-                >
+                <Suspense fallback={<div className="whitespace-pre-wrap">{displayMarkdown}</div>}>
                   <Markdown text={displayMarkdown} />
                 </Suspense>
                 {images.length > 0 && (
                   <div className="msg-image-strip">
                     {images.map((image, i) =>
-                      image.source === null ? null : isLocalPath(
-                          image.source,
-                        ) ? (
+                      image.source === null ? null : isLocalPath(image.source) ? (
                         <LocalImage
                           key={i}
                           path={image.source}
-                          onPreview={(src, source) =>
-                            setPreviewImage({ src, source })
-                          }
+                          onPreview={(src, source) => setPreviewImage({ src, source })}
                         />
                       ) : (
                         <RemoteImage
                           key={i}
                           src={image.source}
-                          onPreview={(src, source) =>
-                            setPreviewImage({ src, source })
-                          }
+                          onPreview={(src, source) => setPreviewImage({ src, source })}
                         />
                       ),
                     )}
                   </div>
                 )}
-                <CopyMessageButton
-                  content={displayContent}
-                  copyText={copyText}
-                />
+                <CopyMessageButton content={displayContent} copyText={copyText} />
                 {msgTs && (
                   <div className="msg-bubble-footer">
                     <span className="msg-bubble-ts">{msgTs}</span>
@@ -286,40 +237,23 @@ export function MessageBubble(props: {
                 )}
               </div>
             </div>
-            {props.message.role === "assistant" &&
-              (props.message.token_usage || props.message.model) && (
-                <div className="msg-token-row">
-                  {props.message.model && (
-                    <span className="msg-model-label">
-                      {props.message.model}
-                    </span>
-                  )}
-                  {props.message.token_usage && (
-                    <TokenUsageDisplay usage={props.message.token_usage!} />
-                  )}
-                </div>
-              )}
+            {props.message.role === "assistant" && (props.message.token_usage || props.message.model) && (
+              <div className="msg-token-row">
+                {props.message.model && <span className="msg-model-label">{props.message.model}</span>}
+                {props.message.token_usage && <TokenUsageDisplay usage={props.message.token_usage!} />}
+              </div>
+            )}
           </>
         ) : props.message.content.startsWith("[thinking]\n") ? (
-          <ThinkingBlock
-            content={props.message.content.slice("[thinking]\n".length)}
-          />
+          <ThinkingBlock content={props.message.content.slice("[thinking]\n".length)} />
         ) : (
           <SystemMessage content={props.message.content} />
         )
       ) : (
-        <ToolMessage
-          message={props.message}
-          provider={props.provider}
-          parentSessionId={props.parentSessionId}
-        />
+        <ToolMessage message={props.message} provider={props.provider} parentSessionId={props.parentSessionId} />
       )}
       {previewImage && (
-        <ImagePreview
-          src={previewImage.src}
-          source={previewImage.source}
-          onClose={() => setPreviewImage(null)}
-        />
+        <ImagePreview src={previewImage.src} source={previewImage.source} onClose={() => setPreviewImage(null)} />
       )}
     </>
   );

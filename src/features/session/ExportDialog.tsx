@@ -2,13 +2,7 @@ import { useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import type { SessionMeta } from "@/lib/types";
 import { exportSession } from "@/lib/tauri";
@@ -18,18 +12,13 @@ import { errorMessage } from "@/lib/errors";
 
 type ExportFormat = "json" | "markdown" | "html";
 
-const FORMAT_OPTIONS: { value: ExportFormat; labelKey: string; ext: string }[] =
-  [
-    { value: "json", labelKey: "export.json", ext: "json" },
-    { value: "markdown", labelKey: "export.markdown", ext: "md" },
-    { value: "html", labelKey: "export.html", ext: "html" },
-  ];
+const FORMAT_OPTIONS: { value: ExportFormat; labelKey: string; ext: string }[] = [
+  { value: "json", labelKey: "export.json", ext: "json" },
+  { value: "markdown", labelKey: "export.markdown", ext: "md" },
+  { value: "html", labelKey: "export.html", ext: "html" },
+];
 
-export function ExportDialog(props: {
-  open: boolean;
-  session: SessionMeta;
-  onClose: () => void;
-}) {
+export function ExportDialog(props: { open: boolean; session: SessionMeta; onClose: () => void }) {
   const { t } = useI18n();
   const [format, setFormat] = useState<ExportFormat>("json");
   const [exporting, setExporting] = useState(false);
@@ -41,9 +30,7 @@ export function ExportDialog(props: {
     try {
       const outputPath = await save({
         defaultPath: `${props.session.title || "session"}.${selected.ext}`,
-        filters: [
-          { name: selected.value.toUpperCase(), extensions: [selected.ext] },
-        ],
+        filters: [{ name: selected.value.toUpperCase(), extensions: [selected.ext] }],
       });
 
       if (!outputPath) return;

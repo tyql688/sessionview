@@ -13,10 +13,7 @@ export function ThinkingBlock(props: { content: string }) {
 
   return (
     <div className={`msg-thinking${expanded ? " expanded" : ""}`}>
-      <div
-        className="msg-thinking-header"
-        onClick={() => setExpanded(!expanded)}
-      >
+      <div className="msg-thinking-header" onClick={() => setExpanded(!expanded)}>
         <span className="msg-thinking-icon">💭</span>
         <span className="msg-thinking-label">{t("timeline.thinking")}</span>
         {!expanded && <span className="msg-thinking-preview">{preview()}</span>}

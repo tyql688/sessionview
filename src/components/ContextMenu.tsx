@@ -26,8 +26,7 @@ export function ContextMenu(props: Props) {
   const anchor = useMemo(() => {
     if (!position) return null;
     return {
-      getBoundingClientRect: () =>
-        DOMRect.fromRect({ x: position.x, y: position.y, width: 0, height: 0 }),
+      getBoundingClientRect: () => DOMRect.fromRect({ x: position.x, y: position.y, width: 0, height: 0 }),
     };
   }, [position]);
 
@@ -40,13 +39,7 @@ export function ContextMenu(props: Props) {
       modal={false}
     >
       <Menu.Portal>
-        <Menu.Positioner
-          anchor={anchor}
-          side="bottom"
-          align="start"
-          sideOffset={2}
-          className="z-[300] outline-none"
-        >
+        <Menu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={2} className="z-[300] outline-none">
           <Menu.Popup className="min-w-44 rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none duration-100 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
             {props.items.map((item, i) =>
               item.separator ? (
@@ -64,16 +57,8 @@ export function ContextMenu(props: Props) {
                     props.onClose();
                   }}
                 >
-                  <span>
-                    {typeof item.label === "function"
-                      ? item.label()
-                      : item.label}
-                  </span>
-                  {item.shortcut && (
-                    <span className="text-xs text-muted-foreground">
-                      {item.shortcut}
-                    </span>
-                  )}
+                  <span>{typeof item.label === "function" ? item.label() : item.label}</span>
+                  {item.shortcut && <span className="text-xs text-muted-foreground">{item.shortcut}</span>}
                 </Menu.Item>
               ),
             )}

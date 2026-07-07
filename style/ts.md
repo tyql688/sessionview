@@ -1,20 +1,28 @@
-# TypeScript & Solid.js Style Guide
+# TypeScript & React Style Guide
 
-The canonical coding standard for the `src/` frontend (Solid.js + TypeScript).
-`CLAUDE.md` links here instead of duplicating these rules — this file is the single
-source of truth.
+The canonical coding standard for the `src/` frontend (React + TypeScript).
+`AGENTS.md` links here instead of duplicating these rules — this file is the
+single source of truth.
 
 Every rule lists its **enforcing tool** so you know whether a violation fails the
 build automatically or is caught only in review:
 
 | Tag | Meaning |
 |-----|---------|
-| `tsc` | TypeScript compiler (`npx tsc --noEmit`) |
-| `biome` | Biome formatter/linter (`npm run biome:check`) — owns formatting + general lint |
-| `eslint` | ESLint, trimmed to `eslint-plugin-solid` — owns Solid reactivity rules Biome cannot replicate |
+| `tsc` | TypeScript compiler (`npm run typecheck`) |
+| `biome` | Biome formatter/linter/import sorting (`npm run lint` / `npm run format`) |
+| `eslint` | ESLint, trimmed to typescript-eslint + react-hooks rules Biome cannot replicate (`npm run lint`) |
+| `knip` | Release-time dead-code, unused-export, and dependency audit (`npm run knip`) |
 | `review` | No automated check; enforced by human/agent review |
 
-Run `npm run check` (or let the lefthook pre-commit hook run) before every commit.
+Run `npm run check` before committing larger frontend changes. The lefthook
+pre-commit hook formats staged frontend files with Biome and runs ESLint on
+staged TS/TSX files; the pre-push hook runs `npm run check` and `npm test`.
+Run `npm run knip` before a release and after broad frontend refactors; it is
+intentionally not a pre-push hook because it is noisier than type/lint/test
+feedback during normal feature work. Knip errors block release. Type-only unused
+exports are warnings so shared model files can be cleaned opportunistically
+without blocking unrelated release work.
 
 ---
 
@@ -53,18 +61,18 @@ setGroups((prev) => prev.map((g) => (g.id === id ? { ...g, activeTabId } : g)));
 group.activeTabId = id;
 ```
 
-## 4. Solid.js reactivity
+## 4. React reactivity
 
-- **`<Index>` for tab/pane collections** you want to keep stable across reorders (`EditorArea`, `EditorGroupsContainer`). **`<For>`** only when identity tracks the item. — `eslint` (partial) / `review`
-- **`<Show when={id} keyed>`** when a component must remount on identity change — e.g. `<Show when={session().id} keyed>` forces `SessionView` to drop stale local state. — `review`
-- **Read accessors `()` inside JSX/effects, not at component top level** — a top-level read runs once and captures a stale value. — `eslint` (`solid/reactivity` is off due to false positives; this is review-enforced)
-- **`createMemo` only when a downstream consumer runs more than once per change** — otherwise it is pure overhead. — `review`
-- **Use `on()` for explicit dependency tracking** when an effect should react to a specific signal only. — `review`
+- **Hooks stay at the top level.** `useState` / `useEffect` / `useMemo` / store hooks are never called in loops, conditions, or callbacks. — `eslint` / `review`
+- **Use stable keys for collections.** `.map()` uses item IDs, not array indexes, for tab/pane/session collections that should survive reorders. — `review`
+- **Use `key={id}` for intentional remounts** when component-local state must reset on identity change, such as `SessionView` on session replacement. — `review`
+- **Use `useMemo` only when it has a real job:** expensive computation or identity used by a downstream dependency. React Compiler handles routine memoization. — `review`
+- **Store reads are split by context.** Components read via reactive `useX()` hooks; event handlers/effects use imperative getters/actions when they need current state outside render. — `review`
 
 ## 5. Components & structure
 
 - **Explicit `interface Props { … }`** for any component with more than one prop. No inline `{ x }: { x: string }`. — `review`
-- **Many small files over few large ones.** Target 200–400 LOC, 800 hard max. Extract hooks (`createXxx`) and sub-components when a file mixes orchestration with rendering. — `review` (LOC checked by the `scripts/check-file-size` pre-push step)
+- **Many small files over few large ones.** Target 200–400 LOC, 800 hard max. Extract hooks and sub-components when a file mixes orchestration with rendering. — `review`
 - **Organize by feature/domain**, not by type. — `review`
 - **No single-use helpers** — inline them. — `review`
 
@@ -75,11 +83,13 @@ group.activeTabId = id;
 
 ## 7. Formatting & Biome linting
 
-- 2-space indent, 80-column width, double quotes, semicolons, trailing commas, LF line endings. — `biome`
-- Never hand-format; run `npm run biome:format`. The pre-commit hook formats staged files automatically. — `biome`
-- Biome runs its `recommended` linter alongside ESLint. A few recommended rules are
-  **intentionally disabled** in `biome.json` (documented here because Biome's config
-  cannot hold inline comments):
+- 2-space indent, 120-column width, double quotes, semicolons, trailing commas, LF line endings. — `biome`
+- Never hand-format; run `npm run format`. The pre-commit hook formats staged
+  files automatically. Use `npm run format:check` when you only want to verify
+  formatting. — `biome`
+- Biome runs the `preset: "recommended"` linter alongside ESLint. A few
+  recommended rules are **intentionally disabled** in `biome.json` (documented
+  here because Biome's config cannot hold inline comments):
   - **`a11y` group** (`useButtonType`, `noSvgWithoutTitle`, `noStaticElementInteractions`,
     `useKeyWithClickEvents`) — full WCAG linting is out of scope for this icon-heavy
     desktop app; revisit as a dedicated initiative.
@@ -94,9 +104,14 @@ group.activeTabId = id;
 
 ### Quick checklist before commit
 
-- [ ] `tsc` clean, `biome:check` clean, `eslint` clean
+- [ ] `npm run check` clean
 - [ ] No `any` / `as unknown as` / `@ts-ignore` / `console.log` / empty `catch`
 - [ ] Stores updated immutably (spread)
-- [ ] Reactivity: `Index` vs `For`, keyed `Show`, accessors read in scope
+- [ ] Reactivity: hooks at top level, stable keys, deliberate remount keys
 - [ ] User-facing strings via `t()`, both locales in parity
 - [ ] New behavior has a `*.test.ts(x)` next to the source
+
+### Release checklist
+
+- [ ] `npm run knip` has no errors; type-only warnings are either cleaned up or
+      accepted as advisory

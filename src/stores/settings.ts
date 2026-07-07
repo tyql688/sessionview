@@ -50,10 +50,7 @@ const VALID_TERMINALS: TerminalApp[] = [
 ];
 
 function readStorage(key: string): string | null {
-  if (
-    typeof localStorage === "undefined" ||
-    typeof localStorage.getItem !== "function"
-  ) {
+  if (typeof localStorage === "undefined" || typeof localStorage.getItem !== "function") {
     return null;
   }
   try {
@@ -65,10 +62,7 @@ function readStorage(key: string): string | null {
 }
 
 function writeStorage(key: string, value: string): void {
-  if (
-    typeof localStorage === "undefined" ||
-    typeof localStorage.setItem !== "function"
-  ) {
+  if (typeof localStorage === "undefined" || typeof localStorage.setItem !== "function") {
     return;
   }
   try {
@@ -96,9 +90,7 @@ function parseStoredStringArray<T extends string>(
 
     const invalidValue = parsed.find((value) => typeof value !== "string");
     if (invalidValue !== undefined) {
-      throw new Error(
-        `invalid ${label} entry: ${JSON.stringify(invalidValue)}`,
-      );
+      throw new Error(`invalid ${label} entry: ${JSON.stringify(invalidValue)}`);
     }
 
     const value = parsed.filter(isValid) as T[];
@@ -227,26 +219,18 @@ export function removeBlockedFolder(path: string) {
 export function isPathBlocked(path: string): boolean {
   return useSettingsStore
     .getState()
-    .blockedFolders.some(
-      (blocked) => path === blocked || path.startsWith(`${blocked}/`),
-    );
+    .blockedFolders.some((blocked) => path === blocked || path.startsWith(`${blocked}/`));
 }
 
 // Imperative getters for non-reactive logic (filtering, tree building).
-export const getBlockedFolders = () =>
-  useSettingsStore.getState().blockedFolders;
+export const getBlockedFolders = () => useSettingsStore.getState().blockedFolders;
 
 // Reactive hooks for components.
 export const useTerminalApp = () => useSettingsStore((s) => s.terminalApp);
-export const useDisabledProviders = () =>
-  useSettingsStore((s) => s.disabledProviders);
-export const useDisabledProvidersError = () =>
-  useSettingsStore((s) => s.disabledProvidersError);
+export const useDisabledProviders = () => useSettingsStore((s) => s.disabledProviders);
+export const useDisabledProvidersError = () => useSettingsStore((s) => s.disabledProvidersError);
 export const useShowOrphans = () => useSettingsStore((s) => s.showOrphans);
 export const useFocusMode = () => useSettingsStore((s) => s.focusMode);
-export const useExplorerGrouping = () =>
-  useSettingsStore((s) => s.explorerGrouping);
-export const useBlockedFolders = () =>
-  useSettingsStore((s) => s.blockedFolders);
-export const useBlockedFoldersError = () =>
-  useSettingsStore((s) => s.blockedFoldersError);
+export const useExplorerGrouping = () => useSettingsStore((s) => s.explorerGrouping);
+export const useBlockedFolders = () => useSettingsStore((s) => s.blockedFolders);
+export const useBlockedFoldersError = () => useSettingsStore((s) => s.blockedFoldersError);
