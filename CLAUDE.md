@@ -157,6 +157,7 @@ Resume: Claude `--resume`, Codex `resume`, Antigravity `agy --conversation <id>`
 - **Trash**: `TrashMeta.parent_id` cascades restore/delete; `is_session_dir()` prevents shared dir deletion
 - **Immutable state**: All zustand store updates use spread (`set((s) => ({ ...s, field: newValue }))`). Never mutate in place.
 - **React reactivity**: `.map()` with stable keys (item id, not index) for tab/pane collections so instances survive reorders. Use `key={id}` when a component must remount on identity change (e.g. `key={session.id}` for `SessionView`).
+- **Session timeline is virtualized** (`@tanstack/react-virtual`): only near-viewport rows exist in the DOM, absolutely positioned in a spacer, top-down order (no column-reverse). Message loading stays backend-windowed (tail on open, older pages prepended near the top; entry keys on absolute indices keep row measurements across prepends). Consequences: anything needing "all rows" must run on entry DATA, not the DOM — in-session search counts/navigates over `searchHaystack` (`buildMatchLocations`) and only paints CSS Highlight ranges on mounted rows; the minimap positions from the virtualizer's rendered range + outline (no DOM anchors); keyboard paging (PageUp/PageDown/Home/End) is handled at document level in SessionView because WebKit routes paging keys only to the scroll area under the last click.
 
 ## Pitfalls
 

@@ -51,9 +51,10 @@ function supportsHighlightApi(): boolean {
 
 /**
  * All occurrences of `term` inside [data-searchable] subtrees, as Ranges in
- * VISUAL order (top→bottom). Sorting by bounding box is required because the
- * messages container uses `column-reverse`: DOM order is newest-first while
- * visual order is oldest-first.
+ * document order — which, with the virtualized top-down timeline, is also
+ * visual order. Only the rows currently mounted by the virtualizer are
+ * scanned; match counting and navigation run on entry data instead
+ * (`buildMatchLocations`), so the DOM walk stays a cheap paint-only pass.
  */
 export function collectSearchRanges(
   container: HTMLElement | undefined,
@@ -88,12 +89,76 @@ export function collectSearchRanges(
     }
   }
 
-  ranges.sort((a, b) => {
-    const ra = a.getBoundingClientRect();
-    const rb = b.getBoundingClientRect();
-    return ra.top - rb.top || ra.left - rb.left;
-  });
   return ranges;
+}
+
+/** One element per occurrence of `term` across the loaded entries: the value
+ * is the entry index the occurrence lives in. Counting runs on entry data —
+ * not the DOM — so totals cover the whole loaded session even though the
+ * virtualizer only mounts the rows near the viewport. */
+export function buildMatchLocations(
+  entries: ProcessedEntry[],
+  term: string,
+): number[] {
+  const normalized = normalizeSessionSearch(term);
+  if (!normalized) return [];
+  const locations: number[] = [];
+  entries.forEach((entry, entryIndex) => {
+    const haystack = entry.searchHaystack;
+    for (
+      let at = haystack.indexOf(normalized);
+      at !== -1;
+      at = haystack.indexOf(normalized, at + normalized.length)
+    ) {
+      locations.push(entryIndex);
+    }
+  });
+  return locations;
+}
+
+/** The active match, addressed as (entry index, nth occurrence within that
+ * entry) — the shape the DOM paint pass needs to pick the right Range. */
+export function activeMatchTarget(
+  locations: number[],
+  activeIdx: number,
+): { entryIndex: number; occurrence: number } | null {
+  const entryIndex = locations[activeIdx];
+  if (entryIndex === undefined) return null;
+  let occurrence = 0;
+  for (let i = activeIdx - 1; i >= 0 && locations[i] === entryIndex; i -= 1) {
+    occurrence += 1;
+  }
+  return { entryIndex, occurrence };
+}
+
+/** Paint highlights over the currently mounted rows and return the active
+ * Range if it is mounted (for scroll-into-view). `active` addresses the
+ * match by entry key + occurrence because Ranges are rebuilt from the live
+ * DOM on every pass — virtual rows mount and unmount as the user scrolls. */
+export function paintVisibleHighlights(
+  container: HTMLElement | undefined,
+  term: string,
+  active: { entryKey: string; occurrence: number } | null,
+): Range | null {
+  const ranges = collectSearchRanges(container, term);
+  let activeIndex: number | null = null;
+  if (active && container) {
+    const entryEl = container.querySelector(
+      `[data-entry-key="${CSS.escape(active.entryKey)}"]`,
+    );
+    if (entryEl) {
+      const inEntry = ranges
+        .map((range, index) => ({ range, index }))
+        .filter(({ range }) => entryEl.contains(range.startContainer));
+      // The DOM shows rendered markdown while occurrences are counted over
+      // the source text, so the nth source occurrence may not map 1:1 onto
+      // the nth rendered Range — clamp instead of dropping the highlight.
+      const target = inEntry[Math.min(active.occurrence, inEntry.length - 1)];
+      if (target) activeIndex = target.index;
+    }
+  }
+  applySearchHighlight(ranges, activeIndex);
+  return activeIndex !== null ? (ranges[activeIndex] ?? null) : null;
 }
 
 /** Paint the collected ranges; `activeIndex` gets the distinct active style.

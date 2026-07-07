@@ -1,10 +1,9 @@
 import { render } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { SessionTurnOutlineEntry } from "@/lib/tauri";
 import {
   TimelineMinimap,
-  currentTickFromOffsets,
-  sampleOutline,
+  activeTurnIndex,
 } from "@/features/session/TimelineMinimap";
 
 function outlineOf(count: number): SessionTurnOutlineEntry[] {
@@ -16,106 +15,58 @@ function outlineOf(count: number): SessionTurnOutlineEntry[] {
   }));
 }
 
-function makeScroller(): HTMLDivElement {
-  const el = document.createElement("div");
-  document.body.appendChild(el);
-  return el;
+function renderMinimap(outline: SessionTurnOutlineEntry[], activeIndex = 0) {
+  return render(
+    <TimelineMinimap
+      outline={outline}
+      activeIndex={activeIndex}
+      scrolling={false}
+      onWheelScroll={() => {}}
+      onRevealMessage={() => Promise.resolve(true)}
+    />,
+  );
 }
 
-describe("sampleOutline", () => {
-  it("returns the outline unchanged when under the cap", () => {
-    const outline = outlineOf(5);
-    expect(sampleOutline(outline, 32)).toBe(outline);
+describe("activeTurnIndex", () => {
+  it("picks the last turn starting at or above the viewport-top message", () => {
+    // Turns start at message indices 0/2/4/…; message 5 belongs to turn 2.
+    expect(activeTurnIndex(outlineOf(4), 5, false)).toBe(2);
+    expect(activeTurnIndex(outlineOf(4), 0, false)).toBe(0);
   });
 
-  it("samples long outlines down to the cap, keeping first and last", () => {
-    const sampled = sampleOutline(outlineOf(200), 32);
-    expect(sampled).toHaveLength(32);
-    expect(sampled[0]?.ordinal).toBe(0);
-    expect(sampled[sampled.length - 1]?.ordinal).toBe(199);
-    const ordinals = sampled.map((t) => t.ordinal);
-    expect(new Set(ordinals).size).toBe(ordinals.length);
-  });
-});
-
-describe("currentTickFromOffsets", () => {
-  it("picks the last anchor scrolled past the viewport top", () => {
-    // Normal-scroll coordinates: anchors at 0/500/1000, viewport at 520.
-    expect(currentTickFromOffsets([0, 500, 1000], 520)).toBe(1);
+  it("points at the last turn when the newest row is visible", () => {
+    // Bottom of the session: the viewport top may still show an older turn,
+    // but the user is reading the newest one.
+    expect(activeTurnIndex(outlineOf(4), 2, true)).toBe(3);
   });
 
-  it("works with the column-reverse negative coordinate space", () => {
-    // Bottom of a column-reverse scroller: scrollTop 0, older anchors above
-    // at negative offsets, the newest turn's anchor just above the top.
-    expect(currentTickFromOffsets([-900, -400, -10], 0)).toBe(2);
-    // Scrolled up into history.
-    expect(currentTickFromOffsets([-900, -400, -10], -450)).toBe(0);
-  });
-
-  it("skips unmounted anchors instead of stopping at them", () => {
-    // Tail-first loading: the oldest turns have no DOM node (Infinity) while
-    // newer ones do — they must not mask the real current turn.
-    const inf = Number.POSITIVE_INFINITY;
-    expect(currentTickFromOffsets([inf, inf, -400, -10], 0)).toBe(3);
+  it("defaults to the newest turn while nothing is measurable yet", () => {
+    expect(activeTurnIndex(outlineOf(4), null, false)).toBe(3);
+    expect(activeTurnIndex([], 10, false)).toBe(0);
   });
 });
 
 describe("TimelineMinimap", () => {
-  it("renders one tick per outline turn", () => {
-    const { container } = render(
-      <TimelineMinimap
-        outline={outlineOf(3)}
-        messagesRef={makeScroller()}
-        onRevealMessage={() => Promise.resolve(true)}
-      />,
-    );
+  it("renders one tick per outline turn — the whole session, no sampling", () => {
+    const { container } = renderMinimap(outlineOf(200));
     expect(container.querySelectorAll(".timeline-minimap-tick")).toHaveLength(
-      3,
+      200,
     );
   });
 
   it("hides below the minimum turn count", () => {
-    const { container } = render(
-      <TimelineMinimap
-        outline={outlineOf(1)}
-        messagesRef={makeScroller()}
-        onRevealMessage={() => Promise.resolve(true)}
-      />,
-    );
+    const { container } = renderMinimap(outlineOf(1));
     expect(container.querySelector(".timeline-minimap")).toBeNull();
   });
 
-  // Regression: the scroll container mounts after the outline arrives, so the
-  // element prop starts undefined. The subscription effect must re-run and
-  // attach once the element is finally passed in — the migration originally
-  // handed a render-time ref snapshot down, which never updated and left the
-  // minimap without a scroll listener.
-  it("attaches the scroll listener when the container arrives late", () => {
-    const scroller = makeScroller();
-    const addSpy = vi.spyOn(scroller, "addEventListener");
-
-    const { rerender, unmount } = render(
-      <TimelineMinimap
-        outline={outlineOf(3)}
-        messagesRef={null}
-        onRevealMessage={() => Promise.resolve(true)}
-      />,
+  it("marks the active tick", () => {
+    const { container } = renderMinimap(outlineOf(5), 3);
+    const ticks = container.querySelectorAll(".timeline-minimap-tick");
+    expect(ticks[3]?.classList.contains("timeline-minimap-tick-active")).toBe(
+      true,
     );
-    expect(addSpy).not.toHaveBeenCalled();
-
-    rerender(
-      <TimelineMinimap
-        outline={outlineOf(3)}
-        messagesRef={scroller}
-        onRevealMessage={() => Promise.resolve(true)}
-      />,
+    expect(ticks[0]?.classList.contains("timeline-minimap-tick-active")).toBe(
+      false,
     );
-    expect(addSpy).toHaveBeenCalledWith("scroll", expect.any(Function), {
-      passive: true,
-    });
-
-    const removeSpy = vi.spyOn(scroller, "removeEventListener");
-    unmount();
-    expect(removeSpy).toHaveBeenCalledWith("scroll", expect.any(Function));
   });
 });

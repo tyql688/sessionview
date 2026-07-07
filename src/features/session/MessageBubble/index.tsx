@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { lazy, Suspense, useState, useMemo } from "react";
 import type { Message, Provider } from "@/lib/types";
 import { ProviderIcon, UserIcon } from "@/components/icons";
 import { useI18n } from "@/i18n/index";
@@ -19,7 +19,17 @@ import {
   TokenUsageDisplay,
 } from "@/features/session/MessageBubble/TokenUsage";
 import { ToolMessage } from "@/features/session/MessageBubble/ToolMessage";
-import { LazyMarkdown } from "@/features/session/MessageBubble/LazyMarkdown";
+
+// The markdown engine (streamdown + shiki/katex/mermaid plugins) is by far
+// the heaviest frontend dependency — load it on demand so the app shell and
+// explorer render without it. Rendering per bubble is eager: the virtualizer
+// only mounts the rows near the viewport, so each mount parses exactly one
+// message. The fallback shows the raw text during the one-time chunk load.
+const Markdown = lazy(() =>
+  import("@/features/session/timeline/Markdown").then((module) => ({
+    default: module.Markdown,
+  })),
+);
 
 const SYSTEM_SUBTYPE_CONFIG: Record<
   string,
@@ -130,9 +140,6 @@ export function MessageBubble(props: {
   message: Message;
   provider?: Provider;
   parentSessionId?: string;
-  /** Row is on screen at mount (newest tail on open) — render real markdown
-   * immediately instead of waiting for the near-viewport upgrade. */
-  eagerMarkdown?: boolean;
 }) {
   const [previewImage, setPreviewImage] = useState<{
     src: string;
@@ -240,10 +247,13 @@ export function MessageBubble(props: {
               <div
                 className={`msg-bubble msg-bubble-${props.message.role}${isCommandMessage() ? " msg-bubble-command" : ""}`}
               >
-                <LazyMarkdown
-                  text={displayMarkdown}
-                  eager={props.eagerMarkdown}
-                />
+                <Suspense
+                  fallback={
+                    <div className="whitespace-pre-wrap">{displayMarkdown}</div>
+                  }
+                >
+                  <Markdown text={displayMarkdown} />
+                </Suspense>
                 {images.length > 0 && (
                   <div className="msg-image-strip">
                     {images.map((image, i) =>

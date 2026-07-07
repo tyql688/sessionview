@@ -118,25 +118,61 @@ import { SessionView } from "@/features/session/index";
 beforeAll(() => {
   // happy-dom lacks these browser-only APIs that child components touch.
   Element.prototype.scrollIntoView = () => {};
-  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+  // The virtualizer reads offsetWidth/offsetHeight for both the scroll
+  // container's viewport and each row's measured size; happy-dom reports 0
+  // for all of them, which renders zero rows. Give the container a viewport
+  // and every row a fixed height so windowing math behaves like a real
+  // browser (120 rows × 100px, 800px viewport → ~8 visible + overscan).
+  Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
     configurable: true,
     get() {
-      return this.classList?.contains("session-messages") ? 1000 : 0;
+      if (this.classList?.contains("session-messages")) return 800;
+      if (this.classList?.contains("session-entry")) return 100;
+      return 0;
     },
   });
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+    configurable: true,
+    get() {
+      return this.classList?.contains("session-messages") ? 800 : 0;
+    },
+  });
+  // scrollToIndex clamps against scrollHeight - clientHeight; derive
+  // scrollHeight from the virtualizer's spacer so the max offset tracks the
+  // loaded content like a real browser.
   Object.defineProperty(HTMLElement.prototype, "clientHeight", {
     configurable: true,
     get() {
-      return this.classList?.contains("session-messages") ? 500 : 0;
+      return this.classList?.contains("session-messages") ? 800 : 0;
     },
   });
-  if (!("ResizeObserver" in globalThis)) {
-    (globalThis as { ResizeObserver: unknown }).ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    };
-  }
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get() {
+      if (!this.classList?.contains("session-messages")) return 0;
+      const inner = this.querySelector<HTMLElement>(".session-messages-inner");
+      const height = inner ? Number.parseInt(inner.style.height, 10) : 0;
+      return Number.isFinite(height) ? height : 0;
+    },
+  });
+  // happy-dom's scrollTo doesn't notify; the virtualizer relies on the
+  // scroll event to track its offset.
+  Element.prototype.scrollTo = function (
+    options?: ScrollToOptions | number,
+    y?: number,
+  ) {
+    const top = typeof options === "object" ? (options?.top ?? 0) : (y ?? 0);
+    this.scrollTop = top;
+    this.dispatchEvent(new Event("scroll"));
+  };
+  // happy-dom ships a ResizeObserver that reports 0×0 for everything, which
+  // would overwrite the stubbed row heights the moment it fires — replace it
+  // with a silent one so measurements come from the offsetHeight stub above.
+  (globalThis as { ResizeObserver: unknown }).ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
 });
 
 beforeEach(() => {
@@ -315,6 +351,8 @@ describe("SessionView smoke", () => {
       />,
     );
 
+    // Opening lands at the newest messages; older rows are outside the
+    // virtualizer's window.
     expect(await findByText("message 119")).toBeInTheDocument();
     expect(queryByText("target after search")).not.toBeInTheDocument();
     expect(queryByText("oldest still above")).not.toBeInTheDocument();
@@ -335,12 +373,14 @@ describe("SessionView smoke", () => {
     await waitFor(() =>
       expect(queryByText("target after search")).toBeInTheDocument(),
     );
-    expect(queryByText("oldest still above")).not.toBeInTheDocument();
 
+    // After the reveal, plain scrolling must still work: driving the scroll
+    // container to the very top brings the oldest row into the virtualizer's
+    // window.
     const messagesEl =
       document.querySelector<HTMLDivElement>(".session-messages");
     expect(messagesEl).not.toBeNull();
-    messagesEl!.scrollTop = -500;
+    messagesEl!.scrollTop = 0;
     fireEvent.scroll(messagesEl!);
 
     await waitFor(() =>

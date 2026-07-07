@@ -155,26 +155,33 @@
   position: relative;
 }
 
-/* Messages */
+/* Messages — virtualized: the inner spacer owns the full scroll height and
+ * only the on-screen rows exist, absolutely positioned by the virtualizer.
+ * Rows never push each other around, so scrolling is symmetric in both
+ * directions regardless of session size. */
 .session-messages {
   flex: 1;
   overflow-y: auto;
   padding: 16px 20px 26px;
-  display: flex;
-  flex-direction: column-reverse;
-  gap: 10px;
+  /* Focus is programmatic (keyboard paging), never a visual affordance. */
+  outline: none;
+}
+
+.session-messages-inner {
+  position: relative;
+  width: 100%;
 }
 
 .session-entry {
+  position: absolute;
+  top: 0;
+  left: 0;
   display: flex;
+  width: 100%;
   flex-direction: column;
-  /* Native windowing: off-screen rows skip layout/paint entirely, which is
-   * what makes thousand-message (codex) sessions scrollable. The DOM stays
-   * real, so minimap anchors, search Ranges, and scrollIntoView all keep
-   * working; `auto` in contain-intrinsic-size remembers each row's measured
-   * height after first render so scrollbar/anchor math stays stable. */
-  content-visibility: auto;
-  contain-intrinsic-size: auto 160px;
+  /* Replaces the old flex gap between rows — spacing must live inside the
+   * measured row so the virtualizer accounts for it. */
+  padding-bottom: 10px;
 }
 
 /* In-session search highlighting (CSS Custom Highlight API — ranges are
@@ -195,16 +202,6 @@
   font-size: 13px;
 }
 
-/* Remove any separators between messages */
-.session-messages > hr,
-.session-messages > .msg-row + .msg-row::before {
-  display: none;
-}
-
-.session-messages > *:empty {
-  display: none;
-}
-
 /* Timeline minimap */
 .timeline-minimap {
   position: absolute;
@@ -221,16 +218,20 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 2px;
+  max-height: 86%;
   /* No overflow clipping here: the hover preview card is absolutely
    * positioned outside the strip's box, and non-visible overflow on an
-   * ancestor clips it away entirely (the card never showed). Tick count is
-   * bounded by sampling, so the strip never needs to scroll. */
+   * ancestor clips it away entirely (the card never showed). */
   pointer-events: auto;
 }
 
+/* One row per turn — no sampling. Rows compress evenly when a session has
+ * more turns than the strip has pixels, so the whole session always fits. */
 .timeline-minimap-row {
   position: relative;
+  display: flex;
+  flex: 0 1 10px;
+  min-height: 0;
 }
 
 .timeline-minimap-button {
@@ -240,7 +241,8 @@
    * (the hover card opens leftward for the same reason). */
   justify-content: flex-end;
   width: 100%;
-  padding: 2px 6px;
+  min-height: 0;
+  padding: 0 6px;
   border: 0;
   background: transparent;
   color: inherit;

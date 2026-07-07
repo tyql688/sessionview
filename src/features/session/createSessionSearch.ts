@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import {
   setPendingSessionSearch,
@@ -6,24 +6,21 @@ import {
 } from "@/features/search/search";
 import {
   applySearchHighlight,
-  collectSearchRanges,
+  buildMatchLocations,
   SESSION_SEARCH_DEBOUNCE_MS,
-  scrollRangeIntoView,
 } from "@/features/session/search-utils";
 import type { ProcessedEntry } from "@/features/session/hooks";
 
 export interface CreateSessionSearchOptions {
   /** Role-filtered entries the search runs against. */
   filteredEntries: ProcessedEntry[];
-  /** Lazy ref getter — the messages container may not exist yet. */
-  getMessagesRef: () => HTMLDivElement | undefined;
   /** Whether the session is still loading (gates the pending-search effect). */
   loading: boolean;
   /** The current session id (matched against a pending global search). */
   sessionId: string;
   /** Load the complete searchable window and return the first matching entry. */
   resolveCompleteSearchMatch: (term: string) => Promise<number | null>;
-  /** Expand the normal render window until the matched entry is present. */
+  /** Scroll the virtualizer to an entry. */
   revealEntry: (entryIndex: number) => void;
   /** Register the debounce timer for cleanup by the owning component. */
   registerDebounce: (clear: () => void) => void;
@@ -36,22 +33,23 @@ export interface CreateSessionSearchResult {
   searchBarOpen: boolean;
   setSearchBarOpen: Dispatch<SetStateAction<boolean>>;
   searchMatchIdx: number;
-  setSearchMatchIdx: Dispatch<SetStateAction<number>>;
+  /** Entry index per occurrence, in session order — data-level, so the count
+   * covers the whole loaded session, not just the mounted rows. */
+  matchLocations: number[];
+  navigateMatch: (delta: number) => void;
 }
 
 /**
- * Owns the in-session search slice of SessionView: the search query signals,
- * the active/focus state, the match count memo, and the two effects that
- * (1) consume a pending global search and (2) debounce typed queries. Bodies
- * are moved verbatim from the inline component so dependency tracking, the
- * debounce timing, and the `suppressNextSearchEffect` guard are unchanged.
+ * Owns the in-session search slice of SessionView: the query signals, the
+ * pending-global-search consumption, the typed-query debounce, and match
+ * navigation.
  *
- * The debounce timer is owned here but its cleanup is registered back with the
- * component via `registerDebounce` so onCleanup stays in one place.
- *
- * Now a React hook: call it at the top level of a component. Latest-value refs
- * back `sessionSearch`/`filteredEntries` so the debounced/awaited callbacks read
- * current values rather than a stale closure capture.
+ * Matches are counted and navigated on entry data (`searchHaystack`), because
+ * under virtualized rendering the DOM only ever holds the rows near the
+ * viewport. Committing a query first pages in the complete session
+ * (`resolveCompleteSearchMatch`), so the locations cover every message; the
+ * DOM highlight paint runs separately in SessionView over whatever rows are
+ * mounted.
  */
 export function useSessionSearch(
   opts: CreateSessionSearchOptions,
@@ -65,8 +63,15 @@ export function useSessionSearch(
 
   const sessionSearchRef = useRef(sessionSearch);
   sessionSearchRef.current = sessionSearch;
-  const filteredEntriesRef = useRef(opts.filteredEntries);
-  filteredEntriesRef.current = opts.filteredEntries;
+
+  const matchLocations = useMemo(
+    () => buildMatchLocations(opts.filteredEntries, activeSessionSearch),
+    [opts.filteredEntries, activeSessionSearch],
+  );
+  const matchLocationsRef = useRef(matchLocations);
+  matchLocationsRef.current = matchLocations;
+  const searchMatchIdxRef = useRef(searchMatchIdx);
+  searchMatchIdxRef.current = searchMatchIdx;
 
   const sessionSearchDebounceRef = useRef<
     ReturnType<typeof setTimeout> | undefined
@@ -78,36 +83,6 @@ export function useSessionSearch(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function focusRenderedSearchMatch(term: string, entryKey?: string) {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const messagesRef = opts.getMessagesRef();
-        if (!messagesRef) return;
-        const ranges = collectSearchRanges(messagesRef, term);
-        if (ranges.length === 0) {
-          applySearchHighlight([], null);
-          return;
-        }
-        // Prefer the first occurrence inside the resolved entry (the complete
-        // first match across the whole session); fall back to the first
-        // rendered occurrence.
-        const targetEntry = entryKey
-          ? messagesRef.querySelector(`[data-entry-key="${entryKey}"]`)
-          : null;
-        let targetIndex = 0;
-        if (targetEntry) {
-          const found = ranges.findIndex((range) =>
-            targetEntry.contains(range.startContainer),
-          );
-          if (found >= 0) targetIndex = found;
-        }
-        setSearchMatchIdx(targetIndex);
-        applySearchHighlight(ranges, targetIndex);
-        scrollRangeIntoView(ranges[targetIndex]);
-      });
-    });
-  }
-
   async function commitSessionSearch(raw: string) {
     const requestId = ++searchRequestIdRef.current;
     const term = raw.trim();
@@ -118,20 +93,35 @@ export function useSessionSearch(
       return;
     }
 
-    const matchIdx = (await opts.resolveCompleteSearchMatch(term)) ?? -1;
+    // Page in the complete session so the data-level match list is total.
+    await opts.resolveCompleteSearchMatch(term);
     if (
       requestId !== searchRequestIdRef.current ||
       term !== sessionSearchRef.current.trim()
     ) {
       return;
     }
-    const targetEntry =
-      matchIdx >= 0 ? filteredEntriesRef.current[matchIdx] : null;
-    if (targetEntry) {
-      opts.revealEntry(matchIdx);
-    }
     setActiveSessionSearch(term);
-    focusRenderedSearchMatch(term, targetEntry?.key);
+  }
+
+  // Reveal the first match once a committed query's locations are computed.
+  // Runs on term change only — navigation moves searchMatchIdx separately.
+  useEffect(() => {
+    if (!activeSessionSearch) return;
+    const first = matchLocationsRef.current[0];
+    if (first !== undefined) {
+      opts.revealEntry(first);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionSearch]);
+
+  function navigateMatch(delta: number) {
+    const locations = matchLocationsRef.current;
+    if (locations.length === 0) return;
+    const next =
+      (searchMatchIdxRef.current + delta + locations.length) % locations.length;
+    setSearchMatchIdx(next);
+    opts.revealEntry(locations[next]);
   }
 
   // Consume a pending session search set by the global SearchOverlay.
@@ -178,6 +168,7 @@ export function useSessionSearch(
     searchBarOpen,
     setSearchBarOpen,
     searchMatchIdx,
-    setSearchMatchIdx,
+    matchLocations,
+    navigateMatch,
   };
 }
