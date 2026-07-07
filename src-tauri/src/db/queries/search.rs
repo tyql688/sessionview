@@ -425,15 +425,17 @@ pub(super) fn keyword_trend_counts(
              GROUP BY day
              ORDER BY day",
         )?;
-        let mapped = stmt.query_map(
-            rusqlite::params![fts_query, since_ms],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?)),
-        )?;
+        let mapped = stmt.query_map(rusqlite::params![fts_query, since_ms], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+        })?;
         for row in mapped {
             rows.push(row?);
         }
     } else {
-        let escaped = keyword.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        let escaped = keyword
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
         let mut stmt = conn.prepare(
             "SELECT date(updated_at / 1000, 'unixepoch', 'localtime') AS day,
                     COUNT(*) AS n

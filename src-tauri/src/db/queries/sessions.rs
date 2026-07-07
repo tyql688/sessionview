@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use rusqlite::params;
 
-use crate::models::{SearchFilters, SearchResult, SessionMeta, TokenTotals, TrendPoint, TrendSeries};
+use crate::models::{
+    SearchFilters, SearchResult, SessionMeta, TokenTotals, TrendPoint, TrendSeries,
+};
 
 use super::super::row_mapper::row_to_session_meta;
 use super::search::{
