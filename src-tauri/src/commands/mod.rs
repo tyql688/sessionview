@@ -19,6 +19,11 @@ use crate::services::{PersistedOutputCache, SessionCache};
 #[derive(Clone)]
 pub struct LoadToken {
     pub request_id: Option<String>,
+    /// Client-issued monotonic sequence. Command handlers run on independently
+    /// scheduled tasks, so token registration order does NOT reflect the order
+    /// requests were issued in — this is the only trustworthy "which load is
+    /// newer" signal for a session key.
+    pub seq: Option<u64>,
     pub flag: CancelFlag,
 }
 

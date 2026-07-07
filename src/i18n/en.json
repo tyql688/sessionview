@@ -51,6 +51,7 @@
     "resume": "Resume",
     "created": "Created",
     "noMessages": "No messages in this session",
+    "loadInterrupted": "Session load was interrupted — try reopening the session",
     "favoriteAdd": "Add to favorites",
     "favoriteRemove": "Remove from favorites",
     "loading": "Loading session...",

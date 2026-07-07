@@ -18,13 +18,14 @@ describe("tauri api wrappers", () => {
     toastError.mockReset();
   });
 
-  it("getSessionDetail sends only sessionId", async () => {
+  it("getSessionDetail sends sessionId plus a load sequence", async () => {
     const { getSessionDetail } = await import("@/lib/tauri");
 
     await getSessionDetail("sess-1");
 
     expect(invoke).toHaveBeenCalledWith("get_session_detail", {
       sessionId: "sess-1",
+      requestSeq: expect.any(Number),
     });
   });
 
@@ -37,6 +38,7 @@ describe("tauri api wrappers", () => {
       sessionId: "sess-1",
       offset: -300,
       limit: 300,
+      requestSeq: expect.any(Number),
     });
   });
 
@@ -50,7 +52,25 @@ describe("tauri api wrappers", () => {
       offset: -300,
       limit: 300,
       requestId: "sess-1:open:1",
+      requestSeq: expect.any(Number),
     });
+  });
+
+  it("session load commands share one strictly increasing sequence", async () => {
+    const { getSessionOpenWindow, getSessionMessagesWindow } =
+      await import("@/lib/tauri");
+
+    await getSessionOpenWindow("sess-1", -300, 300);
+    await getSessionMessagesWindow("sess-1", 0, 300);
+    await getSessionOpenWindow("sess-2", -300, 300);
+
+    const seqs = invoke.mock.calls.map(
+      ([, args]) => (args as { requestSeq: number }).requestSeq,
+    );
+    expect(seqs).toHaveLength(3);
+    for (let i = 1; i < seqs.length; i++) {
+      expect(seqs[i]).toBeGreaterThan(seqs[i - 1]);
+    }
   });
 
   it("cancelSessionLoad sends request identity when provided", async () => {

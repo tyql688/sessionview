@@ -51,6 +51,7 @@
     "resume": "恢复会话",
     "created": "创建于",
     "noMessages": "此会话没有消息",
+    "loadInterrupted": "会话加载被中断，请尝试重新打开",
     "favoriteAdd": "添加到收藏",
     "favoriteRemove": "从收藏移除",
     "loading": "加载会话中...",

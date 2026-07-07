@@ -3,8 +3,9 @@
 //! meta titles. Command handlers in `commands/sessions.rs` stay thin
 //! and delegate here.
 
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 
@@ -12,29 +13,58 @@ use crate::commands::{AppState, LoadToken};
 use crate::models::Message;
 use crate::services::load_cancel::{self, CancelFlag};
 
+/// Identity of one frontend load request: the cancel-matching id plus a
+/// client-issued monotonic sequence that orders concurrent loads for the
+/// same session key (see `LoadToken::seq`).
+#[derive(Clone, Copy, Default)]
+pub(crate) struct LoadRequest<'a> {
+    pub id: Option<&'a str>,
+    pub seq: Option<u64>,
+}
+
 /// RAII guard that registers a cancel flag for `session_id` on
-/// construction and removes it on drop. If a previous flag is still
-/// in flight for the same session, it is tripped so the prior parser
-/// bails out at its next checkpoint. The drop pass only removes the
-/// entry if it is still ours (a newer load may have replaced it).
+/// construction and removes it on drop.
+///
+/// Supersession is decided by the client sequence, never by registration
+/// order: task scheduling can start an older request's blocking task after
+/// a newer one's, and "insert cancels previous" would then kill the load
+/// the user is actually looking at. So:
+/// - incoming seq newer (or ordering unknown) → replace the entry and trip
+///   the previous flag;
+/// - incoming seq older than the registered one → the incoming request is
+///   stale: its own flag starts tripped and the newer token stays in place.
+///
+/// The drop pass only removes the entry if it is still ours (a newer load
+/// may have replaced it; a stale guard never owned it).
 struct CancelFlagGuard<'a> {
-    state: &'a AppState,
+    tokens: &'a Mutex<HashMap<String, LoadToken>>,
     session_id: String,
     flag: CancelFlag,
 }
 
 impl<'a> CancelFlagGuard<'a> {
-    fn new(state: &'a AppState, session_id: &str, request_id: Option<&str>) -> Self {
+    fn new(
+        tokens: &'a Mutex<HashMap<String, LoadToken>>,
+        session_id: &str,
+        request: LoadRequest<'_>,
+    ) -> Self {
         let flag = load_cancel::fresh();
         {
-            let mut map = match state.load_tokens.lock() {
+            let mut map = match tokens.lock() {
                 Ok(g) => g,
                 Err(p) => p.into_inner(),
             };
-            if let Some(prev) = map.insert(
+            let registered_newer = matches!(
+                (map.get(session_id).and_then(|t| t.seq), request.seq),
+                (Some(registered), Some(incoming)) if registered > incoming
+            );
+            if registered_newer {
+                load_cancel::cancel(&flag);
+            } else if let Some(prev) = map.insert(
                 session_id.to_string(),
                 LoadToken {
-                    request_id: request_id.map(str::to_string),
+                    request_id: request.id.map(str::to_string),
+                    seq: request.seq,
                     flag: Arc::clone(&flag),
                 },
             ) {
@@ -42,7 +72,7 @@ impl<'a> CancelFlagGuard<'a> {
             }
         }
         Self {
-            state,
+            tokens,
             session_id: session_id.to_string(),
             flag,
         }
@@ -55,7 +85,7 @@ impl<'a> CancelFlagGuard<'a> {
 
 impl Drop for CancelFlagGuard<'_> {
     fn drop(&mut self) {
-        let mut map = match self.state.load_tokens.lock() {
+        let mut map = match self.tokens.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
@@ -74,13 +104,13 @@ pub(crate) fn with_load_guard<F, R>(
     state: &AppState,
     session_id: &str,
     _source_path: &str,
-    request_id: Option<&str>,
+    request: LoadRequest<'_>,
     work: F,
 ) -> R
 where
     F: FnOnce(CancelFlag) -> R,
 {
-    let cancel_guard = CancelFlagGuard::new(state, session_id, request_id);
+    let cancel_guard = CancelFlagGuard::new(&state.load_tokens, session_id, request);
     let flag = cancel_guard.flag().clone();
     load_cancel::run_with(flag.clone(), move || work(flag))
 }

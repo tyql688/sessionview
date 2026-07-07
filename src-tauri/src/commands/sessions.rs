@@ -11,7 +11,7 @@ use crate::models::{Message, Provider, SessionDetail, SessionMeta, TokenTotals};
 use crate::services::load_cancel;
 use crate::services::session_view::{
     build_session_turn_outline, session_window_bounds, subagent_meta_title, with_load_guard,
-    SessionTurnOutlineEntry,
+    LoadRequest, SessionTurnOutlineEntry,
 };
 use crate::services::{load_session_meta, SessionLifecycleService};
 
@@ -95,13 +95,18 @@ pub async fn get_tree(state: State<'_, AppState>) -> CommandResult<Vec<crate::mo
 #[tauri::command]
 pub async fn get_session_detail(
     session_id: String,
+    request_seq: Option<u64>,
     state: State<'_, AppState>,
 ) -> CommandResult<SessionDetail> {
     let state = state.inner().clone();
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<SessionDetail> {
         let meta = load_session_meta(&state.db, &session_id).map_err(anyhow::Error::msg)?;
         let source_path = meta.source_path.clone();
-        with_load_guard(&state, &session_id, &source_path, None, |_flag| {
+        let request = LoadRequest {
+            id: None,
+            seq: request_seq,
+        };
+        with_load_guard(&state, &session_id, &source_path, request, |_flag| {
             let (messages, parse_warning_count, token_totals) =
                 load_messages_cached(&state, &meta)?;
             if load_cancel::is_canceled() {
@@ -144,6 +149,7 @@ pub async fn get_session_open_window(
     offset: i64,
     limit: usize,
     request_id: Option<String>,
+    request_seq: Option<u64>,
     state: State<'_, AppState>,
 ) -> CommandResult<SessionOpenWindow> {
     let state = state.inner().clone();
@@ -154,7 +160,10 @@ pub async fn get_session_open_window(
             &state,
             &session_id,
             &source_path,
-            request_id.as_deref(),
+            LoadRequest {
+                id: request_id.as_deref(),
+                seq: request_seq,
+            },
             |_flag| {
                 // Same tail fast path as `get_session_messages_window`, but the
                 // token totals are also reflected into the returned metadata so
@@ -195,6 +204,7 @@ pub async fn get_session_messages_window(
     offset: i64,
     limit: usize,
     request_id: Option<String>,
+    request_seq: Option<u64>,
     state: State<'_, AppState>,
 ) -> CommandResult<SessionMessagesWindow> {
     let state = state.inner().clone();
@@ -205,7 +215,10 @@ pub async fn get_session_messages_window(
             &state,
             &session_id,
             &source_path,
-            request_id.as_deref(),
+            LoadRequest {
+                id: request_id.as_deref(),
+                seq: request_seq,
+            },
             |_flag| {
                 // Fast path: when the frontend asks for a tail-of-file window
                 // (negative offset) and the cache hasn't seen this session yet,
@@ -242,6 +255,7 @@ pub async fn get_session_messages_window(
 #[tauri::command]
 pub async fn get_session_turn_outline(
     session_id: String,
+    request_seq: Option<u64>,
     state: State<'_, AppState>,
 ) -> CommandResult<Vec<SessionTurnOutlineEntry>> {
     let state = state.inner().clone();
@@ -255,7 +269,11 @@ pub async fn get_session_turn_outline(
         // session doesn't need to cancel this either; a stale result is
         // discarded by the frontend version check.
         let outline_guard_key = format!("{session_id}#outline");
-        with_load_guard(&state, &outline_guard_key, &source_path, None, |_flag| {
+        let request = LoadRequest {
+            id: None,
+            seq: request_seq,
+        };
+        with_load_guard(&state, &outline_guard_key, &source_path, request, |_flag| {
             let (messages, _, _) = load_messages_cached(&state, &meta)?;
             if load_cancel::is_canceled() {
                 return Err(canceled_error());

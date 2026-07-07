@@ -19,7 +19,8 @@ import type {
 } from "@/lib/types";
 
 /// Sentinel returned by the backend when a load was cancelled mid-flight.
-/// Frontend treats this as silent — no toast, no error UI.
+/// Callers decide what it means: silence when a newer load superseded the
+/// request, retry/error when the canceled request was still the current one.
 const LOAD_CANCELED_SENTINEL = "__cc_session_load_canceled__";
 
 export function isLoadCanceledError(err: unknown): boolean {
@@ -29,6 +30,17 @@ export function isLoadCanceledError(err: unknown): boolean {
       ? err
       : ((err as { message?: string }).message ?? "");
   return msg.includes(LOAD_CANCELED_SENTINEL);
+}
+
+/// Monotonic sequence attached to every session-load command. Backend task
+/// scheduling does not preserve invoke order, so the load guard uses this —
+/// not registration order — to decide which of two concurrent loads for the
+/// same session is newer (the older one is canceled, never the reverse).
+let loadRequestSeq = 0;
+
+function nextLoadRequestSeq(): number {
+  loadRequestSeq += 1;
+  return loadRequestSeq;
 }
 
 export interface SessionMessagesWindow {
@@ -121,18 +133,33 @@ type BackendCommandMap = {
     number
   >;
   get_tree: CommandSpec<undefined, TreeNode[]>;
-  get_session_detail: CommandSpec<{ sessionId: string }, SessionDetail>;
+  get_session_detail: CommandSpec<
+    { sessionId: string; requestSeq: number },
+    SessionDetail
+  >;
   get_session_meta: CommandSpec<{ sessionId: string }, SessionMeta>;
   get_session_open_window: CommandSpec<
-    { sessionId: string; offset: number; limit: number; requestId?: string },
+    {
+      sessionId: string;
+      offset: number;
+      limit: number;
+      requestId?: string;
+      requestSeq: number;
+    },
     SessionOpenWindow
   >;
   get_session_messages_window: CommandSpec<
-    { sessionId: string; offset: number; limit: number; requestId?: string },
+    {
+      sessionId: string;
+      offset: number;
+      limit: number;
+      requestId?: string;
+      requestSeq: number;
+    },
     SessionMessagesWindow
   >;
   get_session_turn_outline: CommandSpec<
-    { sessionId: string },
+    { sessionId: string; requestSeq: number },
     SessionTurnOutlineEntry[]
   >;
   cancel_session_load: CommandSpec<
@@ -232,7 +259,10 @@ export async function getTree(): Promise<TreeNode[]> {
 export async function getSessionDetail(
   sessionId: string,
 ): Promise<SessionDetail> {
-  return invokeCommand("get_session_detail", { sessionId });
+  return invokeCommand("get_session_detail", {
+    sessionId,
+    requestSeq: nextLoadRequestSeq(),
+  });
 }
 
 /// Fetch session metadata plus the initial message window in one IPC.
@@ -247,6 +277,7 @@ export async function getSessionOpenWindow(
     offset,
     limit,
     ...(requestId ? { requestId } : {}),
+    requestSeq: nextLoadRequestSeq(),
   });
 }
 
@@ -263,6 +294,7 @@ export async function getSessionMessagesWindow(
     offset,
     limit,
     ...(requestId ? { requestId } : {}),
+    requestSeq: nextLoadRequestSeq(),
   });
 }
 
@@ -271,6 +303,7 @@ export async function getSessionTurnOutline(
 ): Promise<SessionTurnOutlineEntry[]> {
   return invokeCommand("get_session_turn_outline", {
     sessionId,
+    requestSeq: nextLoadRequestSeq(),
   });
 }
 

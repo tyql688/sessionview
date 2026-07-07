@@ -1,5 +1,75 @@
-use super::{build_session_turn_outline, session_window_bounds, subagent_meta_title};
+use std::collections::HashMap;
+use std::sync::atomic::Ordering;
+use std::sync::Mutex;
+
+use super::{
+    build_session_turn_outline, session_window_bounds, subagent_meta_title, CancelFlagGuard,
+    LoadRequest,
+};
+use crate::commands::LoadToken;
 use crate::models::{Message, MessageRole};
+
+fn request(id: &str, seq: u64) -> LoadRequest<'_> {
+    LoadRequest {
+        id: Some(id),
+        seq: Some(seq),
+    }
+}
+
+fn is_tripped(guard: &CancelFlagGuard<'_>) -> bool {
+    guard.flag().load(Ordering::Relaxed) != 0
+}
+
+#[test]
+fn guard_newer_seq_supersedes_registered_older_load() {
+    let tokens = Mutex::new(HashMap::<String, LoadToken>::new());
+
+    let older = CancelFlagGuard::new(&tokens, "s1", request("s1:open:1", 1));
+    let newer = CancelFlagGuard::new(&tokens, "s1", request("s1:open:2", 2));
+
+    assert!(is_tripped(&older), "older in-flight load must be canceled");
+    assert!(!is_tripped(&newer), "newer load must keep running");
+}
+
+#[test]
+fn guard_stale_seq_registering_late_yields_instead_of_canceling_newer() {
+    let tokens = Mutex::new(HashMap::<String, LoadToken>::new());
+
+    // Task scheduling inversion: the newer request (seq 2) registers first,
+    // then the older request's blocking task (seq 1) starts late.
+    let newer = CancelFlagGuard::new(&tokens, "s1", request("s1:open:2", 2));
+    let stale = CancelFlagGuard::new(&tokens, "s1", request("s1:open:1", 1));
+
+    assert!(!is_tripped(&newer), "current load must NOT be canceled");
+    assert!(
+        is_tripped(&stale),
+        "late stale load must start pre-canceled"
+    );
+
+    // The stale guard never owned the map entry: dropping it must leave the
+    // newer token in place so explicit cancel-by-request-id still finds it.
+    drop(stale);
+    let map = tokens.lock().unwrap();
+    assert_eq!(
+        map.get("s1").and_then(|t| t.request_id.as_deref()),
+        Some("s1:open:2")
+    );
+}
+
+#[test]
+fn guard_without_seq_keeps_replace_semantics_and_drop_cleans_own_entry() {
+    let tokens = Mutex::new(HashMap::<String, LoadToken>::new());
+
+    let first = CancelFlagGuard::new(&tokens, "s1", LoadRequest::default());
+    let second = CancelFlagGuard::new(&tokens, "s1", LoadRequest::default());
+    assert!(is_tripped(&first), "seq-less loads keep replace-previous");
+    assert!(!is_tripped(&second));
+
+    drop(first); // replaced entry: must not remove the second's token
+    assert!(tokens.lock().unwrap().contains_key("s1"));
+    drop(second);
+    assert!(tokens.lock().unwrap().is_empty());
+}
 
 #[test]
 fn session_window_bounds_negative_offset_uses_tail_window() {

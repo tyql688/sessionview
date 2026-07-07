@@ -164,7 +164,6 @@ export function SessionView(props: {
   useEffect(() => {
     const sessionId = props.session.id;
     const version = ++loadVersionRef.current;
-    const requestId = `${sessionId}:open:${version}`;
     const previousRequest = activeOpenRequestRef.current;
     if (previousRequest && previousRequest.sessionId !== sessionId) {
       void cancelSessionLoad(
@@ -174,7 +173,6 @@ export function SessionView(props: {
         console.warn("cancelSessionLoad failed:", err);
       });
     }
-    activeOpenRequestRef.current = { sessionId, requestId };
 
     setLoading(true);
     setError(null);
@@ -186,30 +184,55 @@ export function SessionView(props: {
 
     void (async () => {
       try {
-        // Initial open fetches meta + newest tail together so one backend
-        // load guard owns the parse and one IPC hydrates the view.
-        const open = await getSessionOpenWindow(
-          sessionId,
-          -INITIAL_TAIL,
-          INITIAL_TAIL,
-          requestId,
-        );
-        if (version !== loadVersionRef.current) return;
-        const tail = open.window;
-        setMeta(open.meta);
-        setMessages(tail.messages);
-        setParseWarningCount(tail.parse_warning_count ?? 0);
-        setTotalMessages(tail.total);
-        setWindowStart(tail.start);
-        void refreshOutline(sessionId, version);
-      } catch (e) {
-        if (version !== loadVersionRef.current) return;
-        if (isLoadCanceledError(e)) return; // user navigated away
-        setError(errorMessage(e));
-      } finally {
-        if (activeOpenRequestRef.current?.requestId === requestId) {
-          activeOpenRequestRef.current = null;
+        for (let attempt = 0; ; attempt++) {
+          const requestId =
+            `${sessionId}:open:${version}` +
+            (attempt ? `:retry${attempt}` : "");
+          activeOpenRequestRef.current = { sessionId, requestId };
+          try {
+            // Initial open fetches meta + newest tail together so one backend
+            // load guard owns the parse and one IPC hydrates the view.
+            const open = await getSessionOpenWindow(
+              sessionId,
+              -INITIAL_TAIL,
+              INITIAL_TAIL,
+              requestId,
+            );
+            if (version !== loadVersionRef.current) return;
+            const tail = open.window;
+            setMeta(open.meta);
+            setMessages(tail.messages);
+            setParseWarningCount(tail.parse_warning_count ?? 0);
+            setTotalMessages(tail.total);
+            setWindowStart(tail.start);
+            void refreshOutline(sessionId, version);
+            return;
+          } catch (e) {
+            // Superseded: a newer load owns the view now — stay silent.
+            if (version !== loadVersionRef.current) return;
+            if (isLoadCanceledError(e)) {
+              // Canceled while still the CURRENT load: nothing legitimately
+              // superseded it, so silently returning would strand an empty
+              // view. Retry once (a lost cancel race resolves instantly
+              // against the warm cache), then surface the failure.
+              if (attempt === 0) {
+                console.warn(
+                  `current open request for ${sessionId} was canceled; retrying`,
+                );
+                continue;
+              }
+              setError(t("session.loadInterrupted"));
+              return;
+            }
+            setError(errorMessage(e));
+            return;
+          } finally {
+            if (activeOpenRequestRef.current?.requestId === requestId) {
+              activeOpenRequestRef.current = null;
+            }
+          }
         }
+      } finally {
         if (version === loadVersionRef.current) setLoading(false);
       }
     })();

@@ -73,6 +73,9 @@ const cancelSessionLoadCalls: Array<{
 }> = [];
 const canceledOpenRequestIds = new Set<string>();
 const latestOpenRequestBySession = new Map<string, string>();
+// When > 0, the next open-window calls fail with the cancel sentinel —
+// simulates a lost backend cancel race against the CURRENT request.
+let cancelNextOpenCalls = 0;
 
 function tokenTotals() {
   return {
@@ -95,6 +98,10 @@ vi.mock("@tauri-apps/api/core", () => ({
           if (requestId) latestOpenRequestBySession.set(sessionId, requestId);
           await new Promise((resolve) => setTimeout(resolve, 5));
           if (requestId && canceledOpenRequestIds.has(requestId)) {
+            throw LOAD_CANCELED_SENTINEL;
+          }
+          if (cancelNextOpenCalls > 0) {
+            cancelNextOpenCalls -= 1;
             throw LOAD_CANCELED_SENTINEL;
           }
         }
@@ -226,6 +233,7 @@ beforeEach(async () => {
   cancelSessionLoadCalls.length = 0;
   canceledOpenRequestIds.clear();
   latestOpenRequestBySession.clear();
+  cancelNextOpenCalls = 0;
 });
 
 describe("SessionView smoke", () => {
@@ -279,16 +287,43 @@ describe("SessionView smoke", () => {
     await waitFor(() =>
       expect(openWindowCalls.length).toBeGreaterThanOrEqual(2),
     );
-    const latestRequestId = openWindowCalls[openWindowCalls.length - 1]
-      ?.requestId;
+    const latestRequestId =
+      openWindowCalls[openWindowCalls.length - 1]?.requestId;
     expect(typeof latestRequestId).toBe("string");
     expect(cancelSessionLoadCalls.length).toBeGreaterThan(0);
     expect(cancelSessionLoadCalls.every((call) => call.requestId)).toBe(true);
     expect(
-      cancelSessionLoadCalls.some(
-        (call) => call.requestId === latestRequestId,
-      ),
+      cancelSessionLoadCalls.some((call) => call.requestId === latestRequestId),
     ).toBe(false);
+  });
+
+  it("retries once instead of blanking when the current open is canceled", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    cancelNextOpenCalls = 1;
+
+    const { findByText } = render(
+      <SessionView
+        session={{
+          id: META.id,
+          provider: "claude",
+          title: META.title,
+          project_name: "smoke",
+          is_sidechain: false,
+          source_path: META.source_path,
+          project_path: META.project_path,
+        }}
+        active={true}
+        onRefreshTree={() => {}}
+        onCloseTab={() => {}}
+      />,
+    );
+
+    // The lost cancel race must not strand an empty "no messages" view —
+    // the retry hydrates the timeline.
+    expect(await findByText("Hello there")).toBeInTheDocument();
+    expect(openWindowCalls.length).toBe(2);
+    expect(String(openWindowCalls[1]?.requestId)).toContain(":retry");
+    warnSpy.mockRestore();
   });
 
   it("loads older user messages when in-session search misses the initial tail", async () => {
