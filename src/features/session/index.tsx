@@ -41,6 +41,16 @@ import {
   INITIAL_TAIL,
 } from "@/features/session/createSessionPagination";
 
+/** Each role keeps its own pressed color so the filter reads at a glance. */
+const ROLE_TOGGLE_COLORS: Record<MessageRole, string> = {
+  user: "data-pressed:bg-brand-soft data-pressed:text-brand",
+  assistant:
+    "data-pressed:bg-[color-mix(in_srgb,var(--success)_12%,transparent)] data-pressed:text-success",
+  tool: "data-pressed:bg-[color-mix(in_srgb,var(--text-warning)_14%,transparent)] data-pressed:text-warning",
+  system:
+    "data-pressed:bg-[color-mix(in_srgb,#8b5cf6_12%,transparent)] data-pressed:text-[#8b5cf6]",
+};
+
 export function SessionView(props: {
   session: SessionRef;
   active: boolean;
@@ -393,7 +403,7 @@ export function SessionView(props: {
               <ToggleGroupItem
                 key={role}
                 value={role}
-                className="gap-1.5 text-muted-foreground data-pressed:bg-brand-soft data-pressed:text-brand"
+                className={`gap-1.5 text-muted-foreground ${ROLE_TOGGLE_COLORS[role]}`}
               >
                 {role === "user"
                   ? t("session.filterUser")

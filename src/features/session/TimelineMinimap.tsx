@@ -30,6 +30,26 @@ function anchorFor(scroller: HTMLElement, ordinal: number): HTMLElement | null {
   return scroller.querySelector<HTMLElement>(`[data-turn="${ordinal}"]`);
 }
 
+/** DOM anchors per ordinal, resolved once per content change instead of per
+ * scroll frame — 32 querySelector calls per frame showed up in traces. The
+ * cache only stores found elements; missing ordinals stay re-resolvable
+ * (their turns may enter the rendered window later). Detached elements are
+ * re-resolved too (windowed loading swaps rows). */
+class AnchorCache {
+  private map = new Map<number, HTMLElement>();
+
+  constructor(private scroller: HTMLElement) {}
+
+  get(ordinal: number): HTMLElement | null {
+    const cached = this.map.get(ordinal);
+    if (cached?.isConnected) return cached;
+    this.map.delete(ordinal);
+    const found = anchorFor(this.scroller, ordinal);
+    if (found) this.map.set(ordinal, found);
+    return found;
+  }
+}
+
 /** Evenly sample the outline down to `maxTicks` entries, always keeping the
  * first and last turns. */
 export function sampleOutline(
@@ -54,10 +74,11 @@ export function sampleOutline(
 function anchorOffsets(
   scroller: HTMLElement,
   turns: SessionTurnOutlineEntry[],
+  anchors: AnchorCache,
 ): number[] {
   const scrollerTop = scroller.getBoundingClientRect().top;
   return turns.map((turn) => {
-    const anchor = anchorFor(scroller, turn.ordinal);
+    const anchor = anchors.get(turn.ordinal);
     if (!anchor) return Number.POSITIVE_INFINITY;
     return (
       anchor.getBoundingClientRect().top - scrollerTop + scroller.scrollTop
@@ -75,6 +96,21 @@ export function currentTickFromOffsets(
   offsets: number[],
   scrollTop: number,
 ): number {
+  // column-reverse pins scrollTop to 0 at the BOTTOM (latest messages) —
+  // that state means "at the newest turn", so point at the last tick that
+  // has a rendered anchor instead of running the top-anchor scan (which
+  // degenerates to the first tick when every anchor sits inside/below the
+  // viewport).
+  if (Math.abs(scrollTop) < 4) {
+    for (let i = offsets.length - 1; i >= 0; i -= 1) {
+      const offset = offsets[i];
+      if (offset !== undefined && offset !== Number.POSITIVE_INFINITY) {
+        return i;
+      }
+    }
+    return Math.max(0, offsets.length - 1);
+  }
+
   let current = 0;
   for (let i = 0; i < offsets.length; i += 1) {
     const offset = offsets[i];
@@ -100,10 +136,11 @@ export function TimelineMinimap(props: MinimapProps) {
 
     let frame = 0;
     let quiet: ReturnType<typeof setTimeout> | undefined;
+    const anchors = new AnchorCache(scroller);
 
     const measure = () =>
       currentTickFromOffsets(
-        anchorOffsets(scroller, turns),
+        anchorOffsets(scroller, turns, anchors),
         scroller.scrollTop,
       );
 
@@ -119,11 +156,30 @@ export function TimelineMinimap(props: MinimapProps) {
       if (frame === 0) frame = requestAnimationFrame(update);
     };
 
+    // Re-measure when the content grows/shrinks (lazy Markdown, windowed
+    // loading): on first open the bubbles mount asynchronously, so a single
+    // mount-time measure finds no anchors and the strip points at the top
+    // until the first scroll. The observer fires as rows stream in and the
+    // active tick settles on the latest turn without user input.
+    const remeasure = () => {
+      if (frame === 0) frame = requestAnimationFrame(update);
+    };
+    const observer = new ResizeObserver(remeasure);
+    for (const child of scroller.children) observer.observe(child);
+    const childWatcher = new MutationObserver(() => {
+      observer.disconnect();
+      for (const child of scroller.children) observer.observe(child);
+      remeasure();
+    });
+    childWatcher.observe(scroller, { childList: true });
+
     setActive(measure());
     scroller.addEventListener("scroll", onScroll, { passive: true });
 
     return () => {
       scroller.removeEventListener("scroll", onScroll);
+      observer.disconnect();
+      childWatcher.disconnect();
       if (frame !== 0) cancelAnimationFrame(frame);
       clearTimeout(quiet);
     };
