@@ -106,8 +106,7 @@
   "export": {
     "title": "导出会话",
     "json": "JSON",
-    "markdown": "Markdown",
-    "html": "HTML"
+    "markdown": "Markdown"
   },
   "inputDialog": {
     "newTitle": "新标题：",
@@ -123,7 +122,8 @@
     "indexed": "已索引",
     "sessions": "个会话",
     "providers": "个提供商",
-    "lastScan": "上次扫描",
+    "lastUpdate": "上次更新",
+    "nextUpdate": "下次更新",
     "justNow": "刚刚",
     "indexing": "索引中...",
     "themeLight": "浅色",
@@ -201,6 +201,12 @@
     "clearIndex": "清除索引",
     "totalSessions": "总会话数",
     "dbSize": "数据库大小",
+    "autoIndexInterval": "自动更新索引",
+    "autoIndexIntervalDesc": "启动后按所选间隔在后台重建索引；如果已有维护任务，会跳过本轮。",
+    "autoIndexEvery5m": "每 5 分钟",
+    "autoIndexEvery10m": "每 10 分钟",
+    "autoIndexEvery30m": "每 30 分钟",
+    "autoIndexStartupOnly": "仅启动更新",
     "version": "版本",
     "openInFinder": "在 Finder 中打开",
     "github": "GitHub",
@@ -224,6 +230,16 @@
     "blockedFolders": "屏蔽文件夹",
     "noBlockedFolders": "无屏蔽文件夹",
     "unblock": "取消屏蔽"
+  },
+  "updater": {
+    "updateAvailableTitle": "发现新版本 {version}",
+    "updateAvailableDescription": "可以现在下载并安装更新。安装完成后应用会重启。",
+    "downloadUpdate": "下载并安装",
+    "downloading": "下载中...",
+    "installing": "安装中...",
+    "later": "稍后",
+    "updateFailedTitle": "更新失败",
+    "updateFailedDescription": "更新下载或安装失败。可以稍后重试。"
   },
   "system": {
     "turnDuration": "Turn",

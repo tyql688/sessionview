@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Message } from "@/lib/types";
@@ -110,6 +110,58 @@ describe("MessageBubble", () => {
       />,
     );
 
+    expect(markdownMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["[turn_duration] 1.5s, 6 messages", "1.5s, 6 messages"],
+    ["[stop_hook_summary] 2 hooks: lint (120ms), test (340ms)", "2 hooks: lint (120ms), test (340ms)"],
+  ])("renders %s as a collapsed system disclosure", (content, detail) => {
+    const { container } = render(
+      <MessageBubble
+        message={message({
+          role: "system",
+          content,
+        })}
+      />,
+    );
+
+    const toggle = container.querySelector<HTMLButtonElement>(".msg-system-toggle");
+    expect(toggle).not.toBeNull();
+    if (!toggle) throw new Error("missing system disclosure toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveTextContent(detail);
+    expect(container.querySelector(".msg-system-body")).toBeNull();
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(container.querySelector(".msg-system-body")?.textContent).toBe(detail);
+    expect(markdownMock).not.toHaveBeenCalled();
+  });
+
+  it("hides context compacted content until expanded", () => {
+    const detail = "very long compacted context\nwith more retained conversation details";
+    const { container } = render(
+      <MessageBubble
+        message={message({
+          role: "system",
+          content: `[context_compacted]\n${detail}`,
+        })}
+      />,
+    );
+
+    const toggle = container.querySelector<HTMLButtonElement>(".msg-system-toggle");
+    expect(toggle).not.toBeNull();
+    if (!toggle) throw new Error("missing context compacted toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).not.toHaveTextContent(detail);
+    expect(container.querySelector(".msg-system-body")).toBeNull();
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(container.querySelector(".msg-system-body")?.textContent).toBe(detail);
     expect(markdownMock).not.toHaveBeenCalled();
   });
 

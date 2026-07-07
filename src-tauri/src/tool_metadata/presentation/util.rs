@@ -231,14 +231,52 @@ pub(super) fn split_patch_payload_lines(text: &str) -> Vec<&str> {
     }
 }
 
+#[derive(Clone, Copy)]
+struct PatchLineCursor {
+    old_line: Option<u32>,
+    new_line: Option<u32>,
+}
+
+fn parse_hunk_start(token: &str) -> Option<u32> {
+    token.split(',').next()?.parse().ok()
+}
+
+fn parse_unified_hunk_header(line: &str) -> Option<PatchLineCursor> {
+    let rest = line.strip_prefix("@@")?.trim_start();
+    let rest = rest.strip_prefix('-')?;
+    let (old_part, rest) = rest.split_once(char::is_whitespace)?;
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix('+')?;
+    let new_part = rest.split_whitespace().next()?;
+    Some(PatchLineCursor {
+        old_line: parse_hunk_start(old_part),
+        new_line: parse_hunk_start(new_part),
+    })
+}
+
 pub(super) fn build_patch_line_diff(patch_text: &str) -> Vec<ToolDiffLine> {
     let mut lines = Vec::new();
+    let mut cursor = PatchLineCursor {
+        old_line: None,
+        new_line: None,
+    };
     for raw_line in patch_text.lines() {
         if raw_line == "*** Begin Patch" || raw_line == "*** End Patch" || raw_line.is_empty() {
             continue;
         }
 
         if raw_line.starts_with("*** ") || raw_line.starts_with("@@") {
+            cursor = if raw_line.starts_with("@@") {
+                parse_unified_hunk_header(raw_line).unwrap_or(PatchLineCursor {
+                    old_line: None,
+                    new_line: None,
+                })
+            } else {
+                PatchLineCursor {
+                    old_line: None,
+                    new_line: None,
+                }
+            };
             push_diff_line(
                 &mut lines,
                 ToolDiffLineType::Skip,
@@ -247,11 +285,33 @@ pub(super) fn build_patch_line_diff(patch_text: &str) -> Vec<ToolDiffLine> {
                 None,
             );
         } else if let Some(rest) = raw_line.strip_prefix('+') {
-            push_diff_line(&mut lines, ToolDiffLineType::Add, rest, None, None);
+            push_diff_line(
+                &mut lines,
+                ToolDiffLineType::Add,
+                rest,
+                None,
+                cursor.new_line,
+            );
+            increment_line(&mut cursor.new_line);
         } else if let Some(rest) = raw_line.strip_prefix('-') {
-            push_diff_line(&mut lines, ToolDiffLineType::Remove, rest, None, None);
+            push_diff_line(
+                &mut lines,
+                ToolDiffLineType::Remove,
+                rest,
+                cursor.old_line,
+                None,
+            );
+            increment_line(&mut cursor.old_line);
         } else if let Some(rest) = raw_line.strip_prefix(' ') {
-            push_diff_line(&mut lines, ToolDiffLineType::Context, rest, None, None);
+            push_diff_line(
+                &mut lines,
+                ToolDiffLineType::Context,
+                rest,
+                cursor.old_line,
+                cursor.new_line,
+            );
+            increment_line(&mut cursor.old_line);
+            increment_line(&mut cursor.new_line);
         } else {
             push_diff_line(&mut lines, ToolDiffLineType::Skip, raw_line, None, None);
         }
@@ -409,5 +469,37 @@ pub(super) fn value_to_display_string(value: &Value) -> String {
                 .join(", ")
         }
         Value::Null => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_patch_line_diff_derives_line_numbers_from_unified_hunks() {
+        let lines = build_patch_line_diff(
+            r#"*** Begin Patch
+*** Update File: src/app.ts
+@@ -12,2 +12,3 @@
+ const same = true;
+-const oldValue = 1;
++const newValue = 2;
++const extra = true;
+*** End Patch
+"#,
+        );
+
+        assert_eq!(lines[2].kind, ToolDiffLineType::Context);
+        assert_eq!(lines[2].old_line, Some(12));
+        assert_eq!(lines[2].new_line, Some(12));
+        assert_eq!(lines[3].kind, ToolDiffLineType::Remove);
+        assert_eq!(lines[3].old_line, Some(13));
+        assert_eq!(lines[3].new_line, None);
+        assert_eq!(lines[4].kind, ToolDiffLineType::Add);
+        assert_eq!(lines[4].old_line, None);
+        assert_eq!(lines[4].new_line, Some(13));
+        assert_eq!(lines[5].kind, ToolDiffLineType::Add);
+        assert_eq!(lines[5].new_line, Some(14));
     }
 }

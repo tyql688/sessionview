@@ -91,7 +91,10 @@ export function DatePicker(props: DatePickerProps) {
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner className="isolate z-50" side="bottom" align="start" sideOffset={6}>
-          <Popover.Popup className="usage-date-popover" initialFocus={false}>
+          <Popover.Popup
+            className="usage-date-popover duration-100 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:fill-mode-forwards data-closed:zoom-out-95"
+            initialFocus={false}
+          >
             <div className="usage-date-popover-head">
               <button
                 className="usage-date-nav"
@@ -126,19 +129,19 @@ export function DatePicker(props: DatePickerProps) {
               {days.map((day) => {
                 const selected = day.iso === props.value;
                 return (
-                  <button
+                  <Popover.Close
                     key={day.iso}
+                    render={<button />}
                     className={cn("usage-date-day", !day.currentMonth && "is-outside", selected && "is-selected")}
                     type="button"
                     aria-pressed={selected}
                     disabled={isDisabled(day.iso)}
                     onClick={() => {
                       props.onChange(day.iso);
-                      setOpen(false);
                     }}
                   >
                     {day.date.getDate()}
-                  </button>
+                  </Popover.Close>
                 );
               })}
             </div>

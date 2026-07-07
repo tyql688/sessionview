@@ -22,6 +22,11 @@ export function createSyncManager(callbacks: SyncCallbacks) {
   let syncInFlight = false;
   let pendingFullSync = false;
 
+  function maintenanceErrorMessage(error: unknown): string {
+    const message = String(error);
+    return message.includes("maintenance task already running") ? i18next.t("toast.maintenanceBusy") : message;
+  }
+
   async function refreshTree() {
     const [treeData, count] = await Promise.all([getTree(), getSessionCount()]);
     callbacks.setTree(treeData);
@@ -48,7 +53,7 @@ export function createSyncManager(callbacks: SyncCallbacks) {
       await reindex();
       await refreshTree();
     } catch (e) {
-      toastError(String(e));
+      toastError(maintenanceErrorMessage(e));
     } finally {
       syncInFlight = false;
       if (showSpinner) {
@@ -76,7 +81,7 @@ export function createSyncManager(callbacks: SyncCallbacks) {
       await reindexProviders(providers, true);
       await refreshTree();
     } catch (e) {
-      toastError(String(e));
+      toastError(maintenanceErrorMessage(e));
     } finally {
       syncInFlight = false;
       if (showSpinner) callbacks.setIsLoading(false);
@@ -143,7 +148,7 @@ export function createSyncManager(callbacks: SyncCallbacks) {
       await reindex();
       await refreshTree();
     } catch (e) {
-      toastError(String(e));
+      toastError(maintenanceErrorMessage(e));
     } finally {
       if (!cacheHit) callbacks.setIsLoading(false);
     }

@@ -106,8 +106,7 @@
   "export": {
     "title": "Export Session",
     "json": "JSON",
-    "markdown": "Markdown",
-    "html": "HTML"
+    "markdown": "Markdown"
   },
   "inputDialog": {
     "newTitle": "New title:",
@@ -123,7 +122,8 @@
     "indexed": "Indexed",
     "sessions": "sessions",
     "providers": "providers",
-    "lastScan": "Last scan",
+    "lastUpdate": "Last update",
+    "nextUpdate": "Next update",
     "justNow": "just now",
     "indexing": "Indexing...",
     "themeLight": "Light",
@@ -201,6 +201,12 @@
     "clearIndex": "Clear Index",
     "totalSessions": "Total Sessions",
     "dbSize": "Database Size",
+    "autoIndexInterval": "Auto-update Index",
+    "autoIndexIntervalDesc": "Rebuild the index in the background after startup at the selected interval. If maintenance is already running, that cycle is skipped.",
+    "autoIndexEvery5m": "Every 5 minutes",
+    "autoIndexEvery10m": "Every 10 minutes",
+    "autoIndexEvery30m": "Every 30 minutes",
+    "autoIndexStartupOnly": "Startup only",
     "version": "Version",
     "openInFinder": "Open in Finder",
     "github": "GitHub",
@@ -224,6 +230,16 @@
     "blockedFolders": "Blocked Folders",
     "noBlockedFolders": "No blocked folders",
     "unblock": "Unblock"
+  },
+  "updater": {
+    "updateAvailableTitle": "Version {version} is available",
+    "updateAvailableDescription": "Download and install the update now. The app will relaunch after installation.",
+    "downloadUpdate": "Download and install",
+    "downloading": "Downloading...",
+    "installing": "Installing...",
+    "later": "Later",
+    "updateFailedTitle": "Update failed",
+    "updateFailedDescription": "The update could not be downloaded or installed. You can try again later."
   },
   "system": {
     "turnDuration": "Turn",

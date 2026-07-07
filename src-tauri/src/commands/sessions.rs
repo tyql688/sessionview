@@ -50,12 +50,22 @@ pub struct SessionOpenWindow {
 
 #[tauri::command]
 pub async fn reindex(state: State<'_, AppState>) -> CommandResult<usize> {
+    use std::sync::atomic::Ordering;
+
     let state = state.inner().clone();
-    let count = tokio::task::spawn_blocking(move || state.indexer.reindex())
-        .await
-        .context("task join error")?
-        .map_err(CommandError::from)?;
-    Ok(count)
+    if state.maintenance_running.swap(true, Ordering::SeqCst) {
+        return Err(CommandError::from(anyhow!(
+            "maintenance task already running"
+        )));
+    }
+
+    let worker_state = state.clone();
+    let result = match tokio::task::spawn_blocking(move || worker_state.indexer.reindex()).await {
+        Ok(result) => result.map_err(CommandError::from),
+        Err(error) => Err(CommandError::from(anyhow!("task join error: {error:#}"))),
+    };
+    state.maintenance_running.store(false, Ordering::SeqCst);
+    result
 }
 
 #[tauri::command]
@@ -64,8 +74,17 @@ pub async fn reindex_providers(
     aggressive: Option<bool>,
     state: State<'_, AppState>,
 ) -> CommandResult<usize> {
+    use std::sync::atomic::Ordering;
+
     let state = state.inner().clone();
-    let count = tokio::task::spawn_blocking(move || {
+    if state.maintenance_running.swap(true, Ordering::SeqCst) {
+        return Err(CommandError::from(anyhow!(
+            "maintenance task already running"
+        )));
+    }
+
+    let worker_state = state.clone();
+    let result = match tokio::task::spawn_blocking(move || {
         let filter: Vec<crate::models::Provider> = providers
             .iter()
             .filter_map(|s| crate::models::Provider::parse(s))
@@ -73,14 +92,17 @@ pub async fn reindex_providers(
         if filter.is_empty() {
             return Ok(0);
         }
-        state
+        worker_state
             .indexer
             .reindex_providers(Some(&filter), aggressive.unwrap_or(false))
     })
     .await
-    .context("task join error")?
-    .map_err(CommandError::from)?;
-    Ok(count)
+    {
+        Ok(result) => result.map_err(CommandError::from),
+        Err(error) => Err(CommandError::from(anyhow!("task join error: {error:#}"))),
+    };
+    state.maintenance_running.store(false, Ordering::SeqCst);
+    result
 }
 
 #[tauri::command]

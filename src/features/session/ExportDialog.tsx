@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import type { SessionMeta } from "@/lib/types";
 import { exportSession } from "@/lib/tauri";
@@ -10,12 +10,11 @@ import { useI18n } from "@/i18n/index";
 import { toast, toastError } from "@/stores/toast";
 import { errorMessage } from "@/lib/errors";
 
-type ExportFormat = "json" | "markdown" | "html";
+type ExportFormat = "json" | "markdown";
 
 const FORMAT_OPTIONS: { value: ExportFormat; labelKey: string; ext: string }[] = [
   { value: "json", labelKey: "export.json", ext: "json" },
   { value: "markdown", labelKey: "export.markdown", ext: "md" },
-  { value: "html", labelKey: "export.html", ext: "html" },
 ];
 
 export function ExportDialog(props: { open: boolean; session: SessionMeta; onClose: () => void }) {
@@ -23,9 +22,16 @@ export function ExportDialog(props: { open: boolean; session: SessionMeta; onClo
   const [format, setFormat] = useState<ExportFormat>("json");
   const [exporting, setExporting] = useState(false);
 
+  useLayoutEffect(() => {
+    if (props.open) {
+      setExporting(false);
+    }
+  }, [props.open]);
+
   async function handleExport() {
     const selected = FORMAT_OPTIONS.find((f) => f.value === format);
     if (!selected) return;
+    let closedAfterSuccess = false;
 
     try {
       const outputPath = await save({
@@ -37,12 +43,15 @@ export function ExportDialog(props: { open: boolean; session: SessionMeta; onClo
 
       setExporting(true);
       await exportSession(props.session.id, selected.value, outputPath);
+      closedAfterSuccess = true;
       props.onClose();
       toast(t("toast.exportOk"));
     } catch (e) {
       toastError(errorMessage(e));
     } finally {
-      setExporting(false);
+      if (!closedAfterSuccess) {
+        setExporting(false);
+      }
     }
   }
 
@@ -58,11 +67,11 @@ export function ExportDialog(props: { open: boolean; session: SessionMeta; onClo
           <DialogTitle>{t("export.title")}</DialogTitle>
         </DialogHeader>
         <ToggleGroup
-          className="grid w-full grid-cols-3 gap-2"
+          className="grid w-full grid-cols-2 gap-2"
           value={[format]}
           onValueChange={(next) => {
             const value = next[0];
-            if (value === "json" || value === "markdown" || value === "html") {
+            if (value === "json" || value === "markdown") {
               setFormat(value);
             }
           }}
@@ -85,9 +94,7 @@ export function ExportDialog(props: { open: boolean; session: SessionMeta; onClo
           ))}
         </ToggleGroup>
         <DialogFooter>
-          <Button variant="outline" onClick={props.onClose}>
-            {t("confirm.cancel")}
-          </Button>
+          <DialogClose render={<Button variant="outline" disabled={exporting} />}>{t("confirm.cancel")}</DialogClose>
           <Button onClick={() => void handleExport()} disabled={exporting}>
             {exporting ? "..." : t("session.export")}
           </Button>

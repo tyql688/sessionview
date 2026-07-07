@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/i18n/index";
 import { startRefreshUsage, refreshPricingCatalog } from "@/lib/tauri";
 import {
@@ -59,6 +59,11 @@ export function UsagePanel() {
   const [hoveredDate, setHoveredDate] = useState<string | null>(null);
   const [showClearUsageConfirm, setShowClearUsageConfirm] = useState(false);
   const [isRefreshingPricing, setIsRefreshingPricing] = useState(false);
+  const [dailyUsageCard, setDailyUsageCard] = useState<HTMLElement | null>(null);
+  const [overviewCardHeight, setOverviewCardHeight] = useState<number | null>(null);
+  const setDailyUsageCardRef = useCallback((node: HTMLElement | null) => {
+    setDailyUsageCard(node);
+  }, []);
 
   const {
     scannedProviderSnapshots,
@@ -120,6 +125,27 @@ export function UsagePanel() {
   const fmtChartValue = makeFmtChartValue(() => chartMetric);
 
   const hoveredDaySummary = buildHoveredDaySummary(hoveredDate, dailyChartData, providerInfo);
+
+  useEffect(() => {
+    if (!dailyUsageCard) {
+      setOverviewCardHeight(null);
+      return;
+    }
+
+    const updateOverviewCardHeight = () => {
+      const next = Math.ceil(dailyUsageCard.getBoundingClientRect().height);
+      setOverviewCardHeight((current) => (current === next ? current : next));
+    };
+
+    updateOverviewCardHeight();
+    if (typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+
+    const observer = new ResizeObserver(updateOverviewCardHeight);
+    observer.observe(dailyUsageCard);
+    return () => observer.disconnect();
+  }, [dailyUsageCard]);
 
   async function handleRefreshUsage() {
     try {
@@ -209,6 +235,7 @@ export function UsagePanel() {
 
             <div className="usage-overview-grid">
               <Chart
+                cardRef={setDailyUsageCardRef}
                 dailyChartData={dailyChartData}
                 hoveredDate={hoveredDate}
                 setHoveredDate={setHoveredDate}
@@ -219,7 +246,12 @@ export function UsagePanel() {
                 fmtChartValue={fmtChartValue}
                 providerInfo={providerInfo}
               />
-              <TopModels topModels={topModels} maxTopModelCost={maxTopModelCost} formatModelName={formatModelName} />
+              <TopModels
+                topModels={topModels}
+                maxTopModelCost={maxTopModelCost}
+                formatModelName={formatModelName}
+                cardHeight={overviewCardHeight}
+              />
             </div>
 
             <ModelTable

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { readImageBase64 } from "@/lib/tauri";
 import { cachedLoad } from "@/lib/image-cache";
 import { shortenHomePath } from "@/lib/formatters";
@@ -155,7 +155,7 @@ export function ImagePreview(props: { src: string; source?: string; onClose: () 
         className="top-0 left-0 flex h-dvh w-dvw max-w-none translate-x-0 translate-y-0 items-center justify-center gap-0 rounded-none bg-transparent p-0 shadow-none ring-0 sm:max-w-none"
       >
         <DialogTitle className="sr-only">{t("common.image")}</DialogTitle>
-        <div className="image-preview-stage" onClick={props.onClose}>
+        <DialogClose render={<div className="image-preview-stage" />} nativeButton={false}>
           <img
             src={props.src}
             alt={t("common.image")}
@@ -171,17 +171,20 @@ export function ImagePreview(props: { src: string; source?: string; onClose: () 
               {labelImageSource(props.source, t)}
             </div>
           )}
-        </div>
-        <Button
-          variant="ghost"
-          size="icon-lg"
-          type="button"
-          className="image-preview-close active:translate-y-0"
-          aria-label={t("common.closePreview")}
-          onClick={props.onClose}
+        </DialogClose>
+        <DialogClose
+          render={
+            <Button
+              variant="ghost"
+              size="icon-lg"
+              type="button"
+              className="image-preview-close active:translate-y-0"
+              aria-label={t("common.closePreview")}
+            />
+          }
         >
           <XIcon className="size-5" aria-hidden="true" />
-        </Button>
+        </DialogClose>
       </DialogContent>
     </Dialog>
   );

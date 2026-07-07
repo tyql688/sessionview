@@ -21,26 +21,33 @@ const Markdown = lazy(() =>
   })),
 );
 
-const SYSTEM_SUBTYPE_CONFIG: Record<string, { icon: string; labelKey: string; cls: string }> = {
+const SYSTEM_SUBTYPE_CONFIG: Record<
+  string,
+  { icon: string; labelKey: string; cls: string; collapsible?: boolean; hideCollapsedDetail?: boolean }
+> = {
   turn_duration: {
     icon: "\u23F1",
     labelKey: "system.turnDuration",
     cls: "sys-duration",
+    collapsible: true,
   },
   compact_boundary: {
     icon: "\u2702",
     labelKey: "system.compact",
     cls: "sys-compact",
+    collapsible: true,
   },
   microcompact_boundary: {
     icon: "\u2702",
     labelKey: "system.microcompact",
     cls: "sys-compact",
+    collapsible: true,
   },
   stop_hook_summary: {
     icon: "\u2699",
     labelKey: "system.hooks",
     cls: "sys-hook",
+    collapsible: true,
   },
   api_error: { icon: "\u26A0", labelKey: "system.apiError", cls: "sys-error" },
   away_summary: {
@@ -64,6 +71,8 @@ const SYSTEM_SUBTYPE_CONFIG: Record<string, { icon: string; labelKey: string; cl
     icon: "\u2702",
     labelKey: "system.contextCompacted",
     cls: "sys-compact",
+    collapsible: true,
+    hideCollapsedDetail: true,
   },
 };
 
@@ -79,8 +88,8 @@ function SystemMessage(props: { content: string }) {
   }
 
   const detail = match[2].trim();
-  const collapsible = detail.includes("\n");
-  const summary = collapsible ? (detail.split("\n", 1)[0] ?? "") : detail;
+  const collapsible = detail.length > 0 && (config.collapsible === true || detail.includes("\n"));
+  const summary = collapsible && !config.hideCollapsedDetail ? (detail.split("\n", 1)[0] ?? "") : detail;
 
   if (!collapsible) {
     return (
@@ -105,7 +114,7 @@ function SystemMessage(props: { content: string }) {
       >
         <span className="sys-icon">{config.icon}</span>
         <span className="sys-label">{t(config.labelKey)}</span>
-        <span className="sys-detail">{expanded ? "" : summary}</span>
+        <span className="sys-detail">{expanded || config.hideCollapsedDetail ? "" : summary}</span>
         <span className={`sys-chevron${expanded ? " sys-chevron-open" : ""}`} aria-hidden="true">
           {"\u203A"}
         </span>

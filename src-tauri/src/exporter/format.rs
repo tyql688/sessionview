@@ -1,4 +1,4 @@
-//! Shared formatting helpers for the markdown and html exporters.
+//! Shared formatting helpers for the markdown exporter.
 
 use crate::models::Message;
 

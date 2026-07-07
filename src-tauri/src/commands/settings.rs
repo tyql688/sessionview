@@ -331,9 +331,8 @@ pub async fn export_sessions_batch(
             let detail = load_detail(session_id, &state.db)?;
             let ext = match format.as_str() {
                 "json" => "json",
-                "markdown" => "md",
-                "html" => "html",
-                _ => "txt",
+                "markdown" | "md" => "md",
+                _ => anyhow::bail!("unsupported export format: {format}"),
             };
             // Append short session ID suffix to prevent filename collisions
             let id_suffix = if session_id.len() > 8 {
@@ -351,9 +350,8 @@ pub async fn export_sessions_batch(
                 "json" => {
                     serde_json::to_string_pretty(&detail).context("failed to serialize session")?
                 }
-                "markdown" => crate::exporter::markdown::render(&detail),
-                "html" => crate::exporter::html::render(&detail),
-                _ => String::new(),
+                "markdown" | "md" => crate::exporter::markdown::render(&detail),
+                _ => anyhow::bail!("unsupported export format: {format}"),
             };
             zip.start_file(&filename, options)
                 .context("failed to write zip entry")?;

@@ -131,13 +131,11 @@ impl CodexScanAccum {
                     format!("[turn_aborted] {reason}{duration}"),
                 );
             }
-            "context_compacted" => {
-                push_system_event(
-                    &mut self.messages,
-                    entry.timestamp.clone(),
-                    "[context_compacted]".to_string(),
-                );
-            }
+            // A top-level `compacted` record carries the post-compaction
+            // handoff summary. The event message is only a marker that
+            // compaction happened, and rendering both creates a duplicate
+            // "compacted" row with no useful body.
+            "context_compacted" => {}
             "token_count" => {
                 if let Some(info) = payload.get("info") {
                     let Some((usage_model, usage_counts)) =

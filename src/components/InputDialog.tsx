@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -81,9 +82,7 @@ export function InputDialog(props: {
           )}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={props.onCancel}>
-            {t("confirm.cancel")}
-          </Button>
+          <DialogClose render={<Button variant="outline" />}>{t("confirm.cancel")}</DialogClose>
           <Button onClick={handleSubmit}>{props.confirmLabel}</Button>
         </DialogFooter>
       </DialogContent>

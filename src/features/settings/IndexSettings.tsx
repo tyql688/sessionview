@@ -7,9 +7,13 @@ import { toast, toastError, toastInfo } from "@/stores/toast";
 import { errorMessage } from "@/lib/errors";
 import { formatFileSize } from "@/lib/formatters";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { SelectField, type SelectOption } from "@/components/ui/select";
+import { AUTO_INDEX_INTERVAL_OPTIONS, type AutoIndexInterval } from "@/lib/auto-index";
+import { setAutoIndexInterval, useAutoIndexInterval } from "@/stores/settings";
 
 export function IndexSettings(props: { onIndexChanged: () => void }) {
   const { t } = useI18n();
+  const autoIndexInterval = useAutoIndexInterval();
   const [showClearIndexConfirm, setShowClearIndexConfirm] = useState(false);
 
   const [indexStats, setIndexStats] = useState<IndexStats | undefined>(undefined);
@@ -30,6 +34,17 @@ export function IndexSettings(props: { onIndexChanged: () => void }) {
   }, [refetchStats]);
 
   const indexStatsError = statsError ? errorMessage(statsError) : null;
+  const autoIndexOptions: SelectOption<AutoIndexInterval>[] = AUTO_INDEX_INTERVAL_OPTIONS.map((value) => ({
+    value,
+    label:
+      value === "5m"
+        ? t("settings.autoIndexEvery5m")
+        : value === "10m"
+          ? t("settings.autoIndexEvery10m")
+          : value === "30m"
+            ? t("settings.autoIndexEvery30m")
+            : t("settings.autoIndexStartupOnly"),
+  }));
 
   async function handleRebuildIndex() {
     try {
@@ -57,6 +72,20 @@ export function IndexSettings(props: { onIndexChanged: () => void }) {
       <div className="settings-row">
         <div className="settings-label">{t("settings.dbSize")}</div>
         <span className="settings-stat">{indexStats ? formatFileSize(indexStats.db_size_bytes) : "—"}</span>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <div className="settings-label">{t("settings.autoIndexInterval")}</div>
+          <div className="settings-desc">{t("settings.autoIndexIntervalDesc")}</div>
+        </div>
+        <SelectField
+          value={autoIndexInterval}
+          options={autoIndexOptions}
+          onValueChange={setAutoIndexInterval}
+          triggerClassName="w-44"
+          aria-label={t("settings.autoIndexInterval")}
+        />
       </div>
 
       <div className="settings-row settings-row-spaced">

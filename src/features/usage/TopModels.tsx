@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { useI18n } from "@/i18n/index";
 import type { ModelCost } from "@/lib/types";
 import { fmtCost, fmtTokens } from "@/features/usage/formatters";
@@ -6,13 +7,15 @@ export interface TopModelsProps {
   topModels: ModelCost[];
   maxTopModelCost: number;
   formatModelName: (model: string) => string;
+  cardHeight: number | null;
 }
 
 export function TopModels(props: TopModelsProps) {
   const { t } = useI18n();
+  const cardStyle: CSSProperties | undefined = props.cardHeight ? { height: props.cardHeight } : undefined;
 
   return (
-    <section className="usage-card usage-spotlight-card">
+    <section className="usage-card usage-spotlight-card" style={cardStyle}>
       <div className="usage-section-header">
         <div>
           <div className="usage-section-title">{t("usage.topModels")}</div>

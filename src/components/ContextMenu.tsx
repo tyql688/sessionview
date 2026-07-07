@@ -40,7 +40,7 @@ export function ContextMenu(props: Props) {
     >
       <Menu.Portal>
         <Menu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={2} className="z-[300] outline-none">
-          <Menu.Popup className="min-w-44 rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none duration-100 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
+          <Menu.Popup className="min-w-44 rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none duration-100 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:fill-mode-forwards data-closed:zoom-out-95">
             {props.items.map((item, i) =>
               item.separator ? (
                 <Menu.Separator key={i} className="-mx-1 my-1 h-px bg-border" />
@@ -54,7 +54,6 @@ export function ContextMenu(props: Props) {
                   )}
                   onClick={() => {
                     item.onClick();
-                    props.onClose();
                   }}
                 >
                   <span>{typeof item.label === "function" ? item.label() : item.label}</span>

@@ -15,6 +15,7 @@ export function StatusBar(props: {
   providerCount: number;
   isIndexing?: boolean;
   lastScanTime?: number;
+  nextAutoIndexTime?: number;
   todayCost?: number;
   todayTokens?: TodayTokens;
 }) {
@@ -41,6 +42,15 @@ export function StatusBar(props: {
     const cost = props.todayCost;
     if (cost === undefined || cost === 0) return null;
     return cost < 0.01 ? "<$0.01" : `$${cost.toFixed(2)}`;
+  };
+
+  const nextAutoIndexLabel = () => {
+    const ts = props.nextAutoIndexTime;
+    if (!ts) return null;
+    return new Date(ts).toLocaleTimeString(locale, {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   };
 
   const hasTokens = () => {
@@ -114,7 +124,15 @@ export function StatusBar(props: {
           <>
             <span className="status-separator">·</span>
             <span title={props.lastScanTime ? new Date(props.lastScanTime).toLocaleString() : ""}>
-              {t("status.lastScan")} {lastScanLabel()}
+              {t("status.lastUpdate")} {lastScanLabel()}
+            </span>
+          </>
+        )}
+        {nextAutoIndexLabel() && (
+          <>
+            <span className="status-separator">·</span>
+            <span title={props.nextAutoIndexTime ? new Date(props.nextAutoIndexTime).toLocaleString() : ""}>
+              {t("status.nextUpdate")} {nextAutoIndexLabel()}
             </span>
           </>
         )}

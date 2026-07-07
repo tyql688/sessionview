@@ -66,9 +66,9 @@ interface McpToolMetadata {
 
 type RawOutputPolicy = "keep" | "suppress_terminal" | "suppress_patch_when_diff_present";
 
-type ToolDiffLineType = "context" | "add" | "remove" | "skip";
+export type ToolDiffLineType = "context" | "add" | "remove" | "skip";
 
-interface ToolDiffLine {
+export interface ToolDiffLine {
   type: ToolDiffLineType;
   oldLine: number | null;
   newLine: number | null;

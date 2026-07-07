@@ -37,9 +37,6 @@ impl crate::provider::ProviderDescriptor for Descriptor {
     fn cli_command(&self) -> &'static str {
         "opencode"
     }
-    fn avatar_svg(&self) -> &'static str {
-        r#"<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M16 6H8v12h8V6zm4 16H4V2h16v20z" fill="currentColor"/></svg>"#
-    }
 }
 
 pub struct OpenCodeProvider {

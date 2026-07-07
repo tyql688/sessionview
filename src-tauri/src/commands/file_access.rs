@@ -7,7 +7,7 @@ use crate::error::CommandResult;
 
 use super::AppState;
 
-/// Session images must live under the user home or system temp (same policy as HTML export).
+/// Session images must live under the user home or system temp.
 fn read_image_canonical_allowed(canonical: &Path) -> bool {
     let Some(home) = dirs::home_dir() else {
         return tmp_dir_allows_image(canonical);

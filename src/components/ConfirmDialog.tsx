@@ -34,7 +34,7 @@ export function ConfirmDialog(props: {
           <AlertDialogDescription>{props.message}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel onClick={props.onCancel}>{t("confirm.cancel")}</AlertDialogCancel>
+          <AlertDialogCancel>{t("confirm.cancel")}</AlertDialogCancel>
           <AlertDialogAction variant={props.danger ? "destructive" : "default"} onClick={props.onConfirm}>
             {props.confirmLabel}
           </AlertDialogAction>

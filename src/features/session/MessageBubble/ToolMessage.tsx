@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button";
 import type { Message } from "@/lib/types";
 import { useI18n } from "@/i18n/index";
 import { readToolResultText } from "@/lib/tauri";
-import { buildToolLineDiff, inlineSegments, pairChangedLines, type ToolDiffLine } from "@/lib/diff";
 import {
   formatToolInput,
   formatToolResultMetadata,
@@ -26,6 +25,7 @@ import {
 import { parseContent } from "@/lib/message-content";
 import { SubagentInline } from "@/features/session/MessageBubble/SubagentInline";
 import { ImagePreview, LocalImage, RemoteImage, isLocalPath } from "@/features/session/MessageBubble/ImagePreview";
+import { SessionDiffView, SessionLineDiffView } from "@/features/session/MessageBubble/SessionDiffView";
 
 /** Dispatch a custom event to open a subagent session by description, nickname, or agent ID. */
 function openSubagent(description: string, nickname?: string, agentId?: string, parentSessionId?: string) {
@@ -46,63 +46,6 @@ function subagentButtonLabel(
   if (total <= 1) return t("tool.openSubagent");
   const identity = prompt?.replace(/\s+/g, " ").trim() || agentId?.replace(/\s+/g, " ").trim() || `#${index + 1}`;
   return t("tool.openSubagentNamed", { name: identity });
-}
-
-function DiffRows(props: { lines: ToolDiffLine[] }) {
-  const pairs = useMemo(() => pairChangedLines(props.lines), [props.lines]);
-  const added = props.lines.filter((l) => l.type === "add").length;
-  const removed = props.lines.filter((l) => l.type === "remove").length;
-
-  const codeFor = (line: ToolDiffLine, index: number) => {
-    const partner = pairs.get(index);
-    if (partner === undefined) return line.text || " ";
-    const other = props.lines[partner];
-    if (!other) return line.text || " ";
-    const { from, to } = inlineSegments(
-      line.type === "remove" ? line.text : other.text,
-      line.type === "remove" ? other.text : line.text,
-    );
-    const segments = line.type === "remove" ? from : to;
-    return segments.map((segment, k) =>
-      segment.changed ? (
-        <mark className={`msg-tool-diff-emph ${line.type}`} key={k}>
-          {segment.text}
-        </mark>
-      ) : (
-        segment.text
-      ),
-    );
-  };
-
-  return (
-    <div className="msg-tool-line-diff">
-      <div className="msg-tool-diff-stats">
-        <span className="msg-tool-diff-stat add">+{added}</span>
-        <span className="msg-tool-diff-stat remove">-{removed}</span>
-      </div>
-      {props.lines.map((line, i) =>
-        line.type === "skip" ? (
-          <div className="msg-tool-diff-skip" key={i}>
-            {line.text || "\u22EF"}
-          </div>
-        ) : (
-          <div className={`msg-tool-diff-line ${line.type}`} key={i}>
-            <span className="msg-tool-diff-gutter">{line.oldLine ?? ""}</span>
-            <span className="msg-tool-diff-gutter">{line.newLine ?? ""}</span>
-            <span className="msg-tool-diff-marker">
-              {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
-            </span>
-            <span className="msg-tool-diff-code">{codeFor(line, i)}</span>
-          </div>
-        ),
-      )}
-    </div>
-  );
-}
-
-function LineDiff(props: { oldText: string; newText: string }) {
-  const lines = useMemo(() => buildToolLineDiff(props.oldText, props.newText), [props.oldText, props.newText]);
-  return <DiffRows lines={lines} />;
 }
 
 export function ToolMessage(props: { message: Message; provider?: string; parentSessionId?: string }) {
@@ -350,8 +293,8 @@ export function ToolMessage(props: { message: Message; provider?: string; parent
                   <pre className="msg-tool-field-value">{line.value}</pre>
                 </div>
               ))}
-              {formatted!.diff && <LineDiff oldText={formatted!.diff!.old} newText={formatted!.diff!.new} />}
-              {formatted!.patchDiff && <DiffRows lines={formatted!.patchDiff!} />}
+              {formatted!.diff && <SessionLineDiffView oldText={formatted!.diff!.old} newText={formatted!.diff!.new} />}
+              {formatted!.patchDiff && <SessionDiffView lines={formatted!.patchDiff!} />}
             </div>
           )}
           {resultMetadata && (
@@ -362,8 +305,10 @@ export function ToolMessage(props: { message: Message; provider?: string; parent
                   <pre className="msg-tool-field-value">{line.value}</pre>
                 </div>
               ))}
-              {resultMetadata.diff && <LineDiff oldText={resultMetadata.diff.old} newText={resultMetadata.diff.new} />}
-              {resultMetadata.patchDiff && <DiffRows lines={resultMetadata.patchDiff} />}
+              {resultMetadata.diff && (
+                <SessionLineDiffView oldText={resultMetadata.diff.old} newText={resultMetadata.diff.new} />
+              )}
+              {resultMetadata.patchDiff && <SessionDiffView lines={resultMetadata.patchDiff} />}
               {persistedOutputPath() && (
                 <Button
                   variant="ghost"

@@ -1,6 +1,7 @@
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import type { SessionRef } from "@/lib/types";
 import {
@@ -35,8 +36,9 @@ export function SearchOverlay(props: {
 
   useEffect(() => {
     if (props.show) {
-      queueMicrotask(() => inputRef.current?.focus());
       setSelectedIndex(0);
+    } else {
+      clearSearch();
     }
   }, [props.show]);
 
@@ -69,6 +71,7 @@ export function SearchOverlay(props: {
   }
 
   function handleClose() {
+    if (!props.show) return;
     clearSearch();
     setSelectedIndex(0);
     props.onClose();
@@ -94,10 +97,6 @@ export function SearchOverlay(props: {
       openAt(selectedIndex);
       return;
     }
-    if (e.key === "Escape") {
-      e.preventDefault();
-      handleClose();
-    }
   }
 
   useEffect(() => {
@@ -107,81 +106,84 @@ export function SearchOverlay(props: {
   }, []);
 
   return (
-    props.show && (
-      <div
-        className="search-overlay-backdrop"
-        onMouseDown={(e) => {
-          if (e.target === e.currentTarget) handleClose();
-        }}
+    <Dialog
+      open={props.show}
+      onOpenChange={(open) => {
+        if (!open) handleClose();
+      }}
+    >
+      <DialogContent
+        showCloseButton={false}
+        initialFocus={() => inputRef.current}
+        className="search-overlay top-[12vh] left-1/2 flex max-h-[70vh] w-[min(640px,90vw)] max-w-none -translate-x-1/2 translate-y-0 flex-col gap-0 rounded-[10px] border border-border bg-[var(--bg-editor)] p-0 shadow-[0_12px_36px_rgba(0,0,0,0.25)] ring-0 sm:max-w-none data-open:zoom-in-100 data-closed:zoom-out-100"
       >
-        <div className="search-overlay" role="dialog" aria-modal="true" aria-label={t("search.ariaLabel")}>
-          <div className="search-overlay-input-row">
-            <svg
-              className="search-icon"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <path d="M21 21l-4.35-4.35" />
-            </svg>
-            <Input
-              ref={inputRef}
-              className="search-overlay-input h-auto border-none px-0 py-0 focus-visible:border-transparent focus-visible:ring-0"
-              type="text"
-              aria-label={t("search.ariaLabel")}
-              placeholder={t("search.placeholder")}
-              value={query}
-              onChange={handleInput}
-              onKeyDown={handleKeyDown}
-            />
-            <kbd className="search-shortcut">Esc</kbd>
-          </div>
-          <div className="search-overlay-results">
-            {isSearching && (
-              <div className="search-loading">
-                <div className="spinner spinner-sm" />
-              </div>
-            )}
-            {!isSearching && results.length === 0 && query.trim().length > 0 && (
-              <div className="search-no-results">{t("search.noResults")}</div>
-            )}
-            {query.trim().length === 0 && <div className="search-no-results">{t("search.placeholder")}</div>}
-            {results.map((result, i) => (
-              <Button
-                key={result.session.id}
-                variant="ghost"
-                className={cn(
-                  "search-result-item h-auto justify-start rounded-none whitespace-normal active:translate-y-0",
-                  selectedIndex === i && "selected",
-                )}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  openAt(i);
-                }}
-                onMouseEnter={() => setSelectedIndex(i)}
-              >
-                <span className="provider-dot provider-logo" style={{ color: `var(--${result.session.provider})` }}>
-                  <ProviderIcon provider={result.session.provider} />
-                </span>
-                <div className="search-result-text">
-                  <span className="search-result-title">{result.session.title}</span>
-                  <span
-                    className="search-result-snippet"
-                    // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitizeSnippet escapes then restores <mark> only
-                    dangerouslySetInnerHTML={{
-                      __html: sanitizeSnippet(result.snippet),
-                    }}
-                  />
-                </div>
-              </Button>
-            ))}
-          </div>
+        <DialogTitle className="sr-only">{t("search.ariaLabel")}</DialogTitle>
+        <div className="search-overlay-input-row">
+          <svg
+            className="search-icon"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <path d="M21 21l-4.35-4.35" />
+          </svg>
+          <Input
+            ref={inputRef}
+            className="search-overlay-input h-auto border-none px-0 py-0 focus-visible:border-transparent focus-visible:ring-0"
+            type="text"
+            aria-label={t("search.ariaLabel")}
+            placeholder={t("search.placeholder")}
+            value={query}
+            onChange={handleInput}
+            onKeyDown={handleKeyDown}
+          />
+          <kbd className="search-shortcut">Esc</kbd>
         </div>
-      </div>
-    )
+        <div className="search-overlay-results">
+          {isSearching && (
+            <div className="search-loading">
+              <div className="spinner spinner-sm" />
+            </div>
+          )}
+          {!isSearching && results.length === 0 && query.trim().length > 0 && (
+            <div className="search-no-results">{t("search.noResults")}</div>
+          )}
+          {query.trim().length === 0 && <div className="search-no-results">{t("search.placeholder")}</div>}
+          {results.map((result, i) => (
+            <Button
+              key={result.session.id}
+              variant="ghost"
+              className={cn(
+                "search-result-item h-auto justify-start rounded-none whitespace-normal active:translate-y-0",
+                selectedIndex === i && "selected",
+              )}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                openAt(i);
+              }}
+              onMouseEnter={() => setSelectedIndex(i)}
+            >
+              <span className="provider-dot provider-logo" style={{ color: `var(--${result.session.provider})` }}>
+                <ProviderIcon provider={result.session.provider} />
+              </span>
+              <div className="search-result-text">
+                <span className="search-result-title">{result.session.title}</span>
+                <span
+                  className="search-result-snippet"
+                  // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitizeSnippet escapes then restores <mark> only
+                  dangerouslySetInnerHTML={{
+                    __html: sanitizeSnippet(result.snippet),
+                  }}
+                />
+              </div>
+            </Button>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -11,7 +11,8 @@ fn parse_session_surfaces_top_level_compacted_handoff_summary() {
         &file,
         concat!(
             "{\"timestamp\":\"2026-04-10T10:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"sess-1\",\"cwd\":\"/tmp\",\"cli_version\":\"0.123.0\"}}\n",
-            "{\"timestamp\":\"2026-04-10T10:00:01Z\",\"type\":\"compacted\",\"payload\":{\"message\":\"Recap so far: did X and Y.\",\"replacement_history\":[]}}\n",
+            "{\"timestamp\":\"2026-04-10T10:00:01Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"context_compacted\"}}\n",
+            "{\"timestamp\":\"2026-04-10T10:00:02Z\",\"type\":\"compacted\",\"payload\":{\"message\":\"Recap so far: did X and Y.\",\"replacement_history\":[]}}\n",
             "{\"timestamp\":\"2026-04-10T10:00:02Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"after compaction\"}]}}\n"
         ),
     )
@@ -20,11 +21,17 @@ fn parse_session_surfaces_top_level_compacted_handoff_summary() {
         home_dir: PathBuf::from("/tmp"),
     };
     let parsed = provider.parse_session_file(&file).expect("parsed session");
-    let compacted = parsed
+    let compacted_messages: Vec<_> = parsed
         .messages
         .iter()
-        .find(|m| m.content.contains("[context_compacted]"))
-        .expect("compacted system event");
+        .filter(|m| m.content.contains("[context_compacted]"))
+        .collect();
+    assert_eq!(
+        compacted_messages.len(),
+        1,
+        "event marker must not duplicate the compacted handoff summary"
+    );
+    let compacted = compacted_messages.first().expect("compacted system event");
     assert!(
         compacted.content.contains("Recap so far: did X and Y."),
         "compacted handoff summary missing from {:?}",
@@ -467,7 +474,7 @@ fn parse_session_file_handles_recent_codex_events_without_base64_output() {
         ),
         "Plan item should be emitted as a visible assistant message"
     );
-    for marker in ["[error]", "[turn_aborted]", "[context_compacted]"] {
+    for marker in ["[error]", "[turn_aborted]"] {
         assert!(
             parsed
                 .messages
@@ -476,6 +483,13 @@ fn parse_session_file_handles_recent_codex_events_without_base64_output() {
             "{marker} should be visible as a system event"
         );
     }
+    assert!(
+        !parsed
+            .messages
+            .iter()
+            .any(|message| message.content.contains("[context_compacted]")),
+        "empty context_compacted event markers should not render without a compacted summary"
+    );
 
     let send_input = parsed
         .messages

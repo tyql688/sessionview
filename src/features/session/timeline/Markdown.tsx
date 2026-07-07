@@ -20,7 +20,7 @@ import {
   type StreamdownTranslations,
 } from "streamdown";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { useI18n } from "@/i18n/index";
 import { useResolvedTheme } from "@/stores/theme";
 import { openExternalUrl } from "@/lib/external-links";
@@ -57,14 +57,11 @@ function ExternalLinkModal({ isOpen, onClose, url }: LinkSafetyModalProps) {
     return () => window.clearTimeout(timeout);
   }, [copied]);
 
-  if (!isOpen) return null;
-
   const copyLink = async () => {
     await navigator.clipboard.writeText(url);
     setCopied(true);
   };
   const openLink = () => {
-    onClose();
     openExternalUrl(url).catch((error: unknown) => {
       toastError(String(error));
     });
@@ -87,10 +84,10 @@ function ExternalLinkModal({ isOpen, onClose, url }: LinkSafetyModalProps) {
             )}
             {copied ? t("markdown.copied") : t("markdown.copyLink")}
           </Button>
-          <Button type="button" size="sm" onClick={openLink}>
+          <DialogClose render={<Button type="button" size="sm" />} onClick={openLink}>
             <ExternalLink className="size-3.5" aria-hidden="true" />
             {t("markdown.openLink")}
-          </Button>
+          </DialogClose>
         </div>
       </DialogContent>
     </Dialog>

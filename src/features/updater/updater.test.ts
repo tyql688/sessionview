@@ -126,4 +126,25 @@ describe("updater store", () => {
     expect(phase()).toBe("available");
     vi.useRealTimers();
   });
+
+  it("allows retrying a pending update after download failure", async () => {
+    vi.useFakeTimers();
+    const { check } = await import("@tauri-apps/plugin-updater");
+    const { relaunch } = await import("@tauri-apps/plugin-process");
+    const mockUpdate = {
+      version: "2.0.0",
+      downloadAndInstall: vi.fn().mockRejectedValueOnce(new Error("network reset")).mockResolvedValueOnce(undefined),
+    };
+    vi.mocked(check).mockResolvedValue(mockUpdate as unknown as Awaited<ReturnType<typeof check>>);
+
+    const { checkForUpdate, downloadAndInstall, getUpdaterPhase: phase } = await import("@/features/updater/updater");
+    await checkForUpdate();
+    await downloadAndInstall();
+    expect(phase()).toBe("error");
+
+    await downloadAndInstall();
+    expect(mockUpdate.downloadAndInstall).toHaveBeenCalledTimes(2);
+    expect(relaunch).toHaveBeenCalled();
+    vi.useRealTimers();
+  });
 });

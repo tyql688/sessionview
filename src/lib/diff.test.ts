@@ -1,14 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  buildPatchLineDiff,
-  buildStructuredPatchLineDiff,
-  buildToolLineDiff,
-  inlineSegments,
-  pairChangedLines,
-  type ToolDiffLine,
-  type ToolDiffLineType,
-} from "@/lib/diff";
+import { buildToolLineDiff, inlineSegments, pairChangedLines } from "@/lib/diff";
+import type { ToolDiffLine, ToolDiffLineType } from "@/lib/types";
 
 describe("buildToolLineDiff", () => {
   it("renders unchanged lines as context and changed lines as remove/add", () => {
@@ -45,73 +38,6 @@ describe("buildToolLineDiff", () => {
 
     expect(lines.length).toBe(440);
     expect(lines.some((line) => line.type === "skip")).toBe(false);
-  });
-});
-
-describe("buildPatchLineDiff", () => {
-  it("converts apply_patch hunks into diff rows", () => {
-    const lines = buildPatchLineDiff(`*** Begin Patch
-*** Update File: src/app.ts
-@@
--const oldValue = 1;
-+const newValue = 2;
- const same = true;
-*** End Patch
-`);
-
-    expect(lines).toEqual([
-      {
-        type: "skip",
-        oldLine: null,
-        newLine: null,
-        text: "*** Update File: src/app.ts",
-      },
-      { type: "skip", oldLine: null, newLine: null, text: "@@" },
-      {
-        type: "remove",
-        oldLine: null,
-        newLine: null,
-        text: "const oldValue = 1;",
-      },
-      {
-        type: "add",
-        oldLine: null,
-        newLine: null,
-        text: "const newValue = 2;",
-      },
-      {
-        type: "context",
-        oldLine: null,
-        newLine: null,
-        text: "const same = true;",
-      },
-    ]);
-  });
-});
-
-describe("buildStructuredPatchLineDiff", () => {
-  it("converts Claude structuredPatch hunks into numbered diff rows", () => {
-    expect(
-      buildStructuredPatchLineDiff([
-        {
-          oldStart: 12,
-          oldLines: 3,
-          newStart: 12,
-          newLines: 3,
-          lines: [" context", "-old", "+new"],
-        },
-      ]),
-    ).toEqual([
-      {
-        type: "skip",
-        oldLine: null,
-        newLine: null,
-        text: "@@ -12,3 +12,3 @@",
-      },
-      { type: "context", oldLine: 12, newLine: 12, text: "context" },
-      { type: "remove", oldLine: 13, newLine: null, text: "old" },
-      { type: "add", oldLine: null, newLine: 13, text: "new" },
-    ]);
   });
 });
 

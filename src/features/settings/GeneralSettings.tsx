@@ -1,4 +1,4 @@
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SelectField } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useI18n } from "@/i18n/index";
 import type { Locale } from "@/i18n/index";
@@ -42,7 +42,6 @@ const TERMINAL_OPTIONS: { value: TerminalApp; label: string }[] = isMac
 
 const THEME_VALUES: Theme[] = ["light", "dark", "system"];
 const LOCALE_VALUES: Locale[] = ["en", "zh"];
-const TERMINAL_VALUES = TERMINAL_OPTIONS.map((option) => option.value);
 
 export function GeneralSettings() {
   const { t, locale, setLocale } = useI18n();
@@ -51,16 +50,19 @@ export function GeneralSettings() {
   const showOrphans = useShowOrphans();
   const focusMode = useFocusMode();
 
-  const themeLabel: Record<Theme, string> = {
-    light: t("settings.themeLight"),
-    dark: t("settings.themeDark"),
-    system: t("settings.themeSystem"),
-  };
-  const localeLabel: Record<Locale, string> = {
-    en: t("settings.languageEnglish"),
-    zh: t("settings.languageChinese"),
-  };
-  const terminalLabel = TERMINAL_OPTIONS.find((option) => option.value === terminalApp)?.label ?? terminalApp;
+  const themeOptions = THEME_VALUES.map((value) => ({
+    value,
+    label:
+      value === "light"
+        ? t("settings.themeLight")
+        : value === "dark"
+          ? t("settings.themeDark")
+          : t("settings.themeSystem"),
+  }));
+  const localeOptions = LOCALE_VALUES.map((value) => ({
+    value,
+    label: value === "en" ? t("settings.languageEnglish") : t("settings.languageChinese"),
+  }));
 
   return (
     <div className="settings-section">
@@ -70,43 +72,26 @@ export function GeneralSettings() {
         <div>
           <div className="settings-label">{t("settings.theme")}</div>
         </div>
-        <Select
+        <SelectField
           value={theme}
-          onValueChange={(value) => {
-            if (THEME_VALUES.includes(value as Theme)) setTheme(value as Theme);
-          }}
-        >
-          <SelectTrigger size="sm" className="w-40">
-            <SelectValue>{themeLabel[theme]}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="light">{t("settings.themeLight")}</SelectItem>
-            <SelectItem value="dark">{t("settings.themeDark")}</SelectItem>
-            <SelectItem value="system">{t("settings.themeSystem")}</SelectItem>
-          </SelectContent>
-        </Select>
+          options={themeOptions}
+          onValueChange={setTheme}
+          triggerClassName="w-44"
+          aria-label={t("settings.theme")}
+        />
       </div>
 
       <div className="settings-row">
         <div>
           <div className="settings-label">{t("settings.language")}</div>
         </div>
-        <Select
+        <SelectField
           value={locale}
-          onValueChange={(value) => {
-            if (LOCALE_VALUES.includes(value as Locale)) {
-              void setLocale(value as Locale);
-            }
-          }}
-        >
-          <SelectTrigger size="sm" className="w-40">
-            <SelectValue>{localeLabel[locale]}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="en">{t("settings.languageEnglish")}</SelectItem>
-            <SelectItem value="zh">{t("settings.languageChinese")}</SelectItem>
-          </SelectContent>
-        </Select>
+          options={localeOptions}
+          onValueChange={(value) => void setLocale(value)}
+          triggerClassName="w-44"
+          aria-label={t("settings.language")}
+        />
       </div>
 
       <div className="settings-row">
@@ -114,25 +99,13 @@ export function GeneralSettings() {
           <div className="settings-label">{t("settings.terminal")}</div>
           <div className="settings-desc">{t("settings.terminalDesc")}</div>
         </div>
-        <Select
+        <SelectField
           value={terminalApp}
-          onValueChange={(value) => {
-            if (TERMINAL_VALUES.includes(value as TerminalApp)) {
-              setTerminalApp(value as TerminalApp);
-            }
-          }}
-        >
-          <SelectTrigger size="sm" className="w-40">
-            <SelectValue>{terminalLabel}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            {TERMINAL_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          options={TERMINAL_OPTIONS}
+          onValueChange={setTerminalApp}
+          triggerClassName="w-44"
+          aria-label={t("settings.terminal")}
+        />
       </div>
 
       <div className="settings-row">

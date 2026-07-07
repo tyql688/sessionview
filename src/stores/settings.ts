@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { errorMessage } from "@/lib/errors";
 import { detectTerminal } from "@/lib/tauri";
 import type { Provider } from "@/lib/types";
+import { DEFAULT_AUTO_INDEX_INTERVAL, isAutoIndexInterval, type AutoIndexInterval } from "@/lib/auto-index";
 
 export type TerminalApp =
   | "terminal"
@@ -117,6 +118,14 @@ function readStoredExplorerGrouping(): ExplorerGrouping {
   return "provider";
 }
 
+function readStoredAutoIndexInterval(): AutoIndexInterval {
+  const raw = readStorage("sessionview-auto-index-interval");
+  if (raw === null) return DEFAULT_AUTO_INDEX_INTERVAL;
+  if (isAutoIndexInterval(raw)) return raw;
+  console.warn(`Ignoring invalid auto index interval setting: ${raw}`);
+  return DEFAULT_AUTO_INDEX_INTERVAL;
+}
+
 const storedTerminal = readStorage("sessionview-terminal") as TerminalApp | null;
 const initialDisabledProviders = parseStoredStringArray<Provider>(
   "sessionview-disabled-providers",
@@ -136,6 +145,7 @@ interface SettingsState {
   showOrphans: boolean;
   focusMode: boolean;
   explorerGrouping: ExplorerGrouping;
+  autoIndexInterval: AutoIndexInterval;
   blockedFolders: string[];
   blockedFoldersError: string | null;
 }
@@ -147,6 +157,7 @@ const useSettingsStore = create<SettingsState>(() => ({
   showOrphans: readStorage("sessionview-show-orphans") !== "false",
   focusMode: readStorage("sessionview-focus-mode") === "true",
   explorerGrouping: readStoredExplorerGrouping(),
+  autoIndexInterval: readStoredAutoIndexInterval(),
   blockedFolders: initialBlockedFolders.value,
   blockedFoldersError: initialBlockedFolders.error,
 }));
@@ -195,6 +206,11 @@ export function setExplorerGrouping(mode: ExplorerGrouping) {
   writeStorage("sessionview-explorer-grouping", mode);
 }
 
+export function setAutoIndexInterval(interval: AutoIndexInterval) {
+  useSettingsStore.setState({ autoIndexInterval: interval });
+  writeStorage("sessionview-auto-index-interval", interval);
+}
+
 export function addBlockedFolder(path: string) {
   const prev = useSettingsStore.getState().blockedFolders;
   if (prev.includes(path)) return;
@@ -232,5 +248,6 @@ export const useDisabledProvidersError = () => useSettingsStore((s) => s.disable
 export const useShowOrphans = () => useSettingsStore((s) => s.showOrphans);
 export const useFocusMode = () => useSettingsStore((s) => s.focusMode);
 export const useExplorerGrouping = () => useSettingsStore((s) => s.explorerGrouping);
+export const useAutoIndexInterval = () => useSettingsStore((s) => s.autoIndexInterval);
 export const useBlockedFolders = () => useSettingsStore((s) => s.blockedFolders);
 export const useBlockedFoldersError = () => useSettingsStore((s) => s.blockedFoldersError);

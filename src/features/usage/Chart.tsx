@@ -1,3 +1,4 @@
+import type { Ref } from "react";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useI18n } from "@/i18n/index";
@@ -15,6 +16,7 @@ export interface ChartProps {
   activeRangeLabel: string;
   fmtChartValue: (n: number) => string;
   providerInfo: (key: string) => ProviderChipInfo;
+  cardRef?: Ref<HTMLElement>;
 }
 
 export function Chart(props: ChartProps) {
@@ -22,7 +24,7 @@ export function Chart(props: ChartProps) {
   const summary = props.hoveredDaySummary;
 
   return (
-    <section className="usage-card usage-chart-card">
+    <section ref={props.cardRef} className="usage-card usage-chart-card">
       <div className="usage-section-header">
         <div className="usage-section-title-row">
           <div className="usage-chart-heading">

@@ -40,10 +40,12 @@ import {
   invokeWithFallback,
 } from "@/lib/tauri";
 import { isMac, isWindows } from "@/lib/platform";
-import { useDisabledProviders } from "@/stores/settings";
+import { useAutoIndexInterval, useDisabledProviders } from "@/stores/settings";
 import { loadProviderSnapshots } from "@/stores/providerSnapshots";
 import { toast, toastError, toastInfo } from "@/stores/toast";
 import { checkForUpdate } from "@/features/updater/updater";
+import { UpdateDialog } from "@/features/updater/UpdateDialog";
+import { autoIndexIntervalMs } from "@/lib/auto-index";
 import {
   getGroups,
   activeGroup,
@@ -114,12 +116,16 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
   const [lastScanTime, setLastScanTime] = useState<number | undefined>(undefined);
+  const [nextAutoIndexTime, setNextAutoIndexTime] = useState<number | undefined>(undefined);
+  const [initialIndexReady, setInitialIndexReady] = useState(false);
+  const [isMaintenanceRunning, setIsMaintenanceRunning] = useState(false);
   const [todayCost, setTodayCost] = useState<number | undefined>(undefined);
   const [todayTokens, setTodayTokens] = useState<
     { input: number; output: number; cache_read: number; cache_write: number } | undefined
   >(undefined);
 
   const disabledProviders = useDisabledProviders();
+  const autoIndexInterval = useAutoIndexInterval();
   const activeGrp = useActiveGroup();
 
   // The sync manager owns long-lived timers/queues; create it once so its
@@ -147,10 +153,65 @@ export default function App() {
   // state without re-subscribing on every change.
   const showKeyboardOverlayRef = useRef(showKeyboardOverlay);
   const tRef = useRef(t);
+  const autoIndexStartPendingRef = useRef(false);
+  const autoIndexActiveRef = useRef(false);
   useEffect(() => {
     showKeyboardOverlayRef.current = showKeyboardOverlay;
     tRef.current = t;
   });
+
+  useEffect(() => {
+    const intervalMs = autoIndexIntervalMs(autoIndexInterval);
+    if (!initialIndexReady || intervalMs === null) {
+      setNextAutoIndexTime(undefined);
+      return;
+    }
+
+    let disposed = false;
+    let timer: number | undefined;
+
+    const schedule = (baseTime: number) => {
+      const now = Date.now();
+      const next = Math.max(baseTime + intervalMs, now);
+      setNextAutoIndexTime(next);
+      timer = window.setTimeout(
+        () => {
+          void run();
+        },
+        Math.max(0, next - Date.now()),
+      );
+    };
+
+    const run = async () => {
+      if (disposed) return;
+      setNextAutoIndexTime(undefined);
+      autoIndexStartPendingRef.current = true;
+      try {
+        const started = await startRebuildIndex();
+        if (!started) {
+          autoIndexStartPendingRef.current = false;
+          console.info("Scheduled index rebuild skipped because another maintenance task is running");
+        }
+      } catch (error) {
+        autoIndexStartPendingRef.current = false;
+        console.error("Failed to start scheduled index rebuild:", error);
+      }
+      if (!disposed) {
+        schedule(Date.now());
+      }
+    };
+
+    const now = Date.now();
+    const recentLastScanTime = lastScanTime !== undefined && now - lastScanTime < intervalMs ? lastScanTime : now;
+    schedule(recentLastScanTime);
+
+    return () => {
+      disposed = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [autoIndexInterval, initialIndexReady, lastScanTime]);
 
   useEffect(() => {
     const sync = syncRef.current;
@@ -191,7 +252,11 @@ export default function App() {
       splitToRight,
       focusAdjacentGroup,
       startRebuildIndex: () => {
-        void startRebuildIndex();
+        void startRebuildIndex()
+          .then((started) => {
+            if (!started) toastInfo(tRef.current("toast.maintenanceBusy"));
+          })
+          .catch(() => toastError(tRef.current("toast.rebuildFailed")));
       },
       syncFromDisk: sync.syncFromDisk,
     });
@@ -219,7 +284,12 @@ export default function App() {
     document.addEventListener("keydown", handleGlobalKeyDown);
 
     void loadProviderSnapshots();
-    void sync.coldStart();
+    void sync.coldStart().finally(() => {
+      if (!disposed) {
+        setInitialIndexReady(true);
+        void refreshStatusBarStats();
+      }
+    });
     // Warm the markdown engine (streamdown + shiki) while the shell is idle,
     // so the first session open doesn't pay the chunk-load + highlighter
     // initialization on the critical path.
@@ -267,7 +337,16 @@ export default function App() {
       }
 
       const um = await listenBackendEvent("maintenance-status", (payload) => {
+        const autoRebuildEvent =
+          payload.job === "rebuild_index" && (autoIndexStartPendingRef.current || autoIndexActiveRef.current);
+
         if (payload.phase === "started") {
+          setIsMaintenanceRunning(true);
+          if (autoRebuildEvent) {
+            autoIndexStartPendingRef.current = false;
+            autoIndexActiveRef.current = true;
+            return;
+          }
           const message =
             payload.job === "refresh_usage"
               ? tRef.current("toast.refreshUsageStarted")
@@ -277,15 +356,26 @@ export default function App() {
         }
 
         if (payload.phase === "failed") {
+          setIsMaintenanceRunning(false);
+          if (autoIndexActiveRef.current && payload.job === "rebuild_index") {
+            autoIndexActiveRef.current = false;
+            console.error(payload.message || "Scheduled index rebuild failed");
+            return;
+          }
           toastError(payload.message || tRef.current("toast.rebuildFailed"));
           return;
         }
 
         if (payload.phase === "finished") {
+          setIsMaintenanceRunning(false);
           // sync non-null (guarded at effect top); assertion needed inside this
           // event-listener callback where TS drops the guard's narrowing.
           void sync!.refreshTree();
           void loadProviderSnapshots(true);
+          if (autoIndexActiveRef.current && payload.job === "rebuild_index") {
+            autoIndexActiveRef.current = false;
+            return;
+          }
           const message =
             payload.job === "refresh_usage" ? tRef.current("toast.refreshUsageOk") : tRef.current("toast.rebuildOk");
           toast(message);
@@ -434,12 +524,14 @@ export default function App() {
         <StatusBar
           sessionCount={sessionCount}
           providerCount={filteredTree.length}
-          isIndexing={isLoading}
+          isIndexing={isLoading || isMaintenanceRunning}
           lastScanTime={lastScanTime}
+          nextAutoIndexTime={nextAutoIndexTime}
           todayCost={todayCost}
           todayTokens={todayTokens}
         />
         <KeyboardOverlay show={showKeyboardOverlay} onClose={() => setShowKeyboardOverlay(false)} />
+        <UpdateDialog />
         <SearchOverlay
           show={showSearchOverlay}
           onClose={() => setShowSearchOverlay(false)}

@@ -76,7 +76,8 @@ export async function checkForUpdate(): Promise<void> {
 }
 
 export async function downloadAndInstall(): Promise<void> {
-  if (!pendingUpdate || getUpdaterPhase() !== "available") return;
+  const phase = getUpdaterPhase();
+  if (!pendingUpdate || (phase !== "available" && phase !== "error")) return;
   const update = pendingUpdate;
 
   clearResetTimer();
