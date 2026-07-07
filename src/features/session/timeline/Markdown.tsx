@@ -162,7 +162,7 @@ export const Markdown = memo(function Markdown({
     };
   }, [resolvedTheme]);
   return (
-    <div className="timeline-markdown min-w-0 text-sm leading-relaxed text-text-primary">
+    <div className="timeline-markdown min-w-0 text-base leading-relaxed text-text-primary">
       <Streamdown
         className="space-y-3"
         parseIncompleteMarkdown={streaming}

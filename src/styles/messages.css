@@ -39,7 +39,7 @@
 .msg-bubble {
   padding: 12px 15px;
   border-radius: 16px;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.68;
   word-break: break-word;
   color: var(--text-primary);
@@ -563,4 +563,46 @@
     max-width: calc(100vw - 24px);
     bottom: 14px;
   }
+}
+
+/* Collapsible system notices (hooks / turn / compaction): quiet row that
+ * discloses the full payload on demand. */
+.msg-system-toggle {
+  cursor: pointer;
+  border: 0;
+  background: none;
+  width: 100%;
+  text-align: left;
+}
+
+.msg-system-toggle:hover .sys-detail,
+.msg-system-toggle:hover .sys-chevron {
+  color: var(--text-secondary);
+}
+
+.sys-chevron {
+  margin-left: 4px;
+  color: var(--text-tertiary);
+  transition: transform var(--dur-fast) var(--ease-standard);
+  display: inline-block;
+}
+
+.sys-chevron-open {
+  transform: rotate(90deg);
+}
+
+.msg-system-body {
+  margin: 4px 0 0 22px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--code-bg);
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
 }

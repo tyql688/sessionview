@@ -81,22 +81,58 @@ const SYSTEM_SUBTYPE_CONFIG: Record<
 
 const LEGACY_LOCAL_COMMAND_PREFIX = "[local_command]";
 
+/** Details short enough to read inline skip the disclosure affordance. */
+const SYSTEM_INLINE_DETAIL_MAX = 80;
+
 function SystemMessage(props: { content: string }) {
   const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
   const match = props.content.match(/^\[(\w+)\]\s*(.*)/s);
-  if (match) {
-    const config = SYSTEM_SUBTYPE_CONFIG[match[1]];
-    if (config) {
-      return (
-        <div className={`msg-system msg-system-tag ${config.cls}`}>
-          <span className="sys-icon">{config.icon}</span>
-          <span className="sys-label">{t(config.labelKey)}</span>
-          <span className="sys-detail">{match[2]}</span>
-        </div>
-      );
-    }
+  const config = match ? SYSTEM_SUBTYPE_CONFIG[match[1]] : undefined;
+  if (!match || !config) {
+    return <div className="msg-system">{props.content}</div>;
   }
-  return <div className="msg-system">{props.content}</div>;
+
+  const detail = match[2].trim();
+  const collapsible =
+    detail.includes("\n") || detail.length > SYSTEM_INLINE_DETAIL_MAX;
+  const summary = collapsible
+    ? `${(detail.split("\n", 1)[0] ?? "").slice(0, SYSTEM_INLINE_DETAIL_MAX)}…`
+    : detail;
+
+  if (!collapsible) {
+    return (
+      <div className={`msg-system msg-system-tag ${config.cls}`}>
+        <span className="sys-icon">{config.icon}</span>
+        <span className="sys-label">{t(config.labelKey)}</span>
+        <span className="sys-detail">{detail}</span>
+      </div>
+    );
+  }
+
+  // Long payloads (hook output, compaction summaries) collapse to one quiet
+  // row; the full text renders only on demand.
+  return (
+    <div className={`msg-system-block ${config.cls}`}>
+      <button
+        type="button"
+        className="msg-system msg-system-tag msg-system-toggle"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <span className="sys-icon">{config.icon}</span>
+        <span className="sys-label">{t(config.labelKey)}</span>
+        <span className="sys-detail">{expanded ? "" : summary}</span>
+        <span
+          className={`sys-chevron${expanded ? " sys-chevron-open" : ""}`}
+          aria-hidden="true"
+        >
+          {"\u203A"}
+        </span>
+      </button>
+      {expanded && <pre className="msg-system-body">{detail}</pre>}
+    </div>
+  );
 }
 
 export function MessageBubble(props: {
