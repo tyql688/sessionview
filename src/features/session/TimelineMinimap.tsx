@@ -67,10 +67,13 @@ export function sampleOutline(
 }
 
 /** Each sampled turn's anchor position in the scroller's scroll coordinate
- * space — recomputed per scroll frame because row heights shift. Works
- * unchanged for the column-reverse container: scrollTop and offsets are both
- * negative above the bottom, and only their ordering matters. Missing anchors
- * (turns outside the rendered window) come in as Infinity. */
+ * space. These are scroll-invariant (they only move when content changes), so
+ * callers cache the array and re-measure on invalidation instead of per scroll
+ * frame — each call forces a synchronous layout per anchor, which was the
+ * dominant scroll-jank source on huge sessions. Works unchanged for the
+ * column-reverse container: scrollTop and offsets are both negative above the
+ * bottom, and only their ordering matters. Missing anchors (turns outside the
+ * rendered window) come in as Infinity. */
 function anchorOffsets(
   scroller: HTMLElement,
   turns: SessionTurnOutlineEntry[],
@@ -138,42 +141,70 @@ export function TimelineMinimap(props: MinimapProps) {
     let quiet: ReturnType<typeof setTimeout> | undefined;
     const anchors = new AnchorCache(scroller);
 
-    const measure = () =>
-      currentTickFromOffsets(
-        anchorOffsets(scroller, turns, anchors),
-        scroller.scrollTop,
-      );
+    // Anchor offsets are scroll-invariant, so the scroll path reads a cached
+    // array and only `scrollTop` — zero getBoundingClientRect calls per frame.
+    // Content changes (rows resizing as content-visibility renders them in,
+    // windowed loading swapping children) mark the cache dirty; re-measuring
+    // is throttled because during a fast scroll the observers fire every
+    // frame and each measure forces a layout per anchor. A final measure at
+    // scroll rest makes the settled tick authoritative.
+    let offsets: number[] = [];
+    let offsetsDirty = true;
+    let lastMeasuredAt = Number.NEGATIVE_INFINITY;
+    const MEASURE_THROTTLE_MS = 150;
+
+    const refreshOffsets = () => {
+      offsets = anchorOffsets(scroller, turns, anchors);
+      offsetsDirty = false;
+      lastMeasuredAt = performance.now();
+    };
+
+    const settle = () => {
+      setScrolling(false);
+      if (offsetsDirty) {
+        refreshOffsets();
+        setActive(currentTickFromOffsets(offsets, scroller.scrollTop));
+      }
+    };
 
     const update = () => {
       frame = 0;
-      setActive(measure());
+      if (
+        offsetsDirty &&
+        performance.now() - lastMeasuredAt >= MEASURE_THROTTLE_MS
+      ) {
+        refreshOffsets();
+      }
+      setActive(currentTickFromOffsets(offsets, scroller.scrollTop));
       setScrolling(true);
       clearTimeout(quiet);
-      quiet = setTimeout(() => setScrolling(false), SCROLL_REST_MS);
+      quiet = setTimeout(settle, SCROLL_REST_MS);
     };
 
     const onScroll = () => {
       if (frame === 0) frame = requestAnimationFrame(update);
     };
 
-    // Re-measure when the content grows/shrinks (lazy Markdown, windowed
+    // Invalidate when the content grows/shrinks (lazy Markdown, windowed
     // loading): on first open the bubbles mount asynchronously, so a single
     // mount-time measure finds no anchors and the strip points at the top
     // until the first scroll. The observer fires as rows stream in and the
     // active tick settles on the latest turn without user input.
-    const remeasure = () => {
+    const invalidate = () => {
+      offsetsDirty = true;
       if (frame === 0) frame = requestAnimationFrame(update);
     };
-    const observer = new ResizeObserver(remeasure);
+    const observer = new ResizeObserver(invalidate);
     for (const child of scroller.children) observer.observe(child);
     const childWatcher = new MutationObserver(() => {
       observer.disconnect();
       for (const child of scroller.children) observer.observe(child);
-      remeasure();
+      invalidate();
     });
     childWatcher.observe(scroller, { childList: true });
 
-    setActive(measure());
+    refreshOffsets();
+    setActive(currentTickFromOffsets(offsets, scroller.scrollTop));
     scroller.addEventListener("scroll", onScroll, { passive: true });
 
     return () => {

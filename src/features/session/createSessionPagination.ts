@@ -116,9 +116,16 @@ export function useSessionPagination(
   const loadOlderDebounceRef = useRef<
     ReturnType<typeof setTimeout> | undefined
   >(undefined);
+  const scrollCheckFrameRef = useRef(0);
   const olderFetchInFlightRef = useRef(false);
   useEffect(() => {
-    opts.registerDebounce(() => clearTimeout(loadOlderDebounceRef.current));
+    opts.registerDebounce(() => {
+      clearTimeout(loadOlderDebounceRef.current);
+      if (scrollCheckFrameRef.current !== 0) {
+        cancelAnimationFrame(scrollCheckFrameRef.current);
+        scrollCheckFrameRef.current = 0;
+      }
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -298,29 +305,37 @@ export function useSessionPagination(
 
   function handleMessagesScroll(e: Event) {
     const target = e.currentTarget as HTMLDivElement;
-    clearTimeout(loadOlderDebounceRef.current);
+    // rAF-coalesced: scrollHeight/clientHeight reads force a synchronous
+    // layout while content-visibility keeps dirtying the tree during scroll,
+    // so cap the geometry read at one per frame regardless of event rate.
+    if (scrollCheckFrameRef.current !== 0) return;
+    scrollCheckFrameRef.current = requestAnimationFrame(() => {
+      scrollCheckFrameRef.current = 0;
+      if (!target.isConnected) return;
+      clearTimeout(loadOlderDebounceRef.current);
 
-    // column-reverse: scrollTop=0 is bottom (newest). User scrolls up -> scrollTop
-    // goes negative. We want to load more when user reaches the visual top.
-    // Visual top = max negative scrollTop = -(scrollHeight - clientHeight).
-    const atVisualTop =
-      target.scrollHeight + target.scrollTop - target.clientHeight <=
-      LOAD_MORE_THRESHOLD;
+      // column-reverse: scrollTop=0 is bottom (newest). User scrolls up ->
+      // scrollTop goes negative. We want to load more when user reaches the
+      // visual top = max negative scrollTop = -(scrollHeight - clientHeight).
+      const atVisualTop =
+        target.scrollHeight + target.scrollTop - target.clientHeight <=
+        LOAD_MORE_THRESHOLD;
 
-    if (atVisualTop) {
-      loadOlderDebounceRef.current = setTimeout(() => {
-        const messagesRef = opts.getMessagesRef();
-        if (!messagesRef) return;
-        const stillAtTop =
-          messagesRef.scrollHeight +
-            messagesRef.scrollTop -
-            messagesRef.clientHeight <=
-          LOAD_MORE_THRESHOLD;
-        if (stillAtTop) {
-          loadOlderEntries();
-        }
-      }, 80);
-    }
+      if (atVisualTop) {
+        loadOlderDebounceRef.current = setTimeout(() => {
+          const messagesRef = opts.getMessagesRef();
+          if (!messagesRef) return;
+          const stillAtTop =
+            messagesRef.scrollHeight +
+              messagesRef.scrollTop -
+              messagesRef.clientHeight <=
+            LOAD_MORE_THRESHOLD;
+          if (stillAtTop) {
+            loadOlderEntries();
+          }
+        }, 80);
+      }
+    });
   }
 
   return {

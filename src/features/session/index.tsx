@@ -41,6 +41,10 @@ import {
   INITIAL_TAIL,
 } from "@/features/session/createSessionPagination";
 
+/** Newest rows rendered with eager (non-lazy) markdown — roughly one
+ * screenful, so opening a session paints real markdown immediately. */
+const EAGER_MARKDOWN_ROWS = 12;
+
 /** Each role keeps its own pressed color so the filter reads at a glance. */
 const ROLE_TOGGLE_COLORS: Record<MessageRole, string> = {
   user: "data-pressed:bg-brand-soft data-pressed:text-brand",
@@ -470,7 +474,7 @@ export function SessionView(props: {
             }}
             onScroll={(e) => handleMessagesScroll(e.nativeEvent)}
           >
-            {visibleEntries.map((entry) => {
+            {visibleEntries.map((entry, entryIndex) => {
               if (entry.type === "time-sep") {
                 return (
                   <div
@@ -514,6 +518,10 @@ export function SessionView(props: {
                     message={entry.msg}
                     provider={meta.provider}
                     parentSessionId={props.session.id}
+                    // visibleEntries is newest-first; the first screenful is
+                    // on screen at mount, so it skips the lazy-markdown gate
+                    // and first paint shows real markdown.
+                    eagerMarkdown={entryIndex < EAGER_MARKDOWN_ROWS}
                   />
                 </div>
               );
