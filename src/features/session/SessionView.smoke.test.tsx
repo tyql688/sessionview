@@ -1,10 +1,13 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { StrictMode } from "react";
 
 import type { Message, SessionMeta } from "@/lib/types";
 import { SESSION_COMMAND_EVENTS } from "@/lib/session-command-events";
 import { processMessages } from "@/features/session/hooks";
 import { findFirstMatchingEntryIndex } from "@/features/session/search-utils";
+
+const LOAD_CANCELED_SENTINEL = "__cc_session_load_canceled__";
 
 // Minimal synthetic session payloads. The backend is fully mocked: `invoke`
 // dispatches on the Tauri command name so the session-load effect resolves
@@ -62,7 +65,14 @@ let openWindowStart = 0;
 let totalMessages = MESSAGES.length;
 let messagesWindowMessages = MESSAGES;
 let outlineEntries: Array<Record<string, unknown>> = [];
+const openWindowCalls: Array<Record<string, unknown> | undefined> = [];
 const messagesWindowCalls: Array<Record<string, unknown> | undefined> = [];
+const cancelSessionLoadCalls: Array<{
+  sessionId: string;
+  requestId?: string;
+}> = [];
+const canceledOpenRequestIds = new Set<string>();
+const latestOpenRequestBySession = new Map<string, string>();
 
 function tokenTotals() {
   return {
@@ -77,6 +87,17 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
     switch (command) {
       case "get_session_open_window":
+        openWindowCalls.push(args);
+        {
+          const sessionId = String(args?.sessionId ?? "");
+          const requestId =
+            typeof args?.requestId === "string" ? args.requestId : undefined;
+          if (requestId) latestOpenRequestBySession.set(sessionId, requestId);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          if (requestId && canceledOpenRequestIds.has(requestId)) {
+            throw LOAD_CANCELED_SENTINEL;
+          }
+        }
         return {
           meta: META,
           window: {
@@ -103,6 +124,22 @@ vi.mock("@tauri-apps/api/core", () => ({
       case "is_favorite":
         return false;
       case "cancel_session_load":
+        {
+          const sessionId = String(args?.sessionId ?? "");
+          const requestId =
+            typeof args?.requestId === "string" ? args.requestId : undefined;
+          cancelSessionLoadCalls.push({
+            sessionId,
+            ...(requestId ? { requestId } : {}),
+          });
+          await new Promise((resolve) => setTimeout(resolve));
+          if (requestId) {
+            canceledOpenRequestIds.add(requestId);
+          } else {
+            const latestRequestId = latestOpenRequestBySession.get(sessionId);
+            if (latestRequestId) canceledOpenRequestIds.add(latestRequestId);
+          }
+        }
         return undefined;
       default:
         return undefined;
@@ -176,14 +213,19 @@ beforeAll(() => {
   };
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   cleanup();
+  await new Promise((resolve) => setTimeout(resolve));
   openWindowMessages = MESSAGES;
   openWindowStart = 0;
   totalMessages = MESSAGES.length;
   messagesWindowMessages = MESSAGES;
   outlineEntries = [];
+  openWindowCalls.length = 0;
   messagesWindowCalls.length = 0;
+  cancelSessionLoadCalls.length = 0;
+  canceledOpenRequestIds.clear();
+  latestOpenRequestBySession.clear();
 });
 
 describe("SessionView smoke", () => {
@@ -211,6 +253,42 @@ describe("SessionView smoke", () => {
     await waitFor(() =>
       expect(document.querySelector(".session-messages")).not.toBeNull(),
     );
+  });
+
+  it("does not cancel the current load during StrictMode remount", async () => {
+    const { findByText } = render(
+      <StrictMode>
+        <SessionView
+          session={{
+            id: META.id,
+            provider: "claude",
+            title: META.title,
+            project_name: "smoke",
+            is_sidechain: false,
+            source_path: META.source_path,
+            project_path: META.project_path,
+          }}
+          active={true}
+          onRefreshTree={() => {}}
+          onCloseTab={() => {}}
+        />
+      </StrictMode>,
+    );
+
+    expect(await findByText("Hello there")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(openWindowCalls.length).toBeGreaterThanOrEqual(2),
+    );
+    const latestRequestId = openWindowCalls[openWindowCalls.length - 1]
+      ?.requestId;
+    expect(typeof latestRequestId).toBe("string");
+    expect(cancelSessionLoadCalls.length).toBeGreaterThan(0);
+    expect(cancelSessionLoadCalls.every((call) => call.requestId)).toBe(true);
+    expect(
+      cancelSessionLoadCalls.some(
+        (call) => call.requestId === latestRequestId,
+      ),
+    ).toBe(false);
   });
 
   it("loads older user messages when in-session search misses the initial tail", async () => {

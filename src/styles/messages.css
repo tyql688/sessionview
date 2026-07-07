@@ -226,6 +226,7 @@
 .msg-system-tag {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
   padding: 2px 10px;
   border-radius: 10px;
@@ -244,6 +245,7 @@
 
 .msg-system-tag .sys-detail {
   opacity: 0.6;
+  overflow-wrap: anywhere;
 }
 
 .msg-system-tag.sys-error {

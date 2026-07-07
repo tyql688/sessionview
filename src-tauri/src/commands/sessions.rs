@@ -101,7 +101,7 @@ pub async fn get_session_detail(
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<SessionDetail> {
         let meta = load_session_meta(&state.db, &session_id).map_err(anyhow::Error::msg)?;
         let source_path = meta.source_path.clone();
-        with_load_guard(&state, &session_id, &source_path, |_flag| {
+        with_load_guard(&state, &session_id, &source_path, None, |_flag| {
             let (messages, parse_warning_count, token_totals) =
                 load_messages_cached(&state, &meta)?;
             if load_cancel::is_canceled() {
@@ -143,38 +143,46 @@ pub async fn get_session_open_window(
     session_id: String,
     offset: i64,
     limit: usize,
+    request_id: Option<String>,
     state: State<'_, AppState>,
 ) -> CommandResult<SessionOpenWindow> {
     let state = state.inner().clone();
     tokio::task::spawn_blocking(move || -> anyhow::Result<SessionOpenWindow> {
         let mut meta = load_session_meta(&state.db, &session_id).map_err(anyhow::Error::msg)?;
         let source_path = meta.source_path.clone();
-        with_load_guard(&state, &session_id, &source_path, |_flag| {
-            // Same tail fast path as `get_session_messages_window`, but the
-            // token totals are also reflected into the returned metadata so
-            // the frontend doesn't need a separate meta request.
-            if let Some(window) = try_tail_fast_path(&state, &meta, offset, limit, &session_id)? {
-                apply_token_totals(&mut meta, window.token_totals);
-                return Ok(SessionOpenWindow { meta, window });
-            }
+        with_load_guard(
+            &state,
+            &session_id,
+            &source_path,
+            request_id.as_deref(),
+            |_flag| {
+                // Same tail fast path as `get_session_messages_window`, but the
+                // token totals are also reflected into the returned metadata so
+                // the frontend doesn't need a separate meta request.
+                if let Some(window) = try_tail_fast_path(&state, &meta, offset, limit, &session_id)?
+                {
+                    apply_token_totals(&mut meta, window.token_totals);
+                    return Ok(SessionOpenWindow { meta, window });
+                }
 
-            let (messages, parse_warning_count, token_totals) =
-                load_messages_cached(&state, &meta)?;
-            if load_cancel::is_canceled() {
-                return Err(canceled_error());
-            }
-            let token_totals =
-                indexed_or_loaded_token_totals(&state.db, &session_id, token_totals)?;
-            apply_token_totals(&mut meta, token_totals);
-            let window = build_session_messages_window(
-                messages.as_ref(),
-                parse_warning_count,
-                token_totals,
-                offset,
-                limit,
-            );
-            Ok(SessionOpenWindow { meta, window })
-        })
+                let (messages, parse_warning_count, token_totals) =
+                    load_messages_cached(&state, &meta)?;
+                if load_cancel::is_canceled() {
+                    return Err(canceled_error());
+                }
+                let token_totals =
+                    indexed_or_loaded_token_totals(&state.db, &session_id, token_totals)?;
+                apply_token_totals(&mut meta, token_totals);
+                let window = build_session_messages_window(
+                    messages.as_ref(),
+                    parse_warning_count,
+                    token_totals,
+                    offset,
+                    limit,
+                );
+                Ok(SessionOpenWindow { meta, window })
+            },
+        )
     })
     .await
     .context("task join error")?
@@ -186,37 +194,45 @@ pub async fn get_session_messages_window(
     session_id: String,
     offset: i64,
     limit: usize,
+    request_id: Option<String>,
     state: State<'_, AppState>,
 ) -> CommandResult<SessionMessagesWindow> {
     let state = state.inner().clone();
     tokio::task::spawn_blocking(move || -> anyhow::Result<SessionMessagesWindow> {
         let meta = load_session_meta(&state.db, &session_id).map_err(anyhow::Error::msg)?;
         let source_path = meta.source_path.clone();
-        with_load_guard(&state, &session_id, &source_path, |_flag| {
-            // Fast path: when the frontend asks for a tail-of-file window
-            // (negative offset) and the cache hasn't seen this session yet,
-            // skip the full-file parse by reading only the trailing bytes.
-            // See `session_tail::try_tail_fast_path` for provider eligibility
-            // and background-promote setup.
-            if let Some(window) = try_tail_fast_path(&state, &meta, offset, limit, &session_id)? {
-                return Ok(window);
-            }
+        with_load_guard(
+            &state,
+            &session_id,
+            &source_path,
+            request_id.as_deref(),
+            |_flag| {
+                // Fast path: when the frontend asks for a tail-of-file window
+                // (negative offset) and the cache hasn't seen this session yet,
+                // skip the full-file parse by reading only the trailing bytes.
+                // See `session_tail::try_tail_fast_path` for provider eligibility
+                // and background-promote setup.
+                if let Some(window) = try_tail_fast_path(&state, &meta, offset, limit, &session_id)?
+                {
+                    return Ok(window);
+                }
 
-            let (messages, parse_warning_count, token_totals) =
-                load_messages_cached(&state, &meta)?;
-            if load_cancel::is_canceled() {
-                return Err(canceled_error());
-            }
-            let token_totals =
-                indexed_or_loaded_token_totals(&state.db, &session_id, token_totals)?;
-            Ok(build_session_messages_window(
-                messages.as_ref(),
-                parse_warning_count,
-                token_totals,
-                offset,
-                limit,
-            ))
-        })
+                let (messages, parse_warning_count, token_totals) =
+                    load_messages_cached(&state, &meta)?;
+                if load_cancel::is_canceled() {
+                    return Err(canceled_error());
+                }
+                let token_totals =
+                    indexed_or_loaded_token_totals(&state.db, &session_id, token_totals)?;
+                Ok(build_session_messages_window(
+                    messages.as_ref(),
+                    parse_warning_count,
+                    token_totals,
+                    offset,
+                    limit,
+                ))
+            },
+        )
     })
     .await
     .context("task join error")?
@@ -239,7 +255,7 @@ pub async fn get_session_turn_outline(
         // session doesn't need to cancel this either; a stale result is
         // discarded by the frontend version check.
         let outline_guard_key = format!("{session_id}#outline");
-        with_load_guard(&state, &outline_guard_key, &source_path, |_flag| {
+        with_load_guard(&state, &outline_guard_key, &source_path, None, |_flag| {
             let (messages, _, _) = load_messages_cached(&state, &meta)?;
             if load_cancel::is_canceled() {
                 return Err(canceled_error());
@@ -256,14 +272,21 @@ pub async fn get_session_turn_outline(
 #[tauri::command]
 pub async fn cancel_session_load(
     session_id: String,
+    request_id: Option<String>,
     state: State<'_, AppState>,
 ) -> CommandResult<()> {
     let map = match state.load_tokens.lock() {
         Ok(g) => g,
         Err(p) => p.into_inner(),
     };
-    if let Some(flag) = map.get(&session_id) {
-        load_cancel::cancel(flag);
+    if let Some(token) = map.get(&session_id) {
+        let matches_request = match request_id.as_deref() {
+            Some(id) => token.request_id.as_deref() == Some(id),
+            None => token.request_id.is_none(),
+        };
+        if matches_request {
+            load_cancel::cancel(&token.flag);
+        }
     }
     Ok(())
 }

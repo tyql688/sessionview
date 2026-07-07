@@ -124,18 +124,21 @@ type BackendCommandMap = {
   get_session_detail: CommandSpec<{ sessionId: string }, SessionDetail>;
   get_session_meta: CommandSpec<{ sessionId: string }, SessionMeta>;
   get_session_open_window: CommandSpec<
-    { sessionId: string; offset: number; limit: number },
+    { sessionId: string; offset: number; limit: number; requestId?: string },
     SessionOpenWindow
   >;
   get_session_messages_window: CommandSpec<
-    { sessionId: string; offset: number; limit: number },
+    { sessionId: string; offset: number; limit: number; requestId?: string },
     SessionMessagesWindow
   >;
   get_session_turn_outline: CommandSpec<
     { sessionId: string },
     SessionTurnOutlineEntry[]
   >;
-  cancel_session_load: CommandSpec<{ sessionId: string }, void>;
+  cancel_session_load: CommandSpec<
+    { sessionId: string; requestId?: string },
+    void
+  >;
   resolve_persisted_output: CommandSpec<{ path: string }, string>;
   search_sessions: CommandSpec<{ filters: SearchFilters }, SearchResult[]>;
   rename_session: CommandSpec<{ sessionId: string; newTitle: string }, void>;
@@ -237,11 +240,13 @@ export async function getSessionOpenWindow(
   sessionId: string,
   offset: number,
   limit: number,
+  requestId?: string,
 ): Promise<SessionOpenWindow> {
   return invokeCommand("get_session_open_window", {
     sessionId,
     offset,
     limit,
+    ...(requestId ? { requestId } : {}),
   });
 }
 
@@ -251,11 +256,13 @@ export async function getSessionMessagesWindow(
   sessionId: string,
   offset: number,
   limit: number,
+  requestId?: string,
 ): Promise<SessionMessagesWindow> {
   return invokeCommand("get_session_messages_window", {
     sessionId,
     offset,
     limit,
+    ...(requestId ? { requestId } : {}),
   });
 }
 
@@ -267,8 +274,14 @@ export async function getSessionTurnOutline(
   });
 }
 
-export async function cancelSessionLoad(sessionId: string): Promise<void> {
-  return invokeCommand("cancel_session_load", { sessionId });
+export async function cancelSessionLoad(
+  sessionId: string,
+  requestId?: string,
+): Promise<void> {
+  return invokeCommand("cancel_session_load", {
+    sessionId,
+    ...(requestId ? { requestId } : {}),
+  });
 }
 
 export async function resolvePersistedOutput(path: string): Promise<string> {

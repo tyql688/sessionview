@@ -55,14 +55,6 @@ function openSubagent(
   );
 }
 
-const SUBAGENT_LABEL_LIMIT = 48;
-
-function compactSubagentLabel(value: string): string {
-  const singleLine = value.replace(/\s+/g, " ").trim();
-  if (singleLine.length <= SUBAGENT_LABEL_LIMIT) return singleLine;
-  return `${singleLine.slice(0, SUBAGENT_LABEL_LIMIT - 3)}...`;
-}
-
 function subagentButtonLabel(
   t: (key: string, options?: Record<string, unknown>) => string,
   prompt: string | undefined,
@@ -72,8 +64,8 @@ function subagentButtonLabel(
 ): string {
   if (total <= 1) return t("tool.openSubagent");
   const identity =
-    compactSubagentLabel(prompt ?? "") ||
-    compactSubagentLabel(agentId ?? "") ||
+    prompt?.replace(/\s+/g, " ").trim() ||
+    agentId?.replace(/\s+/g, " ").trim() ||
     `#${index + 1}`;
   return t("tool.openSubagentNamed", { name: identity });
 }
@@ -551,9 +543,7 @@ export function ToolMessage(props: {
                     description: agentChildPrompts[i] || agentDescription,
                   }}
                   label={
-                    agentChildPrompts[i]
-                      ? compactSubagentLabel(agentChildPrompts[i])
-                      : childId
+                    agentChildPrompts[i]?.replace(/\s+/g, " ").trim() || childId
                   }
                 />
               ))

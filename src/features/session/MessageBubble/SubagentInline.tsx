@@ -102,7 +102,7 @@ export function SubagentInline(props: {
           />
           <span className="shrink-0">{t("tool.subagentPreview")}</span>
           {props.label && (
-            <span className="min-w-0 truncate text-text-tertiary">
+            <span className="min-w-0 whitespace-pre-wrap text-text-tertiary [overflow-wrap:anywhere]">
               {props.label}
             </span>
           )}
@@ -132,7 +132,7 @@ export function SubagentInline(props: {
             <>
               <div className="flex flex-wrap items-center gap-x-2 text-2xs text-text-tertiary">
                 <span
-                  className="max-w-[60%] truncate font-medium text-text-secondary"
+                  className="min-w-0 whitespace-pre-wrap font-medium text-text-secondary [overflow-wrap:anywhere]"
                   title={meta.title}
                 >
                   {meta.title}
@@ -158,7 +158,7 @@ export function SubagentInline(props: {
                     >
                       {msg.role === "user" ? "›" : "‹"}
                     </span>
-                    <span className="line-clamp-2 min-w-0 whitespace-pre-wrap text-text-secondary [overflow-wrap:anywhere]">
+                    <span className="min-w-0 whitespace-pre-wrap text-text-secondary [overflow-wrap:anywhere]">
                       {msg.content}
                     </span>
                   </div>

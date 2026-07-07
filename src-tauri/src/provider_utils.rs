@@ -291,27 +291,6 @@ pub(crate) fn token_usage_from(value: &Value, keys: &UsageKeys) -> Option<TokenU
     })
 }
 
-/// Truncation family — pick by unit and suffix (they are NOT interchangeable):
-/// - here `truncate_with_ellipsis`: counts CHARS, appends `"..."` — titles.
-/// - `db::sync::truncate_chars`: counts CHARS, no suffix — index excerpts.
-/// - `tool_metadata::summary::compact_string`: BYTE limit at a char
-///   boundary, appends `"…"` — tool summaries.
-/// - `exporter::tool_html::truncate_char_boundary`: BYTE limit at a char
-///   boundary, no suffix — HTML export previews.
-pub fn truncate_with_ellipsis(input: &str, max_chars: usize) -> String {
-    if input.chars().count() > max_chars {
-        let mut truncated: String = input.chars().take(max_chars).collect();
-        truncated.push_str("...");
-        truncated
-    } else {
-        input.to_string()
-    }
-}
-
-/// Canonical length of a session title derived from message content. Every
-/// provider derives titles through `session_title`, so this is the one knob.
-pub const SESSION_TITLE_CHARS: usize = 100;
-
 pub fn session_title(first_user_message: Option<&str>) -> String {
     first_user_message
         .map(|message| {
@@ -321,7 +300,7 @@ pub fn session_title(first_user_message: Option<&str>) -> String {
             if text.is_empty() {
                 "Untitled".to_string()
             } else {
-                truncate_with_ellipsis(text, SESSION_TITLE_CHARS)
+                text.to_string()
             }
         })
         .unwrap_or_else(|| "Untitled".to_string())
@@ -408,25 +387,6 @@ mod tests {
         assert_eq!(shorten_home_path("/opt/project"), "/opt/project");
     }
 
-    // --- truncate_with_ellipsis ---
-
-    #[test]
-    fn truncate_short_string_unchanged() {
-        assert_eq!(truncate_with_ellipsis("hello", 10), "hello");
-    }
-
-    #[test]
-    fn truncate_long_string_with_ellipsis() {
-        assert_eq!(truncate_with_ellipsis("hello world", 5), "hello...");
-    }
-
-    #[test]
-    fn truncate_unicode_counts_chars_not_bytes() {
-        let input = "你好世界测试"; // 6 chars, 18 bytes
-        let result = truncate_with_ellipsis(input, 4);
-        assert_eq!(result, "你好世界...");
-    }
-
     // --- session_title ---
 
     #[test]
@@ -452,11 +412,10 @@ mod tests {
     }
 
     #[test]
-    fn session_title_long_message_truncated() {
+    fn session_title_long_message_preserved() {
         let msg = "a".repeat(200);
         let result = session_title(Some(&msg));
-        assert_eq!(result.len(), 103); // 100 chars + "..."
-        assert!(result.ends_with("..."));
+        assert_eq!(result, msg);
     }
 
     // --- is_system_content ---

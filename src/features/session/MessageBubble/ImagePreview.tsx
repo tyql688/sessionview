@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
+import { XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { readImageBase64 } from "@/lib/tauri";
 import { cachedLoad } from "@/lib/image-cache";
 import { shortenHomePath } from "@/lib/formatters";
@@ -180,63 +182,42 @@ export function ImagePreview(props: {
 }) {
   const { t } = useI18n();
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        props.onClose();
-      }
-    };
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", onKeyDown);
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", onKeyDown);
-    };
-    // onClose is the only reactive read; the "destructure props" hint is noise here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.onClose]);
-
   return (
-    <div className="image-preview-overlay" onClick={props.onClose}>
-      <img
-        src={props.src}
-        alt={t("common.image")}
-        className="image-preview-img"
-        onClick={(e) => e.stopPropagation()}
-      />
-      {props.source && (
-        <div
-          className="image-preview-meta"
-          title={props.source ? describeImageSource(props.source) : undefined}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {labelImageSource(props.source!, t)}
-        </div>
-      )}
-      <Button
-        variant="ghost"
-        size="icon-lg"
-        type="button"
-        className="image-preview-close active:translate-y-0"
-        aria-label={t("common.closePreview")}
-        onClick={props.onClose}
+    <Dialog open={true} onOpenChange={(open) => !open && props.onClose()}>
+      <DialogContent
+        showCloseButton={false}
+        className="top-0 left-0 flex h-dvh w-dvw max-w-none translate-x-0 translate-y-0 items-center justify-center gap-0 rounded-none bg-transparent p-0 shadow-none ring-0 sm:max-w-none"
       >
-        <svg
-          width="20"
-          height="20"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          viewBox="0 0 24 24"
+        <DialogTitle className="sr-only">{t("common.image")}</DialogTitle>
+        <div className="image-preview-stage" onClick={props.onClose}>
+          <img
+            src={props.src}
+            alt={t("common.image")}
+            className="image-preview-img"
+            onClick={(e) => e.stopPropagation()}
+          />
+          {props.source && (
+            <div
+              className="image-preview-meta"
+              title={describeImageSource(props.source)}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {labelImageSource(props.source, t)}
+            </div>
+          )}
+        </div>
+        <Button
+          variant="ghost"
+          size="icon-lg"
+          type="button"
+          className="image-preview-close active:translate-y-0"
+          aria-label={t("common.closePreview")}
+          onClick={props.onClose}
         >
-          <line x1="18" y1="6" x2="6" y2="18" />
-          <line x1="6" y1="6" x2="18" y2="18" />
-        </svg>
-      </Button>
-    </div>
+          <XIcon className="size-5" aria-hidden="true" />
+        </Button>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -248,9 +229,7 @@ function labelImageSource(source: string, t: (key: string) => string): string {
   if (source.startsWith("http://") || source.startsWith("https://")) {
     try {
       const url = new URL(source);
-      const pathSegments = url.pathname.split("/").filter(Boolean);
-      const tail = pathSegments.slice(-2).join("/");
-      return tail ? `${url.hostname}/${tail}` : url.hostname;
+      return url.toString();
     } catch (error) {
       console.warn("Failed to parse image source URL:", error);
       return source;
@@ -258,11 +237,7 @@ function labelImageSource(source: string, t: (key: string) => string): string {
   }
 
   const normalized = shortenHomePath(source).replace(/\\/g, "/");
-  const pathSegments = normalized.split("/").filter(Boolean);
-  if (normalized.startsWith("~/")) {
-    return `~/${pathSegments.slice(-2).join("/")}`;
-  }
-  return pathSegments.slice(-2).join("/") || source;
+  return normalized || source;
 }
 
 function describeImageSource(source: string): string {

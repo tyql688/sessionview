@@ -40,6 +40,30 @@ describe("tauri api wrappers", () => {
     });
   });
 
+  it("getSessionOpenWindow sends request identity when provided", async () => {
+    const { getSessionOpenWindow } = await import("@/lib/tauri");
+
+    await getSessionOpenWindow("sess-1", -300, 300, "sess-1:open:1");
+
+    expect(invoke).toHaveBeenCalledWith("get_session_open_window", {
+      sessionId: "sess-1",
+      offset: -300,
+      limit: 300,
+      requestId: "sess-1:open:1",
+    });
+  });
+
+  it("cancelSessionLoad sends request identity when provided", async () => {
+    const { cancelSessionLoad } = await import("@/lib/tauri");
+
+    await cancelSessionLoad("sess-1", "sess-1:open:1");
+
+    expect(invoke).toHaveBeenCalledWith("cancel_session_load", {
+      sessionId: "sess-1",
+      requestId: "sess-1:open:1",
+    });
+  });
+
   it("exportSession uses the simplified session-based payload", async () => {
     const { exportSession } = await import("@/lib/tauri");
 

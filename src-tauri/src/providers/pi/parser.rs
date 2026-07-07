@@ -351,8 +351,6 @@ fn extract_title(entries: &[PiEntry], branch: &[String], header: &PiSessionHeade
                 if let PiAgentMessage::User(user) = &msg_entry.message {
                     let text = extract_content_text(&user.content);
                     if !text.trim().is_empty() {
-                        // Canonical derivation: image-marker strip + shared
-                        // length cap, same as every other provider.
                         return crate::provider_utils::session_title(Some(&text));
                     }
                 }

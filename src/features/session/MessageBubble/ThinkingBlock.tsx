@@ -8,7 +8,7 @@ export function ThinkingBlock(props: { content: string }) {
     // Models pepper thinking with markdown-ish **emphasis**; the collapsed
     // one-liner reads better with the markers stripped (content stays raw).
     const first = props.content.split("\n")[0].replaceAll("**", "");
-    return first.length > 80 ? `${first.slice(0, 80)}...` : first;
+    return first;
   };
 
   return (

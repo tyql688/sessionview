@@ -31,6 +31,7 @@
 .msg-thinking-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 4px 8px;
   cursor: pointer;
@@ -54,9 +55,8 @@
 
 .msg-thinking-preview {
   color: var(--text-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .msg-thinking-chevron {
@@ -98,7 +98,9 @@
 .msg-tool-header {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
+  max-width: 100%;
   padding: 2px 8px;
   background: transparent;
   font-weight: 400;
@@ -133,10 +135,8 @@
 .msg-tool-summary {
   color: var(--text-tertiary);
   font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .msg-tool-input,

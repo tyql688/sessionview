@@ -27,14 +27,19 @@
   text-decoration-color: var(--accent);
 }
 
-/* Code blocks: one-piece panel that follows the app theme — github-light
- * tokens on the light surface, github-dark on the dark one (the dark:
- * variant flips with [data-theme]). */
+/* Code blocks: one-piece panel. In the light theme, keep fenced Markdown code
+ * on the editor's white surface instead of another grey card; dark keeps the
+ * dedicated code surface for contrast with github-dark tokens. */
 .timeline-markdown [data-streamdown="code-block"] {
+  max-width: 100%;
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
-  background: var(--code-bg);
+  background: var(--bg-editor);
   overflow: hidden;
+}
+
+[data-theme="dark"] .timeline-markdown [data-streamdown="code-block"] {
+  background: var(--code-bg);
 }
 
 .timeline-markdown [data-streamdown="code-block-header"] {
@@ -46,15 +51,23 @@
   letter-spacing: 0.08em;
 }
 
-/* Streamdown paints the body white on its own — that stripes the card.
- * Inherit the panel surface instead. */
+/* Keep header/body as one uninterrupted panel surface. */
 .timeline-markdown [data-streamdown="code-block-body"] {
   border: 0;
   background: transparent;
-  padding: 11px 14px;
+  max-width: 100%;
+  padding: 11px 14px 18px;
   font-size: 13px;
   line-height: 1.7;
   color: var(--code-text);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
+}
+
+.timeline-markdown [data-streamdown="code-block-body"] code {
+  display: block;
+  min-width: max-content;
 }
 
 /* Lists: restore visible markers and a comfortable hang. */

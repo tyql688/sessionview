@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { flushSync } from "react-dom";
 import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
-import { getSessionMessagesWindow, isLoadCanceledError } from "@/lib/tauri";
+import {
+  cancelSessionLoad,
+  getSessionMessagesWindow,
+  isLoadCanceledError,
+} from "@/lib/tauri";
 import type { Message, SessionMeta, TokenTotals } from "@/lib/types";
 import { findFirstMatchingEntryIndex } from "@/features/session/search-utils";
 import type { ProcessedEntry } from "@/features/session/hooks";
@@ -95,6 +99,11 @@ export function useSessionPagination(
   scrollElementRef.current = opts.scrollElement;
 
   const windowFetchInFlightRef = useRef(false);
+  const windowRequestSeqRef = useRef(0);
+  const activeWindowRequestRef = useRef<{
+    sessionId: string;
+    requestId: string;
+  } | null>(null);
   // Edge prefetch is armed only after the view has been positioned
   // (scroll-to-end on open, or a reveal jump). Before that, the virtualizer
   // renders from offset 0 and the "near the top" check would fire a spurious
@@ -103,6 +112,35 @@ export function useSessionPagination(
   useEffect(() => {
     positionedRef.current = false;
   }, [opts.sessionId]);
+
+  useEffect(() => {
+    return () => {
+      const request = activeWindowRequestRef.current;
+      if (request) {
+        void cancelSessionLoad(request.sessionId, request.requestId).catch(
+          (error) => {
+            console.warn("cancelSessionLoad failed:", error);
+          },
+        );
+      }
+    };
+  }, [opts.sessionId]);
+
+  function beginWindowRequest(kind: string): {
+    sessionId: string;
+    requestId: string;
+  } {
+    const sessionId = sessionIdRef.current;
+    const requestId = `${sessionId}:window:${kind}:${++windowRequestSeqRef.current}`;
+    activeWindowRequestRef.current = { sessionId, requestId };
+    return { sessionId, requestId };
+  }
+
+  function finishWindowRequest(requestId: string) {
+    if (activeWindowRequestRef.current?.requestId === requestId) {
+      activeWindowRequestRef.current = null;
+    }
+  }
 
   const virtualizer = useVirtualizer({
     count: opts.filteredEntries.length,
@@ -146,13 +184,18 @@ export function useSessionPagination(
     if (windowFetchInFlightRef.current || windowStartRef.current <= 0) {
       return false;
     }
-    const sessionId = sessionIdRef.current;
+    const request = beginWindowRequest("older");
     windowFetchInFlightRef.current = true;
     const newStart = Math.max(0, windowStartRef.current - TAIL_BATCH);
     const span = windowStartRef.current - newStart;
     try {
-      const older = await getSessionMessagesWindow(sessionId, newStart, span);
-      if (sessionId !== sessionIdRef.current) return false;
+      const older = await getSessionMessagesWindow(
+        request.sessionId,
+        newStart,
+        span,
+        request.requestId,
+      );
+      if (request.sessionId !== sessionIdRef.current) return false;
       prependMessages(older);
       return older.messages.length > 0;
     } catch (e) {
@@ -160,6 +203,7 @@ export function useSessionPagination(
       console.warn("load older messages failed:", e);
       return false;
     } finally {
+      finishWindowRequest(request.requestId);
       windowFetchInFlightRef.current = false;
     }
   }
@@ -169,11 +213,16 @@ export function useSessionPagination(
     if (windowFetchInFlightRef.current || end >= totalMessagesRef.current) {
       return false;
     }
-    const sessionId = sessionIdRef.current;
+    const request = beginWindowRequest("newer");
     windowFetchInFlightRef.current = true;
     try {
-      const newer = await getSessionMessagesWindow(sessionId, end, TAIL_BATCH);
-      if (sessionId !== sessionIdRef.current) return false;
+      const newer = await getSessionMessagesWindow(
+        request.sessionId,
+        end,
+        TAIL_BATCH,
+        request.requestId,
+      );
+      if (request.sessionId !== sessionIdRef.current) return false;
       // Appending below the viewport never moves visible content in a
       // top-down layout — no flushSync, no scroll compensation needed.
       opts.setMeta((prev) => opts.withTokenTotals(prev, newer.token_totals));
@@ -185,6 +234,7 @@ export function useSessionPagination(
       console.warn("load newer messages failed:", e);
       return false;
     } finally {
+      finishWindowRequest(request.requestId);
       windowFetchInFlightRef.current = false;
     }
   }
@@ -231,16 +281,17 @@ export function useSessionPagination(
    * if the user scrolls back. */
   async function recenterWindowAround(messageIndex: number): Promise<boolean> {
     if (windowFetchInFlightRef.current) return false;
-    const sessionId = sessionIdRef.current;
+    const request = beginWindowRequest("recenter");
     windowFetchInFlightRef.current = true;
     try {
       const start = Math.max(0, messageIndex - Math.floor(INITIAL_TAIL / 2));
       const window = await getSessionMessagesWindow(
-        sessionId,
+        request.sessionId,
         start,
         INITIAL_TAIL,
+        request.requestId,
       );
-      if (sessionId !== sessionIdRef.current) return false;
+      if (request.sessionId !== sessionIdRef.current) return false;
       // flushSync so the entry lookup below sees the new window.
       flushSync(() => {
         opts.setMeta((prev) => opts.withTokenTotals(prev, window.token_totals));
@@ -254,6 +305,7 @@ export function useSessionPagination(
       console.warn("recenter window failed:", e);
       return false;
     } finally {
+      finishWindowRequest(request.requestId);
       windowFetchInFlightRef.current = false;
     }
   }
@@ -304,18 +356,28 @@ export function useSessionPagination(
     const total = totalMessagesRef.current;
     if (start <= 0 && end >= total) return true;
 
-    const sessionId = sessionIdRef.current;
+    const request = beginWindowRequest("search");
     windowFetchInFlightRef.current = true;
     try {
       if (end >= total) {
-        const older = await getSessionMessagesWindow(sessionId, 0, start);
-        if (sessionId !== sessionIdRef.current) return false;
+        const older = await getSessionMessagesWindow(
+          request.sessionId,
+          0,
+          start,
+          request.requestId,
+        );
+        if (request.sessionId !== sessionIdRef.current) return false;
         prependMessages(older);
         return older.start === 0;
       }
 
-      const complete = await getSessionMessagesWindow(sessionId, 0, total);
-      if (sessionId !== sessionIdRef.current) return false;
+      const complete = await getSessionMessagesWindow(
+        request.sessionId,
+        0,
+        total,
+        request.requestId,
+      );
+      if (request.sessionId !== sessionIdRef.current) return false;
       const scroller = scrollElementRef.current;
       const prevFirstKey = filteredEntriesRef.current[0]?.key;
       const prevScrollTop = scroller?.scrollTop ?? 0;
@@ -345,6 +407,7 @@ export function useSessionPagination(
       console.warn("load complete session for search failed:", e);
       return false;
     } finally {
+      finishWindowRequest(request.requestId);
       windowFetchInFlightRef.current = false;
     }
   }

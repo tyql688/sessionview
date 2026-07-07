@@ -377,7 +377,6 @@ impl SessionProvider for OpenCodeProvider {
                         directory.clone()
                     };
                     let display_title = if title.is_empty() {
-                        // session_title applies the canonical length cap itself.
                         session_title(Some(&content_text))
                     } else {
                         title

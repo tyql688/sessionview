@@ -17,6 +17,12 @@ use crate::services::load_cancel::CancelFlag;
 use crate::services::{PersistedOutputCache, SessionCache};
 
 #[derive(Clone)]
+pub struct LoadToken {
+    pub request_id: Option<String>,
+    pub flag: CancelFlag,
+}
+
+#[derive(Clone)]
 pub struct AppState {
     pub db: Arc<Database>,
     pub indexer: Indexer,
@@ -27,9 +33,10 @@ pub struct AppState {
     /// LRU of resolved `<persisted-output>` referenced files. Replaces
     /// per-message synchronous resolution at parse time.
     pub persisted_output_cache: Arc<PersistedOutputCache>,
-    /// Live cancel flags keyed by session_id. Frontend cancels by id when
-    /// the user closes / switches tabs mid-load.
-    pub load_tokens: Arc<Mutex<HashMap<String, CancelFlag>>>,
+    /// Live cancel flags keyed by session_id. Each flag also carries a
+    /// frontend request identity so stale cleanup IPC cannot cancel a newer
+    /// load for the same session.
+    pub load_tokens: Arc<Mutex<HashMap<String, LoadToken>>>,
     /// Cache keys whose background full-file parse is in flight. The tail
     /// fast-path consults this set to avoid spawning a duplicate promote
     /// when the user opens the same session twice in rapid succession.

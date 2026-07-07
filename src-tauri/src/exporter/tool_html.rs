@@ -12,21 +12,6 @@ fn html_escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-/// Inline preview width for a tool argument in exported HTML — long values
-/// render as `first 57 chars + "..."` so a row stays one line.
-const HTML_ARG_PREVIEW_CHARS: usize = 57;
-
-fn truncate_char_boundary(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        return s;
-    }
-    let mut end = max;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
-}
-
 fn is_path_label(label: &str) -> bool {
     let label = label.to_ascii_lowercase();
     label == "file" || label == "path" || label.ends_with("path")
@@ -253,13 +238,7 @@ pub(crate) fn tool_summary(name: &str, input: &str, metadata: Option<&ToolMetada
             .map(shorten_home_path)
             .unwrap_or_default(),
         "Bash" => string_field(&obj, &["description", "command", "cmd"])
-            .map(|s| {
-                if s.len() > 60 {
-                    format!("{}...", truncate_char_boundary(s, HTML_ARG_PREVIEW_CHARS))
-                } else {
-                    s.to_string()
-                }
-            })
+            .map(str::to_owned)
             .unwrap_or_default(),
         "Grep" | "Glob" => string_field(&obj, &["pattern", "query"])
             .unwrap_or_default()
@@ -306,13 +285,7 @@ pub(crate) fn tool_summary(name: &str, input: &str, metadata: Option<&ToolMetada
                 .map(|s| s.to_string())
                 .unwrap_or_default();
             let prompt = string_field(&obj, &["prompt"])
-                .map(|s| {
-                    if s.len() > 60 {
-                        format!("{}...", truncate_char_boundary(s, HTML_ARG_PREVIEW_CHARS))
-                    } else {
-                        s.to_string()
-                    }
-                })
+                .map(str::to_owned)
                 .unwrap_or_default();
             join_non_empty([cron, prompt])
         }
@@ -330,13 +303,7 @@ pub(crate) fn tool_summary(name: &str, input: &str, metadata: Option<&ToolMetada
             .map(shorten_home_path)
             .unwrap_or_default(),
         "Workflow" => string_field(&obj, &["name", "description", "script"])
-            .map(|s| {
-                if s.len() > 60 {
-                    format!("{}...", truncate_char_boundary(s, HTML_ARG_PREVIEW_CHARS))
-                } else {
-                    s.to_string()
-                }
-            })
+            .map(str::to_owned)
             .unwrap_or_default(),
         "StructuredOutput" => string_field(
             &obj,
@@ -349,22 +316,10 @@ pub(crate) fn tool_summary(name: &str, input: &str, metadata: Option<&ToolMetada
                 "minimal_fix",
             ],
         )
-        .map(|s| {
-            if s.len() > 60 {
-                format!("{}...", truncate_char_boundary(s, HTML_ARG_PREVIEW_CHARS))
-            } else {
-                s.to_string()
-            }
-        })
+        .map(str::to_owned)
         .unwrap_or_default(),
         "JavaScript" => string_field(&obj, &["title", "code"])
-            .map(|s| {
-                if s.len() > 60 {
-                    format!("{}...", truncate_char_boundary(s, HTML_ARG_PREVIEW_CHARS))
-                } else {
-                    s.to_string()
-                }
-            })
+            .map(str::to_owned)
             .unwrap_or_default(),
         "ComputerUse" => {
             let app = string_field(&obj, &["app"])
@@ -376,13 +331,7 @@ pub(crate) fn tool_summary(name: &str, input: &str, metadata: Option<&ToolMetada
             join_non_empty([app, action])
         }
         "SendMessage" => string_field(&obj, &["description", "prompt", "message", "content"])
-            .map(|s| {
-                if s.len() > 60 {
-                    format!("{}...", truncate_char_boundary(s, HTML_ARG_PREVIEW_CHARS))
-                } else {
-                    s.to_string()
-                }
-            })
+            .map(str::to_owned)
             .unwrap_or_default(),
         "AskUserQuestion" => {
             let questions = obj
@@ -399,13 +348,7 @@ pub(crate) fn tool_summary(name: &str, input: &str, metadata: Option<&ToolMetada
             join_non_empty([questions, background])
         }
         "CreateGoal" => string_field(&obj, &["objective"])
-            .map(|s| {
-                if s.len() > 60 {
-                    format!("{}...", truncate_char_boundary(s, HTML_ARG_PREVIEW_CHARS))
-                } else {
-                    s.to_string()
-                }
-            })
+            .map(str::to_owned)
             .unwrap_or_default(),
         "SetGoalBudget" => {
             let value = obj

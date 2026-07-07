@@ -601,9 +601,7 @@
   flex: 1;
   min-width: 0;
   text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .usage-bar-labels > span.active {
@@ -636,6 +634,7 @@
 
 .usage-spotlight-meta {
   justify-content: space-between;
+  flex-wrap: wrap;
 }
 
 .usage-spotlight-tokens,
@@ -790,6 +789,8 @@
   color: var(--text-primary);
   font-size: 12px;
   font-weight: 600;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .usage-model-cell {
@@ -827,11 +828,8 @@
 }
 
 .usage-entity-subtitle {
-  max-width: 320px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 11px;
+  overflow-wrap: anywhere;
   user-select: text;
   -webkit-user-select: text;
 }

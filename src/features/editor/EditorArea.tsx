@@ -147,7 +147,10 @@ export function EditorArea(props: {
                       <ProviderIcon provider={session.provider} />
                     </span>
                     <div className="editor-empty-session-info">
-                      <span className="editor-empty-session-title">
+                      <span
+                        className="editor-empty-session-title"
+                        title={session.title}
+                      >
                         {session.title}
                       </span>
                       <span className="editor-empty-session-meta">

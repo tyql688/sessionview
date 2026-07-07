@@ -96,7 +96,10 @@ export function SessionView(props: {
   // re-renders, so a snapshot prop goes stale.
   const [messagesEl, setMessagesEl] = useState<HTMLDivElement | null>(null);
   const sessionSearchDebounceRef = useRef<(() => void) | undefined>(undefined);
-  const prevSessionIdRef = useRef<string | null>(null);
+  const activeOpenRequestRef = useRef<{
+    sessionId: string;
+    requestId: string;
+  } | null>(null);
 
   function withTokenTotals(
     metaData: SessionMeta,
@@ -160,14 +163,17 @@ export function SessionView(props: {
   useEffect(() => {
     const sessionId = props.session.id;
     const version = ++loadVersionRef.current;
-    // Best-effort cancel of the previously in-flight load so the
-    // backend parser can bail out instead of running to completion.
-    if (prevSessionIdRef.current && prevSessionIdRef.current !== sessionId) {
-      void cancelSessionLoad(prevSessionIdRef.current).catch((err) => {
+    const requestId = `${sessionId}:open:${version}`;
+    const previousRequest = activeOpenRequestRef.current;
+    if (previousRequest && previousRequest.sessionId !== sessionId) {
+      void cancelSessionLoad(
+        previousRequest.sessionId,
+        previousRequest.requestId,
+      ).catch((err) => {
         console.warn("cancelSessionLoad failed:", err);
       });
     }
-    prevSessionIdRef.current = sessionId;
+    activeOpenRequestRef.current = { sessionId, requestId };
 
     setLoading(true);
     setError(null);
@@ -185,6 +191,7 @@ export function SessionView(props: {
           sessionId,
           -INITIAL_TAIL,
           INITIAL_TAIL,
+          requestId,
         );
         if (version !== loadVersionRef.current) return;
         const tail = open.window;
@@ -199,6 +206,9 @@ export function SessionView(props: {
         if (isLoadCanceledError(e)) return; // user navigated away
         setError(errorMessage(e));
       } finally {
+        if (activeOpenRequestRef.current?.requestId === requestId) {
+          activeOpenRequestRef.current = null;
+        }
         if (version === loadVersionRef.current) setLoading(false);
       }
     })();
@@ -256,10 +266,13 @@ export function SessionView(props: {
   // Cancel server-side parse when this view goes away.
   useEffect(() => {
     return () => {
-      if (prevSessionIdRef.current) {
-        void cancelSessionLoad(prevSessionIdRef.current).catch((err) => {
-          console.warn("cancelSessionLoad failed:", err);
-        });
+      const request = activeOpenRequestRef.current;
+      if (request) {
+        void cancelSessionLoad(request.sessionId, request.requestId).catch(
+          (err) => {
+            console.warn("cancelSessionLoad failed:", err);
+          },
+        );
       }
     };
   }, []);

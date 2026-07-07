@@ -97,7 +97,7 @@ body {{ font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helveti
 .tool-summary:hover {{ color: var(--text); }}
 .tool-icon {{ font-size: 1em; }}
 .tool-name {{ font-family: 'SF Mono',Menlo,monospace; font-weight: 600; color: var(--text); }}
-.tool-hint {{ color: var(--text3); font-size: 0.9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+.tool-hint {{ color: var(--text3); font-size: 0.9em; overflow-wrap: anywhere; }}
 .tool-content {{ padding: 8px 14px; border-top: 1px solid var(--border); }}
 .tool-result-detail {{ border-top: 1px solid var(--border); padding-top: 6px; margin-top: 6px; }}
 .tool-field {{ display: flex; gap: 8px; padding: 3px 0; font-size: 0.9em; }}

@@ -27,14 +27,6 @@ fn html_escape_replaces_all_reserved_characters() {
 }
 
 #[test]
-fn truncate_char_boundary_does_not_split_multibyte() {
-    // "café" is 5 bytes (é is 2). Truncating at 4 must back off to 3
-    // so we never slice mid-codepoint.
-    assert_eq!(truncate_char_boundary("café", 4), "caf");
-    assert_eq!(truncate_char_boundary("ab", 10), "ab");
-}
-
-#[test]
 fn is_path_label_matches_path_suffixes() {
     assert!(is_path_label("file"));
     assert!(is_path_label("path"));
@@ -124,13 +116,11 @@ fn tool_summary_extracts_file_path_for_read() {
 }
 
 #[test]
-fn tool_summary_truncates_long_bash_command() {
+fn tool_summary_preserves_long_bash_command() {
     let long = "x".repeat(100);
     let input = json!({ "command": long }).to_string();
     let summary = tool_summary("Bash", &input, None);
-    assert!(summary.ends_with("..."));
-    // 57 chars kept + "..." == 60.
-    assert_eq!(summary.chars().count(), 60);
+    assert_eq!(summary, "x".repeat(100));
 }
 
 #[test]

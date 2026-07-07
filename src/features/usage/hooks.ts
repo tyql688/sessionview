@@ -532,13 +532,7 @@ export function useUsageDerived(deps: UsageDerivedDeps) {
     [stats.data, selectedProviderKeys, chartMetric],
   );
 
-  // The model breakdown card has fixed rows (unlike project/session lists,
-  // which have user-configurable limits) — it's a summary, not a table.
-  const TOP_MODEL_ROWS = 4;
-  const topModels = useMemo(
-    () => sortedModels.slice(0, TOP_MODEL_ROWS),
-    [sortedModels],
-  );
+  const topModels = sortedModels;
   const maxTopModelCost = useMemo(() => topModels[0]?.cost ?? 0, [topModels]);
 
   const activeRangeLabel = ((): string => {

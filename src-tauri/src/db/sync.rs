@@ -247,24 +247,10 @@ impl Database {
     }
 
     pub(crate) fn rename_session(&self, id: &str, new_title: &str) -> Result<(), rusqlite::Error> {
-        // User-typed titles get double the derived-title budget
-        // (SESSION_TITLE_CHARS): an explicit rename is data, not a preview,
-        // but it still needs a sane bound for list layout.
-        const RENAME_TITLE_CHARS: usize = crate::provider_utils::SESSION_TITLE_CHARS * 2;
-        let title = if new_title.chars().count() > RENAME_TITLE_CHARS {
-            new_title
-                .chars()
-                .take(RENAME_TITLE_CHARS)
-                .collect::<String>()
-                .trim_end()
-                .to_string()
-        } else {
-            new_title.to_string()
-        };
         let conn = self.lock_write()?;
         conn.execute(
             "UPDATE sessions SET title = ?1, title_custom = 1 WHERE id = ?2",
-            params![title, id],
+            params![new_title, id],
         )?;
         Ok(())
     }

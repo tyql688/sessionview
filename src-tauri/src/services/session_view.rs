@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
-use crate::commands::AppState;
+use crate::commands::{AppState, LoadToken};
 use crate::models::Message;
 use crate::services::load_cancel::{self, CancelFlag};
 
@@ -24,15 +24,21 @@ struct CancelFlagGuard<'a> {
 }
 
 impl<'a> CancelFlagGuard<'a> {
-    fn new(state: &'a AppState, session_id: &str) -> Self {
+    fn new(state: &'a AppState, session_id: &str, request_id: Option<&str>) -> Self {
         let flag = load_cancel::fresh();
         {
             let mut map = match state.load_tokens.lock() {
                 Ok(g) => g,
                 Err(p) => p.into_inner(),
             };
-            if let Some(prev) = map.insert(session_id.to_string(), Arc::clone(&flag)) {
-                load_cancel::cancel(&prev);
+            if let Some(prev) = map.insert(
+                session_id.to_string(),
+                LoadToken {
+                    request_id: request_id.map(str::to_string),
+                    flag: Arc::clone(&flag),
+                },
+            ) {
+                load_cancel::cancel(&prev.flag);
             }
         }
         Self {
@@ -54,7 +60,7 @@ impl Drop for CancelFlagGuard<'_> {
             Err(p) => p.into_inner(),
         };
         if let Some(existing) = map.get(&self.session_id) {
-            if Arc::ptr_eq(existing, &self.flag) {
+            if Arc::ptr_eq(&existing.flag, &self.flag) {
                 map.remove(&self.session_id);
             }
         }
@@ -68,12 +74,13 @@ pub(crate) fn with_load_guard<F, R>(
     state: &AppState,
     session_id: &str,
     _source_path: &str,
+    request_id: Option<&str>,
     work: F,
 ) -> R
 where
     F: FnOnce(CancelFlag) -> R,
 {
-    let cancel_guard = CancelFlagGuard::new(state, session_id);
+    let cancel_guard = CancelFlagGuard::new(state, session_id, request_id);
     let flag = cancel_guard.flag().clone();
     load_cancel::run_with(flag.clone(), move || work(flag))
 }

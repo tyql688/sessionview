@@ -83,9 +83,6 @@ const SYSTEM_SUBTYPE_CONFIG: Record<
 
 const LEGACY_LOCAL_COMMAND_PREFIX = "[local_command]";
 
-/** Details short enough to read inline skip the disclosure affordance. */
-const SYSTEM_INLINE_DETAIL_MAX = 80;
-
 function SystemMessage(props: { content: string }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
@@ -96,11 +93,8 @@ function SystemMessage(props: { content: string }) {
   }
 
   const detail = match[2].trim();
-  const collapsible =
-    detail.includes("\n") || detail.length > SYSTEM_INLINE_DETAIL_MAX;
-  const summary = collapsible
-    ? `${(detail.split("\n", 1)[0] ?? "").slice(0, SYSTEM_INLINE_DETAIL_MAX)}…`
-    : detail;
+  const collapsible = detail.includes("\n");
+  const summary = collapsible ? (detail.split("\n", 1)[0] ?? "") : detail;
 
   if (!collapsible) {
     return (

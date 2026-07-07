@@ -248,15 +248,13 @@ export function TreeNodeComponent(props: {
           props.node.node_type === "project" &&
           directoryProviders(props.node).length > 0 && (
             <span className="tree-provider-cluster">
-              {directoryProviders(props.node)
-                .slice(0, 4)
-                .map((provider) => (
-                  <i
-                    key={provider}
-                    className="tree-provider-cluster-dot"
-                    style={{ background: getProviderColor(provider) }}
-                  />
-                ))}
+              {directoryProviders(props.node).map((provider) => (
+                <i
+                  key={provider}
+                  className="tree-provider-cluster-dot"
+                  style={{ background: getProviderColor(provider) }}
+                />
+              ))}
             </span>
           )}
         {isOrphanFolder() && (
