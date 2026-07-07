@@ -240,6 +240,17 @@ pub async fn open_in_folder(path: String) -> CommandResult<()> {
 }
 
 fn open_in_folder_sync(path: &str) -> CommandResult<()> {
+    // Session text often references files as ~/... — expand before checks.
+    let expanded: std::path::PathBuf = if let Some(rest) = path.strip_prefix("~/") {
+        match dirs::home_dir() {
+            Some(home) => home.join(rest),
+            None => return Err(anyhow!("cannot resolve home directory").into()),
+        }
+    } else {
+        std::path::PathBuf::from(path)
+    };
+    let path = expanded.to_string_lossy().as_ref().to_string();
+    let path = path.as_str();
     let p = Path::new(path);
     if !p.exists() {
         return Err(anyhow!("path not found: {path}").into());
