@@ -58,6 +58,18 @@ impl Database {
 }
 
 impl Database {
+    /// Fold the WAL back into the main file and truncate it. Heavy sync
+    /// passes append hundreds of MB of WAL, and the passive autocheckpoint
+    /// never wins against steady read traffic — left alone the WAL grows
+    /// unbounded (observed >1GB) and every reader pays to scan it. Called
+    /// after maintenance work; best-effort (TRUNCATE yields to active
+    /// readers rather than erroring).
+    pub fn checkpoint_truncate(&self) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_write()?;
+        conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        Ok(())
+    }
+
     pub fn with_transaction<T, F>(&self, f: F) -> Result<T, rusqlite::Error>
     where
         F: FnOnce(&Connection) -> Result<T, rusqlite::Error>,
@@ -127,7 +139,11 @@ impl Database {
                 VALUES ('delete', old.rowid, old.title, old.content_text, old.project_name);
             END;
 
-            CREATE TRIGGER IF NOT EXISTS sessions_au AFTER UPDATE ON sessions BEGIN
+            -- UPDATE OF: token-total/mtime-only updates must not churn the
+            -- trigram index (it is ~10x the indexed content). Keep the column
+            -- list in sync with the two re-creation sites below.
+            CREATE TRIGGER IF NOT EXISTS sessions_au
+            AFTER UPDATE OF title, content_text, project_name ON sessions BEGIN
                 INSERT INTO sessions_fts(sessions_fts, rowid, title, content_text, project_name)
                 VALUES ('delete', old.rowid, old.title, old.content_text, old.project_name);
                 INSERT INTO sessions_fts(rowid, title, content_text, project_name)
@@ -366,7 +382,8 @@ impl Database {
                      VALUES ('delete', old.rowid, old.title, old.content_text, old.project_name);
                  END;
 
-                 CREATE TRIGGER sessions_au AFTER UPDATE ON sessions BEGIN
+                 CREATE TRIGGER sessions_au
+                 AFTER UPDATE OF title, content_text, project_name ON sessions BEGIN
                      INSERT INTO sessions_fts(sessions_fts, rowid, title, content_text, project_name)
                      VALUES ('delete', old.rowid, old.title, old.content_text, old.project_name);
                      INSERT INTO sessions_fts(rowid, title, content_text, project_name)
@@ -376,6 +393,33 @@ impl Database {
                  INSERT INTO sessions_fts(sessions_fts) VALUES('rebuild');
 
                  INSERT INTO meta (key, value) VALUES ('fts_tokenizer_version', 'trigram_v1')
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
+            )?;
+        }
+
+        // Migration: narrow the FTS update trigger to the indexed columns.
+        // Existing DBs carry the old `AFTER UPDATE` form, which rewrote the
+        // session's trigram postings on EVERY row update (token totals,
+        // source_mtime, ...). Cheap swap — the index itself is untouched.
+        const SESSIONS_AU_VERSION: &str = "update_of_v1";
+        let current_au_version: Option<String> = {
+            let mut stmt =
+                write_conn.prepare("SELECT value FROM meta WHERE key = 'sessions_au_version'")?;
+            stmt.query_row([], |row| row.get(0)).ok()
+        };
+        if current_au_version.as_deref() != Some(SESSIONS_AU_VERSION) {
+            write_conn.execute_batch(
+                "DROP TRIGGER IF EXISTS sessions_au;
+
+                 CREATE TRIGGER sessions_au
+                 AFTER UPDATE OF title, content_text, project_name ON sessions BEGIN
+                     INSERT INTO sessions_fts(sessions_fts, rowid, title, content_text, project_name)
+                     VALUES ('delete', old.rowid, old.title, old.content_text, old.project_name);
+                     INSERT INTO sessions_fts(rowid, title, content_text, project_name)
+                     VALUES (new.rowid, new.title, new.content_text, new.project_name);
+                 END;
+
+                 INSERT INTO meta (key, value) VALUES ('sessions_au_version', 'update_of_v1')
                      ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
             )?;
         }

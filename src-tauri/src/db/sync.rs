@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::models::{Message, MessageRole, Provider, SessionMeta};
 use crate::provider::ParsedSession;
@@ -429,27 +429,129 @@ fn upsert_parsed_sessions_on(
     conn: &Connection,
     sessions: &[ParsedSession],
 ) -> Result<(), rusqlite::Error> {
+    let mut slim = 0usize;
     for parsed in sessions {
         let content = indexable_content_text(&parsed.messages, &parsed.content_text);
-        upsert_session_on(
+        let outcome = upsert_session_on(
             conn,
             &parsed.meta,
             &content,
             &parsed.child_session_ids,
             parsed.source_mtime,
         )?;
+        if outcome == UpsertOutcome::MetadataOnly {
+            slim += 1;
+        }
+    }
+    if slim > 0 {
+        log::debug!(
+            "upsert batch: {slim}/{} sessions had unchanged searchable content (FTS skipped)",
+            sessions.len()
+        );
     }
     Ok(())
 }
 
+/// How `upsert_session_on` wrote the row. `MetadataOnly` means the searchable
+/// columns were untouched, so the (expensive) FTS trigram update never fired.
+#[derive(Debug, PartialEq)]
+enum UpsertOutcome {
+    IndexedContent,
+    MetadataOnly,
+}
+
+/// Upsert one session row. When the row already exists and its effective
+/// searchable columns (title / content_text / project_name, after the
+/// keep-old-value rules below) are unchanged, only the metadata columns are
+/// updated — the SET list omits the FTS-indexed columns so the `UPDATE OF`
+/// trigger does not rewrite ~content-size trigram postings per session.
+/// Measured on a 2.3k-session library: this is roughly half the cost of a
+/// full usage refresh.
 fn upsert_session_on(
     conn: &Connection,
     meta: &SessionMeta,
     content_text: &str,
     child_session_ids: &[String],
     source_mtime: i64,
-) -> Result<(), rusqlite::Error> {
+) -> Result<UpsertOutcome, rusqlite::Error> {
     let provider_str = meta.provider.key();
+
+    let existing: Option<(String, String, String, i64)> = conn
+        .prepare_cached(
+            "SELECT title, content_text, project_name, title_custom FROM sessions WHERE id = ?1",
+        )?
+        .query_row(params![meta.id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .optional()?;
+
+    let searchable_unchanged = existing.as_ref().is_some_and(
+        |(old_title, old_content, old_project_name, title_custom)| {
+            // Mirror the CASE rules of the full upsert below: a custom title
+            // always wins, and placeholder project names keep the old value.
+            let effective_title = if *title_custom == 1 {
+                old_title.as_str()
+            } else {
+                meta.title.as_str()
+            };
+            let effective_project_name =
+                if !meta.project_name.is_empty() && meta.project_name != "Unknown Project" {
+                    meta.project_name.as_str()
+                } else {
+                    old_project_name.as_str()
+                };
+            effective_title == old_title
+                && effective_project_name == old_project_name
+                && content_text == old_content
+        },
+    );
+
+    if searchable_unchanged {
+        conn.execute(
+            "UPDATE sessions SET
+                provider = ?2,
+                project_path = CASE WHEN ?3 != '' THEN ?3 ELSE project_path END,
+                created_at = ?4,
+                updated_at = ?5,
+                message_count = ?6,
+                file_size_bytes = ?7,
+                source_path = ?8,
+                is_sidechain = CASE
+                    WHEN ?2 = 'pi' THEN ?9
+                    WHEN ?9 = 1 OR is_sidechain = 1 THEN 1
+                    ELSE 0
+                END,
+                variant_name = ?10,
+                model = ?11,
+                cc_version = ?12,
+                git_branch = ?13,
+                parent_id = CASE
+                    WHEN ?2 = 'pi' THEN ?14
+                    ELSE COALESCE(?14, parent_id)
+                END,
+                source_mtime = ?15
+             WHERE id = ?1",
+            params![
+                meta.id,
+                provider_str,
+                meta.project_path,
+                meta.created_at,
+                meta.updated_at,
+                meta.message_count,
+                meta.file_size_bytes,
+                meta.source_path,
+                meta.is_sidechain as i64,
+                meta.variant_name,
+                meta.model,
+                meta.cc_version,
+                meta.git_branch,
+                meta.parent_id,
+                source_mtime,
+            ],
+        )?;
+        backfill_children_on(conn, meta, child_session_ids)?;
+        return Ok(UpsertOutcome::MetadataOnly);
+    }
 
     conn.execute(
         "INSERT INTO sessions (id, provider, title, project_path, project_name,
@@ -503,11 +605,21 @@ fn upsert_session_on(
         ],
     )?;
 
-    // Back-fill parent_id / is_sidechain / project metadata on already-indexed
-    // child rows. `child_session_ids` is populated by providers that surface
-    // structured parent→child links in the transcript itself (today only
-    // Antigravity via its `INVOKE_SUBAGENT` step type). For other providers
-    // the list is empty and this loop is a no-op.
+    backfill_children_on(conn, meta, child_session_ids)?;
+
+    Ok(UpsertOutcome::IndexedContent)
+}
+
+/// Back-fill parent_id / is_sidechain / project metadata on already-indexed
+/// child rows. `child_session_ids` is populated by providers that surface
+/// structured parent→child links in the transcript itself (today only
+/// Antigravity via its `INVOKE_SUBAGENT` step type). For other providers
+/// the list is empty and this loop is a no-op.
+fn backfill_children_on(
+    conn: &Connection,
+    meta: &SessionMeta,
+    child_session_ids: &[String],
+) -> Result<(), rusqlite::Error> {
     for child_id in child_session_ids {
         if child_id == &meta.id {
             continue;
@@ -522,7 +634,6 @@ fn upsert_session_on(
             params![meta.id, meta.project_path, meta.project_name, child_id],
         )?;
     }
-
     Ok(())
 }
 

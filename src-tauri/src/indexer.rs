@@ -69,7 +69,15 @@ impl Indexer {
     }
 
     pub fn reindex(&self) -> ServiceResult<usize> {
-        self.reindex_filtered(None, true)
+        self.reindex_filtered(None, true, false)
+    }
+
+    /// Full reparse of every source file regardless of the freshness snapshot,
+    /// WITHOUT destroying any existing data first. Token stats are swapped
+    /// per-session inside each provider's commit, so a failure part-way leaves
+    /// the previous stats in place instead of an empty usage panel.
+    pub fn refresh_usage(&self) -> ServiceResult<usize> {
+        self.reindex_filtered(None, true, true)
     }
 
     pub fn reindex_providers(
@@ -77,13 +85,14 @@ impl Indexer {
         filter: Option<&[Provider]>,
         aggressive: bool,
     ) -> ServiceResult<usize> {
-        self.reindex_filtered(filter, aggressive)
+        self.reindex_filtered(filter, aggressive, false)
     }
 
     fn reindex_filtered(
         &self,
         filter: Option<&[Provider]>,
         aggressive: bool,
+        force_parse: bool,
     ) -> ServiceResult<usize> {
         let start = Instant::now();
         let mut total = 0usize;
@@ -92,8 +101,12 @@ impl Indexer {
 
         let excluded = crate::trash_state::shared_deleted_ids();
         let provider_refs = self.selected_providers(filter);
-        let works =
-            self.collect_provider_work(&provider_refs, pricing_catalog.as_ref(), &excluded)?;
+        let works = self.collect_provider_work(
+            &provider_refs,
+            pricing_catalog.as_ref(),
+            &excluded,
+            force_parse,
+        )?;
 
         // Phase 2 (sequential, DB writer): commit each provider's snapshot.
         // SQLite has a single writer mutex; serializing here avoids contention
@@ -110,6 +123,13 @@ impl Indexer {
             full_reindex || parsed_any_session,
             now_millis,
         )?;
+
+        // Fold the sync's WAL growth back into the main file while the app
+        // is otherwise idle. Best-effort: a busy reader just leaves the WAL
+        // for the next pass.
+        if let Err(error) = self.db.checkpoint_truncate() {
+            log::warn!("post-reindex WAL checkpoint failed: {error}");
+        }
 
         let elapsed = start.elapsed();
         log::info!(
@@ -156,6 +176,7 @@ impl Indexer {
         providers: &[&dyn SessionProvider],
         pricing_catalog: Option<&PricingCatalog>,
         excluded: &HashSet<String>,
+        force_parse: bool,
     ) -> ServiceResult<Vec<ProviderWork>> {
         // Phase 1 (parallel, CPU/IO): scan each provider's files and compute
         // its token-stats batch. seen_hashes dedup is per-provider already
@@ -163,7 +184,9 @@ impl Indexer {
         // scan), so providers don't share state and can run in parallel.
         providers
             .par_iter()
-            .map(|provider| self.scan_provider_work(*provider, pricing_catalog, excluded))
+            .map(|provider| {
+                self.scan_provider_work(*provider, pricing_catalog, excluded, force_parse)
+            })
             .collect()
     }
 
@@ -172,21 +195,27 @@ impl Indexer {
         provider: &dyn SessionProvider,
         pricing_catalog: Option<&PricingCatalog>,
         excluded: &HashSet<String>,
+        force_parse: bool,
     ) -> ServiceResult<ProviderWork> {
         let provider_kind = provider.provider();
         // Pre-fetch the per-source `(size, mtime)` snapshot the provider uses
         // to short-circuit unchanged files. Each provider walks its own data
         // layout; this DB query is the single source of truth for "what we
-        // already indexed".
-        let known = self
-            .db
-            .source_states_for_provider(provider_kind.key())
-            .map_err(|e| {
-                ServiceError::LoadProviderSourceSnapshot(
-                    provider_kind.key().to_string(),
-                    e.to_string(),
-                )
-            })?;
+        // already indexed". A forced parse hands the provider an empty
+        // snapshot instead: every file reads as changed and gets re-parsed,
+        // without the destructive mtime-zeroing the old refresh path used.
+        let known = if force_parse {
+            HashMap::new()
+        } else {
+            self.db
+                .source_states_for_provider(provider_kind.key())
+                .map_err(|e| {
+                    ServiceError::LoadProviderSourceSnapshot(
+                        provider_kind.key().to_string(),
+                        e.to_string(),
+                    )
+                })?
+        };
         let outcome = provider.scan_incremental(&known).map_err(|e| {
             ServiceError::ScanProvider(provider_kind.key().to_string(), e.to_string())
         })?;

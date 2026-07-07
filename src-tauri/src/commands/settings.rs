@@ -250,16 +250,15 @@ pub async fn start_refresh_usage(
 
     tokio::spawn(async move {
         emit_maintenance(&app, "refresh_usage", "started", None);
+        // Full forced reparse; token stats are swapped per-session inside the
+        // provider commits. No destructive global clear up front — a failure
+        // part-way leaves the previous stats intact instead of an empty panel.
         let result = tokio::task::spawn_blocking({
             let state = state.clone();
             move || {
                 state
-                    .db
-                    .clear_usage_stats()
-                    .map_err(|e| format!("failed to clear usage stats: {e:#}"))?;
-                state
                     .indexer
-                    .reindex()
+                    .refresh_usage()
                     .map(|_| ())
                     .map_err(|e| e.to_string())
             }

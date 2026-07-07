@@ -637,3 +637,152 @@ fn indexable_content_retains_complete_dialogue() {
     );
     assert_eq!(text.len(), filler.len() + marker.len());
 }
+
+/// Shared setup for the content-aware-upsert tests: one indexed session whose
+/// searchable content is `content`.
+fn db_with_session(content: &str) -> (TempDir, Database) {
+    let dir = TempDir::new().unwrap();
+    let db = Database::open(dir.path()).unwrap();
+    db.sync_provider_snapshot(
+        &Provider::Claude,
+        &[ParsedSession {
+            meta: sample_meta("session-fts"),
+            messages: Vec::new(),
+            content_text: content.to_string(),
+            parse_warning_count: 0,
+            child_session_ids: Vec::new(),
+            usage_events: Vec::new(),
+            source_mtime: 1,
+        }],
+        true,
+        &[],
+    )
+    .unwrap();
+    (dir, db)
+}
+
+fn fts_match_count(db: &Database, term: &str) -> u64 {
+    let conn = db.lock_read().unwrap();
+    conn.query_row(
+        "SELECT COUNT(*) FROM sessions_fts WHERE sessions_fts MATCH ?1",
+        [term],
+        |row| row.get(0),
+    )
+    .unwrap()
+}
+
+/// FTS5 external-content integrity check: errors when the trigram index has
+/// drifted from the sessions table (i.e. an update skipped FTS when it
+/// should not have, or vice versa).
+fn assert_fts_integrity(db: &Database) {
+    let conn = db.lock_write().unwrap();
+    conn.execute(
+        "INSERT INTO sessions_fts(sessions_fts) VALUES('integrity-check')",
+        [],
+    )
+    .unwrap();
+}
+
+#[test]
+fn upsert_unchanged_content_updates_metadata_without_touching_fts() {
+    let (_dir, db) = db_with_session("hello trigram world");
+
+    let mut meta = sample_meta("session-fts");
+    meta.updated_at += 100;
+    meta.message_count = 7;
+    let outcome = {
+        let conn = db.lock_write().unwrap();
+        super::upsert_session_on(&conn, &meta, "hello trigram world", &[], 42).unwrap()
+    };
+
+    assert_eq!(outcome, super::UpsertOutcome::MetadataOnly);
+    {
+        let conn = db.lock_read().unwrap();
+        let (updated_at, message_count, source_mtime): (i64, i64, i64) = conn
+            .query_row(
+                "SELECT updated_at, message_count, source_mtime FROM sessions WHERE id = 'session-fts'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(updated_at, meta.updated_at);
+        assert_eq!(message_count, 7);
+        assert_eq!(source_mtime, 42);
+    }
+    assert_eq!(fts_match_count(&db, "trigram"), 1);
+    assert_fts_integrity(&db);
+}
+
+#[test]
+fn upsert_changed_content_rewrites_fts() {
+    let (_dir, db) = db_with_session("hello trigram world");
+
+    let meta = sample_meta("session-fts");
+    let outcome = {
+        let conn = db.lock_write().unwrap();
+        super::upsert_session_on(&conn, &meta, "fresh needle content", &[], 42).unwrap()
+    };
+
+    assert_eq!(outcome, super::UpsertOutcome::IndexedContent);
+    assert_eq!(fts_match_count(&db, "trigram"), 0);
+    assert_eq!(fts_match_count(&db, "needle"), 1);
+    assert_fts_integrity(&db);
+}
+
+#[test]
+fn upsert_respects_custom_title_and_still_takes_metadata_path() {
+    let (_dir, db) = db_with_session("hello trigram world");
+    {
+        let conn = db.lock_write().unwrap();
+        conn.execute(
+            "UPDATE sessions SET title = 'My Custom', title_custom = 1 WHERE id = 'session-fts'",
+            [],
+        )
+        .unwrap();
+    }
+
+    // Incoming parse carries a different derived title, but the custom title
+    // wins, so the effective searchable columns are unchanged.
+    let mut meta = sample_meta("session-fts");
+    meta.title = "Derived Title".into();
+    let outcome = {
+        let conn = db.lock_write().unwrap();
+        super::upsert_session_on(&conn, &meta, "hello trigram world", &[], 42).unwrap()
+    };
+
+    assert_eq!(outcome, super::UpsertOutcome::MetadataOnly);
+    let conn = db.lock_read().unwrap();
+    let title: String = conn
+        .query_row(
+            "SELECT title FROM sessions WHERE id = 'session-fts'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(title, "My Custom");
+    drop(conn);
+    assert_fts_integrity(&db);
+}
+
+#[test]
+fn token_totals_update_leaves_fts_index_intact() {
+    let (_dir, db) = db_with_session("hello trigram world");
+
+    db.replace_token_stats(
+        "session-fts",
+        &[TokenStatRow {
+            date: "2026-04-09".into(),
+            model: "claude-opus-4-6".into(),
+            turn_count: 1,
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cost_usd: 0.01,
+        }],
+    )
+    .unwrap();
+
+    assert_eq!(fts_match_count(&db, "trigram"), 1);
+    assert_fts_integrity(&db);
+}
