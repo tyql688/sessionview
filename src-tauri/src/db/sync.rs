@@ -247,10 +247,14 @@ impl Database {
     }
 
     pub(crate) fn rename_session(&self, id: &str, new_title: &str) -> Result<(), rusqlite::Error> {
-        let title = if new_title.chars().count() > 200 {
+        // User-typed titles get double the derived-title budget
+        // (SESSION_TITLE_CHARS): an explicit rename is data, not a preview,
+        // but it still needs a sane bound for list layout.
+        const RENAME_TITLE_CHARS: usize = crate::provider_utils::SESSION_TITLE_CHARS * 2;
+        let title = if new_title.chars().count() > RENAME_TITLE_CHARS {
             new_title
                 .chars()
-                .take(200)
+                .take(RENAME_TITLE_CHARS)
                 .collect::<String>()
                 .trim_end()
                 .to_string()

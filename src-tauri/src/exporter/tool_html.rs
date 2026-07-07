@@ -12,6 +12,10 @@ fn html_escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
+/// Inline preview width for a tool argument in exported HTML — long values
+/// render as `first 57 chars + "..."` so a row stays one line.
+const HTML_ARG_PREVIEW_CHARS: usize = 57;
+
 fn truncate_char_boundary(s: &str, max: usize) -> &str {
     if s.len() <= max {
         return s;
@@ -251,7 +255,7 @@ pub(crate) fn tool_summary(name: &str, input: &str, metadata: Option<&ToolMetada
         "Bash" => string_field(&obj, &["description", "command", "cmd"])
             .map(|s| {
                 if s.len() > 60 {
-                    format!("{}...", truncate_char_boundary(s, 57))
+                    format!("{}...", truncate_char_boundary(s, HTML_ARG_PREVIEW_CHARS))
                 } else {
                     s.to_string()
                 }
@@ -304,7 +308,7 @@ pub(crate) fn tool_summary(name: &str, input: &str, metadata: Option<&ToolMetada
             let prompt = string_field(&obj, &["prompt"])
                 .map(|s| {
                     if s.len() > 60 {
-                        format!("{}...", truncate_char_boundary(s, 57))
+                        format!("{}...", truncate_char_boundary(s, HTML_ARG_PREVIEW_CHARS))
                     } else {
                         s.to_string()
                     }
@@ -328,7 +332,7 @@ pub(crate) fn tool_summary(name: &str, input: &str, metadata: Option<&ToolMetada
         "Workflow" => string_field(&obj, &["name", "description", "script"])
             .map(|s| {
                 if s.len() > 60 {
-                    format!("{}...", truncate_char_boundary(s, 57))
+                    format!("{}...", truncate_char_boundary(s, HTML_ARG_PREVIEW_CHARS))
                 } else {
                     s.to_string()
                 }
@@ -347,7 +351,7 @@ pub(crate) fn tool_summary(name: &str, input: &str, metadata: Option<&ToolMetada
         )
         .map(|s| {
             if s.len() > 60 {
-                format!("{}...", truncate_char_boundary(s, 57))
+                format!("{}...", truncate_char_boundary(s, HTML_ARG_PREVIEW_CHARS))
             } else {
                 s.to_string()
             }
@@ -356,7 +360,7 @@ pub(crate) fn tool_summary(name: &str, input: &str, metadata: Option<&ToolMetada
         "JavaScript" => string_field(&obj, &["title", "code"])
             .map(|s| {
                 if s.len() > 60 {
-                    format!("{}...", truncate_char_boundary(s, 57))
+                    format!("{}...", truncate_char_boundary(s, HTML_ARG_PREVIEW_CHARS))
                 } else {
                     s.to_string()
                 }
@@ -374,7 +378,7 @@ pub(crate) fn tool_summary(name: &str, input: &str, metadata: Option<&ToolMetada
         "SendMessage" => string_field(&obj, &["description", "prompt", "message", "content"])
             .map(|s| {
                 if s.len() > 60 {
-                    format!("{}...", truncate_char_boundary(s, 57))
+                    format!("{}...", truncate_char_boundary(s, HTML_ARG_PREVIEW_CHARS))
                 } else {
                     s.to_string()
                 }
@@ -397,7 +401,7 @@ pub(crate) fn tool_summary(name: &str, input: &str, metadata: Option<&ToolMetada
         "CreateGoal" => string_field(&obj, &["objective"])
             .map(|s| {
                 if s.len() > 60 {
-                    format!("{}...", truncate_char_boundary(s, 57))
+                    format!("{}...", truncate_char_boundary(s, HTML_ARG_PREVIEW_CHARS))
                 } else {
                     s.to_string()
                 }

@@ -2,6 +2,13 @@ use serde_json::Value;
 
 use crate::provider_utils::shorten_home_path;
 
+/// Column budget for tool summaries in the session list / tool rows: WIDE for
+/// the single leading field (command, file path, query), NARROW for secondary
+/// fields that share the line. One knob per class — the same values used to
+/// be inlined at every call site.
+pub(super) const SUMMARY_WIDE_CHARS: usize = 80;
+pub(super) const SUMMARY_NARROW_CHARS: usize = 40;
+
 pub(super) fn compact_string(value: &str, limit: usize) -> String {
     if value.len() <= limit {
         return value.to_string();
@@ -53,7 +60,7 @@ pub(super) fn input_summary(
                 "CommandLine",
             ],
         )
-        .map(|s| compact_string(s, 80))
+        .map(|s| compact_string(s, SUMMARY_WIDE_CHARS))
         .unwrap_or_default(),
         "ScheduleWakeup" => {
             let delay = input
@@ -62,7 +69,7 @@ pub(super) fn input_summary(
                 .and_then(|v| v.as_u64())
                 .map(|seconds| format!("{seconds}s"));
             let reason = string_field(input, &["reason", "prompt"])
-                .map(|s| compact_string(s, 80))
+                .map(|s| compact_string(s, SUMMARY_WIDE_CHARS))
                 .unwrap_or_default();
             [delay.unwrap_or_default(), reason]
                 .into_iter()
@@ -72,7 +79,7 @@ pub(super) fn input_summary(
         }
         "Grep" => string_field(input, &["pattern", "query", "Query"])
             .map(|pattern| {
-                let mut value = format!("/{}/", compact_string(pattern, 60));
+                let mut value = format!("/{}/", compact_string(pattern, SUMMARY_WIDE_CHARS));
                 if let Some(path) = string_field(input, &["path", "dir_path", "SearchPath"]) {
                     value.push(' ');
                     value.push_str(&shorten_home_path(path));
@@ -93,29 +100,29 @@ pub(super) fn input_summary(
                         0 => String::new(),
                         1 => arr[0]
                             .as_str()
-                            .map(|s| compact_string(s, 40))
+                            .map(|s| compact_string(s, SUMMARY_NARROW_CHARS))
                             .unwrap_or_default(),
                         n => format!("{n} agents"),
                     })
                     .unwrap_or_default()
             } else if matches!(raw_name, "send_input" | "close_agent" | "read_agent") {
                 string_field(input, &["target", "agent_id"])
-                    .map(|s| compact_string(s, 40))
+                    .map(|s| compact_string(s, SUMMARY_NARROW_CHARS))
                     .unwrap_or_default()
             } else {
                 // spawn_agent / Task / Subagent / agent / read_agent
                 string_field(input, &["description", "prompt", "message"])
-                    .map(|s| compact_string(s, 80))
+                    .map(|s| compact_string(s, SUMMARY_WIDE_CHARS))
                     .unwrap_or_default()
             }
         }
         "SendMessage" | "FollowupTask" => {
             string_field(input, &["description", "prompt", "message", "content"])
-                .map(|s| compact_string(s, 80))
+                .map(|s| compact_string(s, SUMMARY_WIDE_CHARS))
                 .unwrap_or_default()
         }
         "TaskCreate" => string_field(input, &["subject", "description"])
-            .map(|s| compact_string(s, 80))
+            .map(|s| compact_string(s, SUMMARY_WIDE_CHARS))
             .unwrap_or_default(),
         "TaskUpdate" => {
             let id = string_field(input, &["taskId", "task_id"]).unwrap_or_default();
@@ -141,7 +148,7 @@ pub(super) fn input_summary(
         }
         "TaskOutput" => {
             let task = string_field(input, &["task_id", "taskId"])
-                .map(|s| compact_string(s, 40))
+                .map(|s| compact_string(s, SUMMARY_NARROW_CHARS))
                 .unwrap_or_default();
             let mode = input
                 .get("block")
@@ -153,15 +160,15 @@ pub(super) fn input_summary(
         }
         "TaskStop" => {
             let task = string_field(input, &["task_id", "taskId"])
-                .map(|s| compact_string(s, 40))
+                .map(|s| compact_string(s, SUMMARY_NARROW_CHARS))
                 .unwrap_or_default();
             let reason = string_field(input, &["reason"])
-                .map(|s| compact_string(s, 80))
+                .map(|s| compact_string(s, SUMMARY_WIDE_CHARS))
                 .unwrap_or_default();
             join_non_empty([task, reason])
         }
         "Workflow" => string_field(input, &["name", "description", "script"])
-            .map(|s| compact_string(s, 80))
+            .map(|s| compact_string(s, SUMMARY_WIDE_CHARS))
             .unwrap_or_default(),
         "StructuredOutput" => string_field(
             input,
@@ -174,20 +181,20 @@ pub(super) fn input_summary(
                 "minimal_fix",
             ],
         )
-        .map(|s| compact_string(s, 80))
+        .map(|s| compact_string(s, SUMMARY_WIDE_CHARS))
         .unwrap_or_default(),
         "CronCreate" => {
             let cron = string_field(input, &["cron"])
                 .unwrap_or_default()
                 .to_string();
             let prompt = string_field(input, &["prompt"])
-                .map(|s| compact_string(s, 80))
+                .map(|s| compact_string(s, SUMMARY_WIDE_CHARS))
                 .unwrap_or_default();
             join_non_empty([cron, prompt])
         }
         "CronList" => String::new(),
         "CronDelete" => string_field(input, &["id"])
-            .map(|s| compact_string(s, 40))
+            .map(|s| compact_string(s, SUMMARY_NARROW_CHARS))
             .unwrap_or_default(),
         "Skill" => string_field(input, &["skill"])
             .unwrap_or_default()
@@ -205,14 +212,14 @@ pub(super) fn input_summary(
             .map(shorten_home_path)
             .unwrap_or_default(),
         "ImageGeneration" => string_field(input, &["revised_prompt", "prompt"])
-            .map(|s| compact_string(s, 80))
+            .map(|s| compact_string(s, SUMMARY_WIDE_CHARS))
             .unwrap_or_default(),
         "JavaScript" => string_field(input, &["title", "code"])
-            .map(|s| compact_string(s, 80))
+            .map(|s| compact_string(s, SUMMARY_WIDE_CHARS))
             .unwrap_or_default(),
         "ComputerUse" => {
             let app = string_field(input, &["app"])
-                .map(|s| compact_string(s, 40))
+                .map(|s| compact_string(s, SUMMARY_NARROW_CHARS))
                 .unwrap_or_default();
             let action = match raw_name {
                 "click" => {
@@ -234,7 +241,7 @@ pub(super) fn input_summary(
                     .unwrap_or_default(),
                 "drag" => "drag".to_string(),
                 "type_text" => string_field(input, &["text"])
-                    .map(|s| compact_string(s, 40))
+                    .map(|s| compact_string(s, SUMMARY_NARROW_CHARS))
                     .unwrap_or_else(|| "type text".to_string()),
                 "get_app_state" => "state".to_string(),
                 "list_apps" => "apps".to_string(),
@@ -242,10 +249,10 @@ pub(super) fn input_summary(
                     .map(|s| format!("element {s}"))
                     .unwrap_or_else(|| "set value".to_string()),
                 "select_text" => string_field(input, &["text"])
-                    .map(|s| compact_string(s, 40))
+                    .map(|s| compact_string(s, SUMMARY_NARROW_CHARS))
                     .unwrap_or_else(|| "select text".to_string()),
                 "perform_secondary_action" => string_field(input, &["action"])
-                    .map(|s| compact_string(s, 40))
+                    .map(|s| compact_string(s, SUMMARY_NARROW_CHARS))
                     .unwrap_or_default(),
                 _ => String::new(),
             };
@@ -253,7 +260,7 @@ pub(super) fn input_summary(
         }
         "DynamicTool" => string_field(input, &["tool", "name"])
             .or_else(|| Some(raw_name).filter(|name| *name != "dynamic_tool_call"))
-            .map(|s| compact_string(s, 80))
+            .map(|s| compact_string(s, SUMMARY_WIDE_CHARS))
             .unwrap_or_default(),
         "ListMcpResourcesTool" => {
             let server = string_field(input, &["server"]).unwrap_or_default();
@@ -279,7 +286,7 @@ pub(super) fn input_summary(
             join_non_empty([questions, background])
         }
         "CreateGoal" => string_field(input, &["objective"])
-            .map(|s| compact_string(s, 80))
+            .map(|s| compact_string(s, SUMMARY_WIDE_CHARS))
             .unwrap_or_default(),
         "GetGoal" => String::new(),
         "SetGoalBudget" => {
@@ -298,7 +305,7 @@ pub(super) fn input_summary(
             .to_string(),
         "Plan" => {
             if let Some(explanation) = string_field(input, &["explanation"]) {
-                compact_string(explanation, 80)
+                compact_string(explanation, SUMMARY_WIDE_CHARS)
             } else if let Some(todos) = input.get("todos").and_then(|v| v.as_array()) {
                 format!("{} todo(s)", todos.len())
             } else {
@@ -314,13 +321,13 @@ pub(super) fn input_summary(
                 format!("session {session_id}")
             } else {
                 string_field(input, &["chars"])
-                    .map(|s| compact_string(s, 80))
+                    .map(|s| compact_string(s, SUMMARY_WIDE_CHARS))
                     .unwrap_or_default()
             }
         }
         _ if raw_name.starts_with("mcp__") => {
             string_field(input, &["element", "url", "filter", "level"])
-                .map(|s| compact_string(s, 80))
+                .map(|s| compact_string(s, SUMMARY_WIDE_CHARS))
                 .unwrap_or_default()
         }
         _ => input
@@ -329,7 +336,7 @@ pub(super) fn input_summary(
                 obj.values()
                     .find_map(|v| v.as_str().filter(|s| !s.is_empty()))
             })
-            .map(|s| compact_string(s, 80))
+            .map(|s| compact_string(s, SUMMARY_WIDE_CHARS))
             .unwrap_or_default(),
     };
 

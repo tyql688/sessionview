@@ -291,6 +291,13 @@ pub(crate) fn token_usage_from(value: &Value, keys: &UsageKeys) -> Option<TokenU
     })
 }
 
+/// Truncation family — pick by unit and suffix (they are NOT interchangeable):
+/// - here `truncate_with_ellipsis`: counts CHARS, appends `"..."` — titles.
+/// - `db::sync::truncate_chars`: counts CHARS, no suffix — index excerpts.
+/// - `tool_metadata::summary::compact_string`: BYTE limit at a char
+///   boundary, appends `"…"` — tool summaries.
+/// - `exporter::tool_html::truncate_char_boundary`: BYTE limit at a char
+///   boundary, no suffix — HTML export previews.
 pub fn truncate_with_ellipsis(input: &str, max_chars: usize) -> String {
     if input.chars().count() > max_chars {
         let mut truncated: String = input.chars().take(max_chars).collect();
@@ -301,6 +308,10 @@ pub fn truncate_with_ellipsis(input: &str, max_chars: usize) -> String {
     }
 }
 
+/// Canonical length of a session title derived from message content. Every
+/// provider derives titles through `session_title`, so this is the one knob.
+pub const SESSION_TITLE_CHARS: usize = 100;
+
 pub fn session_title(first_user_message: Option<&str>) -> String {
     first_user_message
         .map(|message| {
@@ -310,7 +321,7 @@ pub fn session_title(first_user_message: Option<&str>) -> String {
             if text.is_empty() {
                 "Untitled".to_string()
             } else {
-                truncate_with_ellipsis(text, 100)
+                truncate_with_ellipsis(text, SESSION_TITLE_CHARS)
             }
         })
         .unwrap_or_else(|| "Untitled".to_string())

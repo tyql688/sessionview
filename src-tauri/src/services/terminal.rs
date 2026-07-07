@@ -357,8 +357,10 @@ fn launch_windows_cmd(command: &str, cwd: Option<&str>) -> anyhow::Result<()> {
     // The spawned cmd reads the script once at startup; delete it shortly
     // after (detached — do not block the command on terminal lifetime).
     // Also runs when the launch failed, so failures don't leak the file.
+    // The delay only needs to outlive terminal startup on a slow machine.
+    const TEMP_SCRIPT_CLEANUP_DELAY: std::time::Duration = std::time::Duration::from_secs(10);
     std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(10));
+        std::thread::sleep(TEMP_SCRIPT_CLEANUP_DELAY);
         if let Err(e) = std::fs::remove_file(&bat_path) {
             log::warn!("failed to remove temp script {}: {e}", bat_path.display());
         }

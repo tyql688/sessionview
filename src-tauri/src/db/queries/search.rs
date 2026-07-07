@@ -8,6 +8,14 @@ const LIKE_SNIPPET_CONTEXT_CHARS: usize = 80;
 
 const LIKE_SNIPPET_MAX_CHARS: usize = 200;
 
+/// Hard result cap shared by the FTS and LIKE paths. Deliberate design: the
+/// search UI does not paginate, it expects the best 100 rows.
+const SEARCH_RESULT_LIMIT: &str = " LIMIT 100";
+
+/// FTS5 bm25() column weights, in fts column order: title, content,
+/// project_name — a title hit ranks 10x a content hit, project names 5x.
+const FTS_RANK_ORDER_BY: &str = " ORDER BY bm25(sessions_fts, 10.0, 1.0, 5.0)";
+
 pub(super) fn list_sessions_from_query<P>(
     conn: &Connection,
     sql: &str,
@@ -46,7 +54,8 @@ pub(super) fn search_with_fts(
     );
     let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(query.to_string())];
     append_search_filters(&mut sql, &mut param_values, filters);
-    sql.push_str(" ORDER BY bm25(sessions_fts, 10.0, 1.0, 5.0) LIMIT 100");
+    sql.push_str(FTS_RANK_ORDER_BY);
+    sql.push_str(SEARCH_RESULT_LIMIT);
     query_search_results(conn, &sql, &param_values)
 }
 
@@ -108,7 +117,7 @@ pub(super) fn search_with_like(
     // 100-row cap and dropped. Title matches now outrank project matches, which
     // outrank content-only matches, with recency breaking ties.
     sql.push_str(&like_relevance_order_by(&token_indices));
-    sql.push_str(" LIMIT 100");
+    sql.push_str(SEARCH_RESULT_LIMIT);
     query_like_search_results(conn, &sql, &param_values, &tokens)
 }
 
@@ -352,6 +361,8 @@ fn highlight_like_tokens(snippet: &str, tokens: &[String]) -> String {
         return snippet.to_string();
     }
 
+    // Capacity hint: each highlight adds "<mark></mark>" (13 bytes) around a
+    // selected range.
     let mut highlighted = String::with_capacity(snippet.len() + selected.len() * 13);
     let mut cursor = 0;
     for (start, end) in selected {
