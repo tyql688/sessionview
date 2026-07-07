@@ -61,6 +61,7 @@ let openWindowMessages = MESSAGES;
 let openWindowStart = 0;
 let totalMessages = MESSAGES.length;
 let messagesWindowMessages = MESSAGES;
+let outlineEntries: Array<Record<string, unknown>> = [];
 const messagesWindowCalls: Array<Record<string, unknown> | undefined> = [];
 
 function tokenTotals() {
@@ -98,7 +99,7 @@ vi.mock("@tauri-apps/api/core", () => ({
           token_totals: tokenTotals(),
         };
       case "get_session_turn_outline":
-        return [];
+        return outlineEntries;
       case "is_favorite":
         return false;
       case "cancel_session_load":
@@ -181,6 +182,7 @@ beforeEach(() => {
   openWindowStart = 0;
   totalMessages = MESSAGES.length;
   messagesWindowMessages = MESSAGES;
+  outlineEntries = [];
   messagesWindowCalls.length = 0;
 });
 
@@ -386,5 +388,58 @@ describe("SessionView smoke", () => {
     await waitFor(() =>
       expect(queryByText("oldest still above")).toBeInTheDocument(),
     );
+  });
+
+  it("re-centers the window on a far minimap jump instead of loading the gap", async () => {
+    // Open a 5000-message session at its newest tail, then jump to the first
+    // turn via the minimap. The jump must fetch a small window around the
+    // target — NOT the ~4700 messages in between.
+    const all = Array.from({ length: 5000 }, (_, index) => messageAt(index));
+    openWindowMessages = all.slice(4700);
+    openWindowStart = 4700;
+    totalMessages = 5000;
+    messagesWindowMessages = all.slice(0, 300);
+    outlineEntries = [
+      { ordinal: 0, message_index: 0, user_text: "first turn", reply_text: "" },
+      {
+        ordinal: 1,
+        message_index: 4800,
+        user_text: "last turn",
+        reply_text: "",
+      },
+    ];
+
+    const { findByText, getByLabelText } = render(
+      <SessionView
+        session={{
+          id: META.id,
+          provider: "claude",
+          title: META.title,
+          project_name: "smoke",
+          is_sidechain: false,
+          source_path: META.source_path,
+          project_path: META.project_path,
+        }}
+        active={true}
+        onRefreshTree={() => {}}
+        onCloseTab={() => {}}
+      />,
+    );
+
+    expect(await findByText("message 4999")).toBeInTheDocument();
+    const firstTick = await waitFor(() => getByLabelText("first turn"));
+
+    fireEvent.click(firstTick);
+
+    await waitFor(() =>
+      expect(messagesWindowCalls).toContainEqual(
+        expect.objectContaining({ offset: 0, limit: 300 }),
+      ),
+    );
+    // No bulk fetch of the gap between the tail and the target.
+    for (const call of messagesWindowCalls) {
+      expect(call?.limit).toBeLessThanOrEqual(600);
+    }
+    expect(await findByText("message 0")).toBeInTheDocument();
   });
 });

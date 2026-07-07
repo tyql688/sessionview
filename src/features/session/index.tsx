@@ -135,6 +135,7 @@ export function SessionView(props: {
     filteredEntries,
     windowStart,
     setWindowStart,
+    loadedCount: messages.length,
     scrollElement: messagesEl,
     setMessages,
     setMeta,

@@ -32,6 +32,8 @@ export interface CreateSessionPaginationOptions {
    * `processMessages` needs it before this hook can run. */
   windowStart: number;
   setWindowStart: Dispatch<SetStateAction<number>>;
+  /** Number of currently loaded messages (window end = start + count). */
+  loadedCount: number;
   /** Scroll container (null until it mounts — state twin of the ref). */
   scrollElement: HTMLDivElement | null;
   setMessages: Dispatch<SetStateAction<Message[]>>;
@@ -60,11 +62,16 @@ export interface CreateSessionPaginationResult {
  * not a whole tail.
  *
  * Message *loading* stays windowed (the backend pages the parsed session
- * over IPC): older pages are prepended as the viewport approaches the top of
- * the loaded window. Entry keys are built on absolute message indices, and
- * the virtualizer keys its measurements by entry key, so a prepend shifts
- * indices without invalidating any measured height; the scroll offset is
- * compensated by the spacer growth in the same synchronous flush.
+ * over IPC), in BOTH directions: older pages prepend as the viewport nears
+ * the top of the loaded window, newer pages append as it nears the bottom.
+ * A jump far outside the window (minimap tick, first-turn reveal) does NOT
+ * load everything in between — it re-centers the window around the target,
+ * which costs the same as opening the session. Entry keys are built on
+ * absolute message indices, and the virtualizer keys its measurements by
+ * entry key, so a prepend shifts indices without invalidating any measured
+ * height; the scroll offset is compensated by the spacer growth in the same
+ * synchronous flush. Only a committed in-session search loads the complete
+ * session (counting must cover every message).
  */
 export function useSessionPagination(
   opts: CreateSessionPaginationOptions,
@@ -82,10 +89,20 @@ export function useSessionPagination(
   windowStartRef.current = windowStart;
   const totalMessagesRef = useRef(totalMessages);
   totalMessagesRef.current = totalMessages;
+  const loadedCountRef = useRef(opts.loadedCount);
+  loadedCountRef.current = opts.loadedCount;
   const scrollElementRef = useRef(opts.scrollElement);
   scrollElementRef.current = opts.scrollElement;
 
-  const olderFetchInFlightRef = useRef(false);
+  const windowFetchInFlightRef = useRef(false);
+  // Edge prefetch is armed only after the view has been positioned
+  // (scroll-to-end on open, or a reveal jump). Before that, the virtualizer
+  // renders from offset 0 and the "near the top" check would fire a spurious
+  // older-page fetch on every open.
+  const positionedRef = useRef(false);
+  useEffect(() => {
+    positionedRef.current = false;
+  }, [opts.sessionId]);
 
   const virtualizer = useVirtualizer({
     count: opts.filteredEntries.length,
@@ -126,11 +143,11 @@ export function useSessionPagination(
   }
 
   async function loadOlderTail(): Promise<boolean> {
-    if (olderFetchInFlightRef.current || windowStartRef.current <= 0) {
+    if (windowFetchInFlightRef.current || windowStartRef.current <= 0) {
       return false;
     }
     const sessionId = sessionIdRef.current;
-    olderFetchInFlightRef.current = true;
+    windowFetchInFlightRef.current = true;
     const newStart = Math.max(0, windowStartRef.current - TAIL_BATCH);
     const span = windowStartRef.current - newStart;
     try {
@@ -143,53 +160,115 @@ export function useSessionPagination(
       console.warn("load older messages failed:", e);
       return false;
     } finally {
-      olderFetchInFlightRef.current = false;
+      windowFetchInFlightRef.current = false;
     }
   }
 
-  // Prefetch: when the rendered window nears the top of the loaded messages,
-  // page in the next older batch. Runs off the virtualizer's own render
-  // output — no scroll listener, no geometry reads.
+  async function loadNewerTail(): Promise<boolean> {
+    const end = windowStartRef.current + loadedCountRef.current;
+    if (windowFetchInFlightRef.current || end >= totalMessagesRef.current) {
+      return false;
+    }
+    const sessionId = sessionIdRef.current;
+    windowFetchInFlightRef.current = true;
+    try {
+      const newer = await getSessionMessagesWindow(sessionId, end, TAIL_BATCH);
+      if (sessionId !== sessionIdRef.current) return false;
+      // Appending below the viewport never moves visible content in a
+      // top-down layout — no flushSync, no scroll compensation needed.
+      opts.setMeta((prev) => opts.withTokenTotals(prev, newer.token_totals));
+      opts.setMessages((prev) => [...prev, ...newer.messages]);
+      setTotalMessages(newer.total);
+      return newer.messages.length > 0;
+    } catch (e) {
+      if (isLoadCanceledError(e)) return false;
+      console.warn("load newer messages failed:", e);
+      return false;
+    } finally {
+      windowFetchInFlightRef.current = false;
+    }
+  }
+
+  // Prefetch: when the rendered window nears either edge of the loaded
+  // messages, page in the next batch on that side. Runs off the
+  // virtualizer's own render output — no scroll listener, no geometry reads.
   const virtualItems = virtualizer.getVirtualItems();
   const firstRenderedIndex = virtualItems[0]?.index ?? 0;
+  const lastRenderedIndex = virtualItems[virtualItems.length - 1]?.index ?? 0;
+  const entryCount = opts.filteredEntries.length;
   useEffect(() => {
+    if (!positionedRef.current) return;
     if (windowStart <= 0) return;
     if (firstRenderedIndex > PREFETCH_ROW_RUNWAY) return;
     void loadOlderTail();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firstRenderedIndex, windowStart]);
+  useEffect(() => {
+    if (!positionedRef.current) return;
+    if (windowStart + opts.loadedCount >= totalMessages) return;
+    if (entryCount - 1 - lastRenderedIndex > PREFETCH_ROW_RUNWAY) return;
+    void loadNewerTail();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    lastRenderedIndex,
+    entryCount,
+    windowStart,
+    opts.loadedCount,
+    totalMessages,
+  ]);
 
   function revealEntry(entryIndex: number) {
     const total = filteredEntriesRef.current.length;
     if (entryIndex < 0 || entryIndex >= total) return;
+    positionedRef.current = true;
     virtualizer.scrollToIndex(entryIndex, { align: "center" });
+  }
+
+  /** Re-center the loaded window around a target message, REPLACING the
+   * current window. A far jump (minimap tick near the top of a 13k-message
+   * session) must not page in everything in between — re-centering costs the
+   * same IPC as opening the session, and the discarded rows reload on demand
+   * if the user scrolls back. */
+  async function recenterWindowAround(messageIndex: number): Promise<boolean> {
+    if (windowFetchInFlightRef.current) return false;
+    const sessionId = sessionIdRef.current;
+    windowFetchInFlightRef.current = true;
+    try {
+      const start = Math.max(0, messageIndex - Math.floor(INITIAL_TAIL / 2));
+      const window = await getSessionMessagesWindow(
+        sessionId,
+        start,
+        INITIAL_TAIL,
+      );
+      if (sessionId !== sessionIdRef.current) return false;
+      // flushSync so the entry lookup below sees the new window.
+      flushSync(() => {
+        opts.setMeta((prev) => opts.withTokenTotals(prev, window.token_totals));
+        opts.setMessages(window.messages);
+        setWindowStart(window.start);
+        setTotalMessages(window.total);
+      });
+      return true;
+    } catch (e) {
+      if (isLoadCanceledError(e)) return false;
+      console.warn("recenter window failed:", e);
+      return false;
+    } finally {
+      windowFetchInFlightRef.current = false;
+    }
   }
 
   async function revealMessageIndex(messageIndex: number): Promise<boolean> {
     if (messageIndex < 0 || messageIndex >= totalMessagesRef.current) {
       return false;
     }
+    positionedRef.current = true;
 
-    if (messageIndex < windowStartRef.current) {
-      if (olderFetchInFlightRef.current) return false;
-      const sessionId = sessionIdRef.current;
-      olderFetchInFlightRef.current = true;
-      try {
-        const span = windowStartRef.current - messageIndex;
-        const older = await getSessionMessagesWindow(
-          sessionId,
-          messageIndex,
-          span,
-        );
-        if (sessionId !== sessionIdRef.current) return false;
-        prependMessages(older);
-      } catch (e) {
-        if (isLoadCanceledError(e)) return false;
-        console.warn("reveal message failed:", e);
-        return false;
-      } finally {
-        olderFetchInFlightRef.current = false;
-      }
+    const start = windowStartRef.current;
+    const end = start + loadedCountRef.current;
+    if (messageIndex < start || messageIndex >= end) {
+      const recentered = await recenterWindowAround(messageIndex);
+      if (!recentered) return false;
     }
 
     const entries = filteredEntriesRef.current;
@@ -213,32 +292,71 @@ export function useSessionPagination(
     return true;
   }
 
-  async function loadAllOlderEntriesForSearch(): Promise<boolean> {
-    if (olderFetchInFlightRef.current) return false;
+  /** Load whatever the window is missing so search covers every message.
+   * The common shape (window is the newest tail) prepends the older part,
+   * preserving the viewport; a re-centered window missing BOTH sides is
+   * replaced with the full session, compensating the scroll offset by where
+   * the previously-first row lands in the new entry list. */
+  async function ensureCompleteWindowForSearch(): Promise<boolean> {
+    if (windowFetchInFlightRef.current) return false;
     const start = windowStartRef.current;
-    if (start <= 0) return true;
+    const end = start + loadedCountRef.current;
+    const total = totalMessagesRef.current;
+    if (start <= 0 && end >= total) return true;
 
     const sessionId = sessionIdRef.current;
-    olderFetchInFlightRef.current = true;
+    windowFetchInFlightRef.current = true;
     try {
-      const older = await getSessionMessagesWindow(sessionId, 0, start);
+      if (end >= total) {
+        const older = await getSessionMessagesWindow(sessionId, 0, start);
+        if (sessionId !== sessionIdRef.current) return false;
+        prependMessages(older);
+        return older.start === 0;
+      }
+
+      const complete = await getSessionMessagesWindow(sessionId, 0, total);
       if (sessionId !== sessionIdRef.current) return false;
-      prependMessages(older);
-      return older.start === 0;
+      const scroller = scrollElementRef.current;
+      const prevFirstKey = filteredEntriesRef.current[0]?.key;
+      const prevScrollTop = scroller?.scrollTop ?? 0;
+      flushSync(() => {
+        opts.setMeta((prev) =>
+          opts.withTokenTotals(prev, complete.token_totals),
+        );
+        opts.setMessages(complete.messages);
+        setWindowStart(complete.start);
+        setTotalMessages(complete.total);
+      });
+      if (scroller && prevFirstKey !== undefined) {
+        const anchorIndex = filteredEntriesRef.current.findIndex(
+          (entry) => entry.key === prevFirstKey,
+        );
+        if (anchorIndex > 0) {
+          virtualizer.getTotalSize(); // force a fresh measurements pass
+          const anchorStart =
+            virtualizer.measurementsCache[anchorIndex]?.start ??
+            anchorIndex * ESTIMATED_ROW_PX;
+          scroller.scrollTop = prevScrollTop + anchorStart;
+        }
+      }
+      return complete.start === 0;
     } catch (e) {
       if (isLoadCanceledError(e)) return false;
       console.warn("load complete session for search failed:", e);
       return false;
     } finally {
-      olderFetchInFlightRef.current = false;
+      windowFetchInFlightRef.current = false;
     }
   }
 
   async function resolveCompleteSearchMatch(
     term: string,
   ): Promise<number | null> {
-    if (windowStartRef.current > 0) {
-      const loadedCompleteWindow = await loadAllOlderEntriesForSearch();
+    if (
+      windowStartRef.current > 0 ||
+      windowStartRef.current + loadedCountRef.current < totalMessagesRef.current
+    ) {
+      const loadedCompleteWindow = await ensureCompleteWindowForSearch();
       if (!loadedCompleteWindow) return null;
     }
 
@@ -250,6 +368,7 @@ export function useSessionPagination(
   }
 
   function scrollToEnd() {
+    positionedRef.current = true;
     const scrollLast = () => {
       const last = filteredEntriesRef.current.length - 1;
       if (last >= 0) virtualizer.scrollToIndex(last, { align: "end" });
