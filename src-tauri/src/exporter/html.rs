@@ -17,25 +17,33 @@ fn html_escape(s: &str) -> String {
 }
 
 fn is_allowed_image_path(path: &str) -> bool {
+    use crate::services::path_norm::norm_starts_with;
+
     let Ok(canonical) = std::fs::canonicalize(path) else {
         return false;
     };
-    let home_ok = dirs::home_dir().is_some_and(|h| canonical.starts_with(&h));
+    // `canonicalize` yields verbatim paths (`\\?\C:\...`) on Windows, so all
+    // prefix checks must go through the normalized comparison.
+    let home_ok = dirs::home_dir().is_some_and(|h| norm_starts_with(&canonical, &h));
     let tmp_ok = {
         #[cfg(not(target_os = "windows"))]
         {
-            canonical.starts_with("/tmp")
-                || canonical.starts_with("/private/tmp")
-                || canonical.starts_with("/var/folders")
+            norm_starts_with(&canonical, Path::new("/tmp"))
+                || norm_starts_with(&canonical, Path::new("/private/tmp"))
+                || norm_starts_with(&canonical, Path::new("/var/folders"))
+                || norm_starts_with(&canonical, Path::new("/private/var/folders"))
         }
         #[cfg(target_os = "windows")]
         {
-            std::env::var("TEMP")
-                .map(|t| canonical.starts_with(&t))
-                .unwrap_or(false)
-                || std::env::var("TMP")
-                    .map(|t| canonical.starts_with(&t))
-                    .unwrap_or(false)
+            ["TEMP", "TMP"].iter().any(|key| {
+                std::env::var(key).ok().is_some_and(|raw| {
+                    let base = Path::new(raw.trim());
+                    match base.canonicalize() {
+                        Ok(c) => norm_starts_with(&canonical, &c),
+                        Err(_) => norm_starts_with(&canonical, base),
+                    }
+                })
+            })
         }
     };
     home_ok || tmp_ok

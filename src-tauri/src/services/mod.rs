@@ -2,6 +2,7 @@ pub mod error;
 pub(crate) mod image_cache;
 pub(crate) mod image_markers;
 pub mod load_cancel;
+pub(crate) mod path_norm;
 mod persisted_output_cache;
 mod provider_snapshots;
 mod session_cache;

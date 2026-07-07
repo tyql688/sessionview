@@ -334,8 +334,13 @@ fn launch_windows_powershell(command: &str, cwd: Option<&str>) -> anyhow::Result
 #[cfg(target_os = "windows")]
 fn launch_windows_cmd(command: &str, cwd: Option<&str>) -> anyhow::Result<()> {
     // Write a temp .bat file to avoid `&&` being parsed by the outer cmd in
-    // `cmd /C start "" cmd /K "cd /d ... && ..."`.
-    let bat_path = std::env::temp_dir().join(format!("cc_session_{}.bat", std::process::id()));
+    // `cmd /C start "" cmd /K "cd /d ... && ..."`. Inlining the command is
+    // not viable: resume commands may contain quotes/`&`/`%` and the
+    // double-layer cmd quoting is unreliable.
+    // Name includes a timestamp so a recycled PID never picks up a stale file.
+    let nanos = std::time::UNIX_EPOCH.elapsed().map_or(0, |d| d.as_nanos());
+    let bat_path =
+        std::env::temp_dir().join(format!("cc_session_{}_{nanos}.bat", std::process::id()));
     let mut bat = String::from("@echo off\r\n");
     if let Some(dir) = cwd {
         if !dir.is_empty() {
@@ -347,7 +352,19 @@ fn launch_windows_cmd(command: &str, cwd: Option<&str>) -> anyhow::Result<()> {
     std::fs::write(&bat_path, &bat).context("failed to write temp script")?;
 
     let bat_str = bat_path.to_string_lossy().to_string();
-    run_windows_start(&["cmd", "/K", &bat_str], "Command Prompt")
+    let result = run_windows_start(&["cmd", "/K", &bat_str], "Command Prompt");
+
+    // The spawned cmd reads the script once at startup; delete it shortly
+    // after (detached — do not block the command on terminal lifetime).
+    // Also runs when the launch failed, so failures don't leak the file.
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(10));
+        if let Err(e) = std::fs::remove_file(&bat_path) {
+            log::warn!("failed to remove temp script {}: {e}", bat_path.display());
+        }
+    });
+
+    result
 }
 
 /// Launch a Windows terminal via `cmd /C start` with CREATE_NO_WINDOW to avoid

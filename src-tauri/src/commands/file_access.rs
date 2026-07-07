@@ -29,16 +29,9 @@ fn canonical_under_home(canonical: &Path, home: &Path) -> bool {
             return true;
         }
     }
-    // Last resort: compare prefix after stripping Windows verbatim `\\?\` and ignoring case.
-    // Covers edge cases where `starts_with` disagrees on prefix form between paths.
-    fn lossy_norm(p: &Path) -> String {
-        p.to_string_lossy()
-            .trim_start_matches(r"\\?\")
-            .to_ascii_lowercase()
-    }
-    let c = lossy_norm(canonical);
-    let h = lossy_norm(home).trim_end_matches('\\').to_string();
-    c == h || c.starts_with(&format!("{h}\\"))
+    // Last resort: normalized comparison (strips Windows verbatim `\\?\`,
+    // folds case). Covers prefix-form disagreements between paths.
+    crate::services::path_norm::norm_starts_with(canonical, home)
 }
 
 #[cfg(not(windows))]
@@ -57,12 +50,13 @@ fn tmp_dir_allows_image(canonical: &Path) -> bool {
 
 #[cfg(target_os = "windows")]
 fn tmp_dir_allows_image(canonical: &Path) -> bool {
+    use crate::services::path_norm::norm_starts_with;
     ["TEMP", "TMP"].iter().any(|key| {
         std::env::var(key).ok().is_some_and(|raw| {
             let base = Path::new(raw.trim());
             match base.canonicalize() {
-                Ok(c) => canonical.starts_with(&c),
-                Err(_) => canonical.starts_with(base),
+                Ok(c) => norm_starts_with(canonical, &c),
+                Err(_) => norm_starts_with(canonical, base),
             }
         })
     })

@@ -51,7 +51,12 @@ pub struct OpenCodeProvider {
 
 impl OpenCodeProvider {
     pub(crate) fn new() -> Option<Self> {
-        // OpenCode stores its DB in XDG_DATA_HOME/opencode/ (~/.local/share/opencode/ on macOS/Linux)
+        // OpenCode's data dir follows env-paths semantics:
+        // %LOCALAPPDATA%\opencode on Windows,
+        // XDG_DATA_HOME/opencode (~/.local/share/opencode) on macOS/Linux.
+        #[cfg(windows)]
+        let base = dirs::data_local_dir()?;
+        #[cfg(not(windows))]
         let base = if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
             PathBuf::from(xdg)
         } else {
