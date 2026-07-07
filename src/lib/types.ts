@@ -49,7 +49,7 @@ export interface SessionRef {
 }
 
 export type MessageRole = "user" | "assistant" | "tool" | "system";
-export type MessageKind = "command_input" | "command_output";
+type MessageKind = "command_input" | "command_output";
 
 export interface TokenUsage {
   input_tokens: number;
@@ -58,36 +58,36 @@ export interface TokenUsage {
   cache_read_input_tokens: number;
 }
 
-export interface McpToolMetadata {
+interface McpToolMetadata {
   server: string;
   tool: string;
   display: string;
 }
 
-export type RawOutputPolicy = "keep" | "suppress_terminal" | "suppress_patch_when_diff_present";
+type RawOutputPolicy = "keep" | "suppress_terminal" | "suppress_patch_when_diff_present";
 
-export type ToolDiffLineType = "context" | "add" | "remove" | "skip";
+type ToolDiffLineType = "context" | "add" | "remove" | "skip";
 
-export interface ToolDiffLine {
+interface ToolDiffLine {
   type: ToolDiffLineType;
   oldLine: number | null;
   newLine: number | null;
   text: string;
 }
 
-export interface ToolLine {
+interface ToolLine {
   label: string;
   value: string;
 }
 
-export interface ToolDetail {
+interface ToolDetail {
   lines: ToolLine[];
   diff?: { old: string; new: string };
   patchDiff?: ToolDiffLine[];
   persistedOutputPath?: string;
 }
 
-export interface ToolPresentation {
+interface ToolPresentation {
   icon: string;
   inputDetail?: ToolDetail;
   resultDetail?: ToolDetail;
@@ -129,7 +129,7 @@ export interface SessionDetail {
   parse_warning_count?: number;
 }
 
-export type TreeNodeType = "provider" | "project" | "session";
+type TreeNodeType = "provider" | "project" | "session";
 
 export interface TreeNode {
   id: string;
@@ -169,7 +169,7 @@ export interface PricingCatalogStatus {
 }
 
 export type MaintenanceJob = "rebuild_index" | "refresh_usage";
-export type MaintenancePhase = "started" | "finished" | "failed";
+type MaintenancePhase = "started" | "finished" | "failed";
 
 export interface MaintenanceEvent {
   job: MaintenanceJob;
@@ -259,7 +259,7 @@ export interface ModelCost {
   cost: number;
 }
 
-export interface ProjectProviderUsage {
+interface ProjectProviderUsage {
   provider: string;
   sessions: number;
   turns: number;

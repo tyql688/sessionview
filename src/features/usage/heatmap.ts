@@ -4,7 +4,7 @@ import type { ActivityDay } from "@/lib/types";
 export type HeatmapMetric = "sessions" | "turns" | "tokens" | "cost";
 
 /** Intensity bucket: 0 = no activity, 1 (lightest) … 4 (darkest). */
-export type HeatmapLevel = 0 | 1 | 2 | 3 | 4;
+type HeatmapLevel = 0 | 1 | 2 | 3 | 4;
 
 export interface HeatmapCell {
   /** ISO `YYYY-MM-DD`. Present even for padding cells (kept for keying). */
@@ -18,12 +18,12 @@ export interface HeatmapCell {
   level: HeatmapLevel;
 }
 
-export interface HeatmapWeek {
+interface HeatmapWeek {
   /** Exactly 7 cells, index 0 = Sunday … 6 = Saturday. */
   cells: HeatmapCell[];
 }
 
-export interface HeatmapMonthLabel {
+interface HeatmapMonthLabel {
   /** Index into `weeks` of the column where this month first appears. */
   weekIndex: number;
   /** Month number 1–12 (the caller localizes the label text). */

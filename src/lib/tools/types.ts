@@ -1,7 +1,3 @@
-import type { ToolDetail } from "@/lib/types";
-
-export type { ToolDetail };
-
 /** First non-empty string value among `keys` in `obj` (empty string if none). */
 export function firstString(obj: Record<string, unknown>, keys: string[]): string {
   for (const key of keys) {

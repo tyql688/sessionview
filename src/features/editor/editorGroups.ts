@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { SessionRef } from "@/lib/types";
 
-export interface EditorGroup {
+interface EditorGroup {
   id: string;
   tabs: SessionRef[];
   activeTabId: string | null;

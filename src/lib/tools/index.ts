@@ -1,4 +1,3 @@
-export type { ToolDetail } from "@/lib/tools/types";
 export {
   parseMcpToolName,
   toolDisplayName,

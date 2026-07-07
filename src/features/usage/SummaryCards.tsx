@@ -1,13 +1,13 @@
 import { useI18n } from "@/i18n/index";
 import { fmtCost, fmtTrend, trendClass } from "@/features/usage/formatters";
 
-export interface SummaryStatItem {
+interface SummaryStatItem {
   label: string;
   value: string;
   trend: number | null;
 }
 
-export interface TokenBreakdownItem {
+interface TokenBreakdownItem {
   label: string;
   value: string;
   share: string;
