@@ -786,3 +786,58 @@ fn token_totals_update_leaves_fts_index_intact() {
     assert_eq!(fts_match_count(&db, "trigram"), 1);
     assert_fts_integrity(&db);
 }
+
+#[test]
+fn aggressive_sync_only_deletes_sessions_whose_source_file_is_gone() {
+    let dir = TempDir::new().unwrap();
+    let db = Database::open(dir.path()).unwrap();
+
+    // Session A: source file genuinely absent. Session B: source file exists
+    // on disk but (as under transient I/O pressure) is missing from the scan.
+    let existing_source = dir.path().join("still-here.jsonl");
+    std::fs::write(&existing_source, "{}\n").unwrap();
+
+    let mut meta_gone = sample_meta("session-gone");
+    meta_gone.source_path = dir
+        .path()
+        .join("vanished.jsonl")
+        .to_string_lossy()
+        .into_owned();
+    let mut meta_alive = sample_meta("session-alive");
+    meta_alive.source_path = existing_source.to_string_lossy().into_owned();
+
+    let as_parsed = |meta: &SessionMeta| ParsedSession {
+        meta: meta.clone(),
+        messages: Vec::new(),
+        content_text: "hello".into(),
+        parse_warning_count: 0,
+        child_session_ids: Vec::new(),
+        usage_events: Vec::new(),
+        source_mtime: 1,
+    };
+    db.sync_provider_snapshot(
+        &Provider::Claude,
+        &[as_parsed(&meta_gone), as_parsed(&meta_alive)],
+        true,
+        &[],
+    )
+    .unwrap();
+
+    // Aggressive re-sync that saw NEITHER file (e.g. every open failed).
+    db.sync_provider_snapshot(&Provider::Claude, &[], true, &[])
+        .unwrap();
+
+    let conn = db.lock_read().unwrap();
+    let surviving: Vec<String> = conn
+        .prepare("SELECT id FROM sessions ORDER BY id")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        surviving,
+        vec!["session-alive".to_string()],
+        "sessions with a still-existing source file must survive a lossy scan"
+    );
+}

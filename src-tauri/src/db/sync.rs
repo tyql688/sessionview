@@ -195,7 +195,7 @@ impl Database {
                     delete_missing_sessions_for_source(conn, &provider_key, source_path, ids)?;
                 }
 
-                delete_missing_sources_for_provider(
+                delete_vanished_sources_for_provider(
                     conn,
                     &provider_key,
                     &snapshot_sources.source_paths,
@@ -661,29 +661,53 @@ fn delete_missing_sessions_for_source(
     Ok(())
 }
 
-fn delete_missing_sources_for_provider(
+/// Remove sessions whose source file is gone. A source missing from the scan
+/// output is only a HINT — scans silently skip files that fail to open/stat
+/// (transient I/O pressure, permissions), and treating those as deleted once
+/// wiped a whole library. Deletion therefore requires positive proof: the
+/// path must stat as `NotFound`. Any other outcome (exists, EMFILE, EPERM…)
+/// preserves the rows and logs a warning.
+fn delete_vanished_sources_for_provider(
     conn: &Connection,
     provider_key: &str,
-    source_paths: &[String],
+    scanned_source_paths: &[String],
 ) -> Result<(), rusqlite::Error> {
-    if source_paths.is_empty() {
-        conn.execute(
-            "DELETE FROM sessions WHERE provider = ?1",
-            params![provider_key],
-        )?;
-        return Ok(());
-    }
-
-    let mut sql = String::from("DELETE FROM sessions WHERE provider = ?1 AND source_path NOT IN (");
-    sql.push_str(&repeat_vars(source_paths.len()));
-    sql.push(')');
-
+    let mut sql = String::from("SELECT DISTINCT source_path FROM sessions WHERE provider = ?1");
     let mut params_refs: Vec<&dyn rusqlite::types::ToSql> = vec![&provider_key];
-    for source_path in source_paths {
-        params_refs.push(source_path);
+    if !scanned_source_paths.is_empty() {
+        sql.push_str(" AND source_path NOT IN (");
+        sql.push_str(&repeat_vars(scanned_source_paths.len()));
+        sql.push(')');
+        for source_path in scanned_source_paths {
+            params_refs.push(source_path);
+        }
     }
 
-    conn.execute(&sql, params_refs.as_slice())?;
+    let mut stmt = conn.prepare(&sql)?;
+    let candidates: Vec<String> = stmt
+        .query_map(params_refs.as_slice(), |row| row.get::<_, String>(0))?
+        .collect::<Result<_, _>>()?;
+
+    for source_path in candidates {
+        match std::fs::symlink_metadata(&source_path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                conn.execute(
+                    "DELETE FROM sessions WHERE provider = ?1 AND source_path = ?2",
+                    params![provider_key, source_path],
+                )?;
+            }
+            Err(error) => {
+                log::warn!(
+                    "source {source_path} missing from {provider_key} scan but unverifiable ({error}); keeping its sessions"
+                );
+            }
+            Ok(_) => {
+                log::warn!(
+                    "source {source_path} missing from {provider_key} scan but still on disk; keeping its sessions"
+                );
+            }
+        }
+    }
     Ok(())
 }
 
