@@ -2,7 +2,12 @@ import { useState, useMemo, useEffect } from "react";
 import type { Message } from "@/lib/types";
 import { useI18n } from "@/i18n/index";
 import { readToolResultText } from "@/lib/tauri";
-import { buildToolLineDiff, type ToolDiffLine } from "@/lib/diff";
+import {
+  buildToolLineDiff,
+  inlineSegments,
+  pairChangedLines,
+  type ToolDiffLine,
+} from "@/lib/diff";
 import {
   formatToolInput,
   formatToolResultMetadata,
@@ -73,28 +78,53 @@ function subagentButtonLabel(
 }
 
 function DiffRows(props: { lines: ToolDiffLine[] }) {
+  const pairs = useMemo(() => pairChangedLines(props.lines), [props.lines]);
+  const added = props.lines.filter((l) => l.type === "add").length;
+  const removed = props.lines.filter((l) => l.type === "remove").length;
+
+  const codeFor = (line: ToolDiffLine, index: number) => {
+    const partner = pairs.get(index);
+    if (partner === undefined) return line.text || " ";
+    const other = props.lines[partner];
+    if (!other) return line.text || " ";
+    const { from, to } = inlineSegments(
+      line.type === "remove" ? line.text : other.text,
+      line.type === "remove" ? other.text : line.text,
+    );
+    const segments = line.type === "remove" ? from : to;
+    return segments.map((segment, k) =>
+      segment.changed ? (
+        <mark className={`msg-tool-diff-emph ${line.type}`} key={k}>
+          {segment.text}
+        </mark>
+      ) : (
+        segment.text
+      ),
+    );
+  };
+
   return (
     <div className="msg-tool-line-diff">
-      {props.lines.map((line, i) => (
-        <div className={`msg-tool-diff-line ${line.type}`} key={i}>
-          <span className="msg-tool-diff-gutter msg-tool-diff-gutter-old">
-            {line.oldLine ?? ""}
-          </span>
-          <span className="msg-tool-diff-gutter msg-tool-diff-gutter-new">
-            {line.newLine ?? ""}
-          </span>
-          <span className="msg-tool-diff-marker">
-            {line.type === "add"
-              ? "+"
-              : line.type === "remove"
-                ? "-"
-                : line.type === "skip"
-                  ? "⋯"
-                  : " "}
-          </span>
-          <span className="msg-tool-diff-code">{line.text || " "}</span>
-        </div>
-      ))}
+      <div className="msg-tool-diff-stats">
+        <span className="msg-tool-diff-stat add">+{added}</span>
+        <span className="msg-tool-diff-stat remove">-{removed}</span>
+      </div>
+      {props.lines.map((line, i) =>
+        line.type === "skip" ? (
+          <div className="msg-tool-diff-skip" key={i}>
+            {line.text || "\u22EF"}
+          </div>
+        ) : (
+          <div className={`msg-tool-diff-line ${line.type}`} key={i}>
+            <span className="msg-tool-diff-gutter">{line.oldLine ?? ""}</span>
+            <span className="msg-tool-diff-gutter">{line.newLine ?? ""}</span>
+            <span className="msg-tool-diff-marker">
+              {line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}
+            </span>
+            <span className="msg-tool-diff-code">{codeFor(line, i)}</span>
+          </div>
+        ),
+      )}
     </div>
   );
 }

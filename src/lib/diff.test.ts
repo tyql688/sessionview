@@ -4,6 +4,10 @@ import {
   buildPatchLineDiff,
   buildStructuredPatchLineDiff,
   buildToolLineDiff,
+  inlineSegments,
+  pairChangedLines,
+  type ToolDiffLine,
+  type ToolDiffLineType,
 } from "@/lib/diff";
 
 describe("buildToolLineDiff", () => {
@@ -108,5 +112,57 @@ describe("buildStructuredPatchLineDiff", () => {
       { type: "remove", oldLine: 13, newLine: null, text: "old" },
       { type: "add", oldLine: null, newLine: 13, text: "new" },
     ]);
+  });
+});
+
+describe("inlineSegments", () => {
+  it("highlights the differing middle, keeps prefix/suffix quiet", () => {
+    const { from, to } = inlineSegments(
+      'const x = "old-value";',
+      'const x = "new-value";',
+    );
+    expect(from).toEqual([
+      { text: 'const x = "', changed: false },
+      { text: "old", changed: true },
+      { text: '-value";', changed: false },
+    ]);
+    expect(to[1]).toEqual({ text: "new", changed: true });
+  });
+
+  it("degrades to full-changed for disjoint rewrites", () => {
+    const { from, to } = inlineSegments("alpha", "omega");
+    expect(from.some((s) => s.changed)).toBe(true);
+    expect(to.map((s) => s.text).join("")).toBe("omega");
+  });
+
+  it("handles pure insertion", () => {
+    const { to } = inlineSegments("ab", "aXb");
+    expect(to).toEqual([
+      { text: "a", changed: false },
+      { text: "X", changed: true },
+      { text: "b", changed: false },
+    ]);
+  });
+});
+
+describe("pairChangedLines", () => {
+  it("pairs equal-position remove/add runs", () => {
+    const mk = (type: ToolDiffLineType, text: string): ToolDiffLine => ({
+      type,
+      oldLine: null,
+      newLine: null,
+      text,
+    });
+    const lines = [
+      mk("context", "a"),
+      mk("remove", "old1"),
+      mk("remove", "old2"),
+      mk("add", "new1"),
+      mk("context", "z"),
+    ];
+    const pairs = pairChangedLines(lines);
+    expect(pairs.get(1)).toBe(3);
+    expect(pairs.get(3)).toBe(1);
+    expect(pairs.has(2)).toBe(false);
   });
 });

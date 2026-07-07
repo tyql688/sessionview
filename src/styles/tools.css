@@ -201,75 +201,68 @@
   min-width: 0;
 }
 
-.msg-tool-diff {
+.msg-tool-line-diff {
+  position: relative;
   margin-top: 6px;
-  border-radius: 6px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-}
-
-.msg-tool-diff pre {
-  margin: 0;
-  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  overflow: auto;
+  max-height: 380px;
+  background: var(--bg-editor);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 300px;
-  overflow-y: auto;
-  color: var(--text-primary);
+  line-height: 1.55;
 }
 
-.msg-tool-diff-old {
-  background: var(--diff-old-bg);
-  display: flex;
-  border-left: 3px solid var(--diff-old-border);
+/* +n/-n badge floating over the card's top-right corner. */
+.msg-tool-diff-stats {
+  position: sticky;
+  top: 4px;
+  float: right;
+  display: inline-flex;
+  gap: 6px;
+  margin: 4px 6px 0 0;
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--bg-editor) 82%, transparent);
+  backdrop-filter: blur(4px);
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 1;
 }
 
-.msg-tool-diff-old pre {
-  color: var(--diff-old-text);
-}
-
-.msg-tool-diff-new {
-  background: var(--diff-new-bg);
-  border-top: 1px solid var(--border);
-  display: flex;
-  border-left: 3px solid var(--diff-new-border);
-}
-
-.msg-tool-diff-new pre {
-  color: var(--diff-new-text);
-}
-
-.msg-tool-diff-label {
-  padding: 8px 6px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 14px;
-  font-weight: 800;
-  flex-shrink: 0;
-  width: 20px;
-  text-align: center;
-  user-select: none;
-}
-
-.msg-tool-diff-old .msg-tool-diff-label {
-  color: var(--diff-old-border);
-}
-.msg-tool-diff-new .msg-tool-diff-label {
+.msg-tool-diff-stat.add {
   color: var(--diff-new-border);
 }
 
-.msg-tool-line-diff {
-  margin-top: 6px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: auto;
-  max-height: 360px;
-  background: var(--bg-main);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  line-height: 1.45;
+.msg-tool-diff-stat.remove {
+  color: var(--diff-old-border);
+}
+
+/* Character-level emphasis inside paired remove/add lines. */
+.msg-tool-diff-emph {
+  border-radius: 3px;
+  padding: 0 1px;
+  color: inherit;
+}
+
+.msg-tool-diff-emph.add {
+  background: color-mix(in srgb, var(--diff-new-border) 28%, transparent);
+}
+
+.msg-tool-diff-emph.remove {
+  background: color-mix(in srgb, var(--diff-old-border) 26%, transparent);
+}
+
+.msg-tool-diff-skip {
+  padding: 3px 12px;
+  color: var(--text-tertiary);
+  background: color-mix(in srgb, var(--text-primary) 3%, transparent);
+  border-block: 1px solid var(--border-subtle);
+  font-size: 11px;
+  text-align: center;
+  user-select: none;
 }
 
 .msg-tool-diff-line {
@@ -298,7 +291,30 @@
   color: var(--text-tertiary);
   user-select: none;
   text-align: right;
-  border-right: 1px solid var(--border-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+/* GitHub-style gutters: one shade deeper than the row they annotate. */
+.msg-tool-diff-line.add .msg-tool-diff-gutter {
+  background: color-mix(in srgb, var(--diff-new-border) 10%, transparent);
+  color: color-mix(in srgb, var(--diff-new-border) 70%, var(--text-tertiary));
+}
+
+.msg-tool-diff-line.remove .msg-tool-diff-gutter {
+  background: color-mix(in srgb, var(--diff-old-border) 10%, transparent);
+  color: color-mix(in srgb, var(--diff-old-border) 70%, var(--text-tertiary));
+}
+
+.msg-tool-diff-marker {
+  font-weight: 700;
+}
+
+.msg-tool-diff-line.add .msg-tool-diff-marker {
+  color: var(--diff-new-border);
+}
+
+.msg-tool-diff-line.remove .msg-tool-diff-marker {
+  color: var(--diff-old-border);
 }
 
 .msg-tool-diff-marker {
