@@ -41,7 +41,7 @@ pub struct TailWindow {
 ///
 /// `Err` is returned only for IO failures (open / metadata / mmap);
 /// empty files and "fewer lines than requested" are normal results.
-pub fn tail_byte_offset(path: &Path, target_lines: usize) -> std::io::Result<TailWindow> {
+pub(crate) fn tail_byte_offset(path: &Path, target_lines: usize) -> std::io::Result<TailWindow> {
     let file = File::open(path)?;
     let metadata = file.metadata()?;
     let file_size = metadata.len();
@@ -106,7 +106,7 @@ pub fn tail_byte_offset(path: &Path, target_lines: usize) -> std::io::Result<Tai
 /// Returns `None` on any locate/open/seek failure (after logging), so
 /// the provider's tail parser falls back to the full-file parse — this
 /// matches the per-parser scaffold each provider previously inlined.
-pub fn open_tail_reader(
+pub(crate) fn open_tail_reader(
     path: &Path,
     scan_lines: usize,
     label: &str,

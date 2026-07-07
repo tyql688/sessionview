@@ -1,9 +1,11 @@
 use serde_json::Value;
 
 // Provider-agnostic marker helpers — see `services::image_markers`.
-pub use crate::services::image_markers::{extract_image_source_segments, is_image_placeholder};
+pub(crate) use crate::services::image_markers::{
+    extract_image_source_segments, is_image_placeholder,
+};
 
-pub fn extract_codex_content(payload: &Value) -> String {
+pub(crate) fn extract_codex_content(payload: &Value) -> String {
     match payload.get("content") {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Array(arr)) => extract_codex_array_content(arr),
@@ -19,7 +21,7 @@ pub fn extract_codex_content(payload: &Value) -> String {
     }
 }
 
-pub fn extract_codex_array_content(arr: &[Value]) -> String {
+pub(crate) fn extract_codex_array_content(arr: &[Value]) -> String {
     let mut parts = Vec::new();
 
     for item in arr {
@@ -48,21 +50,21 @@ pub fn extract_codex_array_content(arr: &[Value]) -> String {
     parts.join("\n")
 }
 
-pub fn extract_codex_text(item: &Value) -> Option<&str> {
+pub(crate) fn extract_codex_text(item: &Value) -> Option<&str> {
     item.get("text")
         .or_else(|| item.get("output_text"))
         .or_else(|| item.get("input_text"))
         .and_then(|t| t.as_str())
 }
 
-pub fn is_codex_image_wrapper(text: &str) -> bool {
+pub(crate) fn is_codex_image_wrapper(text: &str) -> bool {
     let trimmed = text.trim();
     (trimmed.starts_with("<image name=") && trimmed.ends_with('>')) || trimmed == "</image>"
 }
 
 /// Extract readable text from Codex tool output.
 /// Handles: plain text, JSON `{"output":"..."}`, JSON array `[{"type":"text","text":"..."}]`.
-pub fn extract_tool_output(raw: &str) -> String {
+pub(crate) fn extract_tool_output(raw: &str) -> String {
     let trimmed = raw.trim();
     // Try JSON object with "output" field (custom_tool_call_output)
     if trimmed.starts_with('{') {
@@ -99,7 +101,7 @@ pub fn extract_tool_output(raw: &str) -> String {
     omit_base64_image_sources(raw)
 }
 
-pub fn strip_inline_image_sources(text: &str) -> String {
+pub(crate) fn strip_inline_image_sources(text: &str) -> String {
     if !text.contains("[Image: source:") {
         return text.to_string();
     }
@@ -117,7 +119,7 @@ pub fn strip_inline_image_sources(text: &str) -> String {
         .join("\n")
 }
 
-pub fn omit_base64_image_sources(text: &str) -> String {
+pub(crate) fn omit_base64_image_sources(text: &str) -> String {
     if !text.contains(";base64,") {
         return text.to_string();
     }
@@ -147,7 +149,10 @@ fn is_base64_image_url(value: &str) -> bool {
     value.starts_with("data:image/") && value.contains(";base64,")
 }
 
-pub fn build_codex_user_message(payload: &Value, response_image_segments: &[String]) -> String {
+pub(crate) fn build_codex_user_message(
+    payload: &Value,
+    response_image_segments: &[String],
+) -> String {
     let message = payload
         .get("message")
         .and_then(|v| v.as_str())

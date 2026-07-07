@@ -12,7 +12,7 @@ use crate::provider::{
 };
 use crate::providers::claude::parser;
 
-pub struct Descriptor;
+pub(crate) struct Descriptor;
 impl crate::provider::ProviderDescriptor for Descriptor {
     fn owns_source_path(&self, source_path: &str) -> bool {
         let p = source_path.replace('\\', "/");
@@ -69,7 +69,7 @@ struct Variant {
     normalized_prefix: String,
 }
 
-pub struct CcMirrorProvider {
+pub(crate) struct CcMirrorProvider {
     variants: Vec<Variant>,
 }
 
@@ -193,7 +193,7 @@ pub(crate) fn hydrate_variant_names(sessions: &mut [SessionMeta]) {
 }
 
 impl CcMirrorProvider {
-    pub fn new() -> Option<Self> {
+    pub(crate) fn new() -> Option<Self> {
         let home_dir = dirs::home_dir()?;
         let mirror_root = home_dir.join(".cc-mirror");
         if !mirror_root.exists() {

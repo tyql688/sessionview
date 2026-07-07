@@ -33,7 +33,7 @@ use crate::provider::{
 };
 use crate::provider_utils::project_name_from_path;
 
-pub struct Descriptor;
+pub(crate) struct Descriptor;
 impl crate::provider::ProviderDescriptor for Descriptor {
     fn owns_source_path(&self, source_path: &str) -> bool {
         let p = source_path.replace('\\', "/");

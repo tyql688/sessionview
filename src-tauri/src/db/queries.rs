@@ -54,7 +54,7 @@ pub(crate) struct UsageSessionModelDetailRow {
 pub(crate) type UsageTotalsRow = (u64, u64, u64, u64, u64, u64, f64);
 
 impl Database {
-    pub fn get_meta(&self, key: &str) -> Result<Option<String>, rusqlite::Error> {
+    pub(crate) fn get_meta(&self, key: &str) -> Result<Option<String>, rusqlite::Error> {
         let conn = self.lock_read()?;
         let mut stmt = conn.prepare("SELECT value FROM meta WHERE key = ?1")?;
         let mut rows = stmt.query_map(params![key], |row| row.get::<_, String>(0))?;
@@ -65,7 +65,7 @@ impl Database {
         }
     }
 
-    pub fn set_meta(&self, key: &str, value: &str) -> Result<(), rusqlite::Error> {
+    pub(crate) fn set_meta(&self, key: &str, value: &str) -> Result<(), rusqlite::Error> {
         let conn = self.lock_write()?;
         conn.execute(
             "INSERT INTO meta (key, value) VALUES (?1, ?2)
@@ -75,7 +75,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn db_size_bytes(&self) -> u64 {
+    pub(crate) fn db_size_bytes(&self) -> u64 {
         // Prefer (page_count - freelist_count) * page_size for actual data usage;
         // file size on disk includes free pages that can't be reclaimed while the
         // app is running. Falls back to file metadata if the pragma query fails.

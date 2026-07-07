@@ -14,7 +14,7 @@ use crate::provider::{
 };
 use crate::provider_utils::session_title;
 
-pub struct Descriptor;
+pub(crate) struct Descriptor;
 impl crate::provider::ProviderDescriptor for Descriptor {
     fn owns_source_path(&self, source_path: &str) -> bool {
         source_path
@@ -49,7 +49,7 @@ pub struct OpenCodeProvider {
 }
 
 impl OpenCodeProvider {
-    pub fn new() -> Option<Self> {
+    pub(crate) fn new() -> Option<Self> {
         // OpenCode stores its DB in XDG_DATA_HOME/opencode/ (~/.local/share/opencode/ on macOS/Linux)
         let base = if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
             PathBuf::from(xdg)

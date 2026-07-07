@@ -2,7 +2,11 @@ use std::process::Command;
 
 use anyhow::Context;
 
-pub fn launch_terminal(target: &str, command: &str, cwd: Option<&str>) -> anyhow::Result<()> {
+pub(crate) fn launch_terminal(
+    target: &str,
+    command: &str,
+    cwd: Option<&str>,
+) -> anyhow::Result<()> {
     if command.trim().is_empty() {
         anyhow::bail!("Command is empty");
     }

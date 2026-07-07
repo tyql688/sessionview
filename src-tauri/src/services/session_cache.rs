@@ -80,7 +80,7 @@ impl SessionCache {
     // to satisfy clippy would force every caller to build the struct
     // before calling, with no real readability gain.
     #[allow(clippy::too_many_arguments)]
-    pub fn insert(
+    pub(crate) fn insert(
         &self,
         key: String,
         source_path: String,
@@ -135,7 +135,7 @@ impl SessionCache {
         inner.map.remove(key);
     }
 
-    pub fn invalidate_source(&self, source_path: &str) {
+    pub(crate) fn invalidate_source(&self, source_path: &str) {
         let mut inner = match self.inner.lock() {
             Ok(g) => g,
             Err(poisoned) => poisoned.into_inner(),

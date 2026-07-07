@@ -3,16 +3,16 @@ use crate::models::{Provider, ProviderSnapshot};
 use crate::services::error::{ServiceError, ServiceResult};
 use std::path::{Path, PathBuf};
 
-pub struct ProviderSnapshotService<'a> {
+pub(crate) struct ProviderSnapshotService<'a> {
     db: &'a Database,
 }
 
 impl<'a> ProviderSnapshotService<'a> {
-    pub fn new(db: &'a Database) -> Self {
+    pub(crate) fn new(db: &'a Database) -> Self {
         Self { db }
     }
 
-    pub fn list(&self) -> ServiceResult<Vec<ProviderSnapshot>> {
+    pub(crate) fn list(&self) -> ServiceResult<Vec<ProviderSnapshot>> {
         let counts = self
             .db
             .provider_session_counts()

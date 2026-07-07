@@ -14,7 +14,7 @@ use super::search::{
 use super::Database;
 
 impl Database {
-    pub fn get_session(&self, id: &str) -> Result<Option<SessionMeta>, rusqlite::Error> {
+    pub(crate) fn get_session(&self, id: &str) -> Result<Option<SessionMeta>, rusqlite::Error> {
         let conn = self.lock_read()?;
         let mut stmt = conn.prepare(
             "SELECT id, provider, title, project_path, project_name,
@@ -34,7 +34,7 @@ impl Database {
         }
     }
 
-    pub fn get_session_token_totals(
+    pub(crate) fn get_session_token_totals(
         &self,
         session_id: &str,
     ) -> Result<Option<TokenTotals>, rusqlite::Error> {
@@ -63,7 +63,7 @@ impl Database {
         )
     }
 
-    pub fn list_sessions(&self) -> Result<Vec<SessionMeta>, rusqlite::Error> {
+    pub(crate) fn list_sessions(&self) -> Result<Vec<SessionMeta>, rusqlite::Error> {
         let conn = self.lock_read()?;
         list_sessions_from_query(
             &conn,
@@ -79,7 +79,7 @@ impl Database {
         )
     }
 
-    pub fn keyword_trends(
+    pub(crate) fn keyword_trends(
         &self,
         keywords: &[String],
         days: u32,
@@ -108,7 +108,7 @@ impl Database {
         Ok(series)
     }
 
-    pub fn search_filtered(
+    pub(crate) fn search_filtered(
         &self,
         filters: &SearchFilters,
     ) -> Result<Vec<SearchResult>, rusqlite::Error> {
@@ -142,12 +142,15 @@ impl Database {
         }
     }
 
-    pub fn session_count(&self) -> Result<u64, rusqlite::Error> {
+    pub(crate) fn session_count(&self) -> Result<u64, rusqlite::Error> {
         let conn = self.lock_read()?;
         conn.query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
     }
 
-    pub fn count_sessions_for_provider(&self, provider_key: &str) -> Result<u64, rusqlite::Error> {
+    pub(crate) fn count_sessions_for_provider(
+        &self,
+        provider_key: &str,
+    ) -> Result<u64, rusqlite::Error> {
         let conn = self.lock_read()?;
         conn.query_row(
             "SELECT COUNT(*) FROM sessions WHERE provider = ?1",
@@ -162,7 +165,7 @@ impl Database {
     /// which forces a reparse the first time they're seen.
     /// Rows with empty `source_path` (synthetic / detached sessions)
     /// are excluded — they wouldn't survive a file-level check anyway.
-    pub fn source_states_for_provider(
+    pub(crate) fn source_states_for_provider(
         &self,
         provider_key: &str,
     ) -> Result<std::collections::HashMap<String, crate::provider::SourceState>, rusqlite::Error>
@@ -196,7 +199,7 @@ impl Database {
         Ok(out)
     }
 
-    pub fn count_sessions_for_source(
+    pub(crate) fn count_sessions_for_source(
         &self,
         provider_key: &str,
         source_path: &str,
@@ -209,7 +212,7 @@ impl Database {
         )
     }
 
-    pub fn provider_session_counts(&self) -> Result<HashMap<String, u64>, rusqlite::Error> {
+    pub(crate) fn provider_session_counts(&self) -> Result<HashMap<String, u64>, rusqlite::Error> {
         let conn = self.lock_read()?;
         let mut stmt = conn.prepare("SELECT provider, COUNT(*) FROM sessions GROUP BY provider")?;
         let rows = stmt.query_map([], |row| {

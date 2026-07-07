@@ -29,7 +29,10 @@ impl Database {
     }
 
     /// Returns full SessionMeta for all children of a given parent session.
-    pub fn get_child_sessions(&self, parent_id: &str) -> Result<Vec<SessionMeta>, rusqlite::Error> {
+    pub(crate) fn get_child_sessions(
+        &self,
+        parent_id: &str,
+    ) -> Result<Vec<SessionMeta>, rusqlite::Error> {
         let conn = self.lock_read()?;
         let mut stmt = conn.prepare(
             "SELECT id, provider, title, project_path, project_name,
@@ -55,7 +58,7 @@ impl Database {
         Ok(sessions)
     }
 
-    pub fn child_session_counts(
+    pub(crate) fn child_session_counts(
         &self,
         parent_ids: &[String],
     ) -> Result<HashMap<String, u64>, rusqlite::Error> {

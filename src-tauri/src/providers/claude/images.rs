@@ -1,12 +1,12 @@
-pub fn contains_image_source(text: &str) -> bool {
+pub(crate) fn contains_image_source(text: &str) -> bool {
     text.contains("[Image: source:") || text.contains("[Image source:")
 }
 
-pub fn contains_image_placeholder_without_source(text: &str) -> bool {
+pub(crate) fn contains_image_placeholder_without_source(text: &str) -> bool {
     text.contains("[Image") && !contains_image_source(text)
 }
 
-pub fn count_image_markers(text: &str) -> usize {
+pub(crate) fn count_image_markers(text: &str) -> usize {
     let mut count = 0;
     let mut remaining = text;
 
@@ -23,7 +23,7 @@ pub fn count_image_markers(text: &str) -> usize {
     count
 }
 
-pub fn normalize_image_source_segments(text: &str) -> String {
+pub(crate) fn normalize_image_source_segments(text: &str) -> String {
     let mut normalized = String::new();
     let mut remaining = text;
 
@@ -49,7 +49,10 @@ pub fn normalize_image_source_segments(text: &str) -> String {
     normalized
 }
 
-pub fn merge_image_placeholders_with_sources(placeholder_text: &str, meta_text: &str) -> String {
+pub(crate) fn merge_image_placeholders_with_sources(
+    placeholder_text: &str,
+    meta_text: &str,
+) -> String {
     let sources = extract_image_source_segments(meta_text);
     if sources.is_empty() {
         return placeholder_text.to_string();
@@ -96,7 +99,7 @@ pub fn merge_image_placeholders_with_sources(placeholder_text: &str, meta_text: 
 // `services::image_markers` because every provider's parser emits the
 // same `[Image: source: ...]` marker — re-export the ones this module
 // already exposed so existing callers compile unchanged.
-pub use crate::services::image_markers::{
+pub(crate) use crate::services::image_markers::{
     extract_image_source_segments, is_image_placeholder, parse_image_source_segment,
 };
 

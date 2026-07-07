@@ -490,7 +490,7 @@ pub struct CodexTailResult {
 ///   tail naturally starts past that region — `skipping_fork_context`
 ///   stays at its default `false` and the loop dispatches normally.
 /// - No token-total computation: the caller pulls totals from the DB.
-pub fn parse_session_tail(path: &Path, target_messages: usize) -> Option<CodexTailResult> {
+pub(crate) fn parse_session_tail(path: &Path, target_messages: usize) -> Option<CodexTailResult> {
     // Codex JSONL lines are noticeably bigger than Claude's (each turn
     // is ~10-20 KB of `response_item.message` content + tool calls),
     // and an event_msg.token_count plus its enclosing turn_context can

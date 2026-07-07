@@ -16,18 +16,18 @@ thread_local! {
 }
 
 /// Make a fresh flag in the un-canceled state.
-pub fn fresh() -> CancelFlag {
+pub(crate) fn fresh() -> CancelFlag {
     Arc::new(AtomicUsize::new(0))
 }
 
 /// Trip the flag. Idempotent.
-pub fn cancel(flag: &CancelFlag) {
+pub(crate) fn cancel(flag: &CancelFlag) {
     flag.store(1, Ordering::Relaxed);
 }
 
 /// Check whether the flag held by the current spawn_blocking thread (if
 /// any) has been tripped. Returns false when no flag is installed.
-pub fn is_canceled() -> bool {
+pub(crate) fn is_canceled() -> bool {
     CURRENT.with(|c| {
         c.borrow()
             .as_ref()
@@ -39,7 +39,7 @@ pub fn is_canceled() -> bool {
 /// duration of `work`. The previous flag (if any) is saved and restored
 /// on return so nested `run_with` calls observe correct lexical scoping;
 /// reused tokio worker threads don't leak state into the next task.
-pub fn run_with<R>(flag: CancelFlag, work: impl FnOnce() -> R) -> R {
+pub(crate) fn run_with<R>(flag: CancelFlag, work: impl FnOnce() -> R) -> R {
     struct Guard {
         previous: Option<CancelFlag>,
     }

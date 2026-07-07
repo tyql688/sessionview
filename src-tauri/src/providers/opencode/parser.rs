@@ -291,7 +291,7 @@ pub(super) fn build_assistant_messages(
 }
 
 /// Extract token usage from an assistant message's `data.tokens` JSON.
-pub fn extract_tokens(msg_json: &serde_json::Value) -> Option<TokenUsage> {
+pub(crate) fn extract_tokens(msg_json: &serde_json::Value) -> Option<TokenUsage> {
     let tokens = msg_json.get("tokens")?;
     let input = tokens.get("input")?.as_u64()? as u32;
     let output = tokens.get("output")?.as_u64()? as u32;
@@ -313,7 +313,7 @@ pub fn extract_tokens(msg_json: &serde_json::Value) -> Option<TokenUsage> {
 }
 
 /// Convert epoch milliseconds to RFC3339 timestamp string.
-pub fn ms_to_rfc3339(ms: i64) -> Option<String> {
+pub(crate) fn ms_to_rfc3339(ms: i64) -> Option<String> {
     chrono::DateTime::from_timestamp(ms / 1000, ((ms % 1000) * 1_000_000) as u32)
         .map(|dt| dt.to_rfc3339())
 }

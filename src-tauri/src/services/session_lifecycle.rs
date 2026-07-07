@@ -21,20 +21,20 @@ struct RestoreEntries {
     remaining: Vec<TrashMeta>,
 }
 
-pub struct SessionLifecycleService<'a> {
+pub(crate) struct SessionLifecycleService<'a> {
     db: &'a Database,
     source_sync: SourceSyncService<'a>,
 }
 
 impl<'a> SessionLifecycleService<'a> {
-    pub fn new(db: &'a Database) -> Self {
+    pub(crate) fn new(db: &'a Database) -> Self {
         Self {
             db,
             source_sync: SourceSyncService::new(db),
         }
     }
 
-    pub fn trash_session(&self, session_id: &str) -> ServiceResult<()> {
+    pub(crate) fn trash_session(&self, session_id: &str) -> ServiceResult<()> {
         let trash_dir = trash_dir()?;
         let deletion = resolve_session_deletion(self.db, session_id)?;
 
@@ -72,7 +72,7 @@ impl<'a> SessionLifecycleService<'a> {
         Ok(())
     }
 
-    pub fn purge_session(&self, session_id: &str) -> ServiceResult<()> {
+    pub(crate) fn purge_session(&self, session_id: &str) -> ServiceResult<()> {
         let deletion = resolve_session_deletion(self.db, session_id)?;
 
         // Clean cached images before deleting session data
@@ -98,7 +98,7 @@ impl<'a> SessionLifecycleService<'a> {
         Ok(())
     }
 
-    pub fn trash_sessions(&self, session_ids: &[String]) -> crate::models::BatchResult {
+    pub(crate) fn trash_sessions(&self, session_ids: &[String]) -> crate::models::BatchResult {
         let mut succeeded = 0u32;
         let mut failed = 0u32;
         let mut errors = Vec::new();
@@ -119,7 +119,7 @@ impl<'a> SessionLifecycleService<'a> {
         }
     }
 
-    pub fn restore_sessions(&self, trash_ids: &[String]) -> crate::models::BatchResult {
+    pub(crate) fn restore_sessions(&self, trash_ids: &[String]) -> crate::models::BatchResult {
         let mut succeeded = 0u32;
         let mut failed = 0u32;
         let mut errors = Vec::new();
@@ -140,7 +140,10 @@ impl<'a> SessionLifecycleService<'a> {
         }
     }
 
-    pub fn permanent_delete_trash_batch(&self, trash_ids: &[String]) -> crate::models::BatchResult {
+    pub(crate) fn permanent_delete_trash_batch(
+        &self,
+        trash_ids: &[String],
+    ) -> crate::models::BatchResult {
         let mut succeeded = 0u32;
         let mut failed = 0u32;
         let mut errors = Vec::new();
@@ -161,7 +164,7 @@ impl<'a> SessionLifecycleService<'a> {
         }
     }
 
-    pub fn list_trash() -> ServiceResult<Vec<TrashMeta>> {
+    pub(crate) fn list_trash() -> ServiceResult<Vec<TrashMeta>> {
         let trash_dir = trash_dir()?;
         let meta_path = trash_meta_path(&trash_dir);
         let shared_deletions_path = shared_deletions_path(&trash_dir);
@@ -176,7 +179,7 @@ impl<'a> SessionLifecycleService<'a> {
         )
     }
 
-    pub fn restore_session(&self, trash_id: &str) -> ServiceResult<()> {
+    pub(crate) fn restore_session(&self, trash_id: &str) -> ServiceResult<()> {
         let trash_dir = trash_dir()?;
         let meta_path = trash_meta_path(&trash_dir);
         let shared_deletions_path = shared_deletions_path(&trash_dir);
@@ -246,7 +249,7 @@ impl<'a> SessionLifecycleService<'a> {
         Ok(())
     }
 
-    pub fn empty_trash() -> ServiceResult<()> {
+    pub(crate) fn empty_trash() -> ServiceResult<()> {
         let trash_dir = trash_dir()?;
         let meta_path = trash_meta_path(&trash_dir);
         let shared_deletions_path = shared_deletions_path(&trash_dir);
@@ -274,7 +277,7 @@ impl<'a> SessionLifecycleService<'a> {
         Ok(())
     }
 
-    pub fn permanent_delete_trash(&self, trash_id: &str) -> ServiceResult<()> {
+    pub(crate) fn permanent_delete_trash(&self, trash_id: &str) -> ServiceResult<()> {
         let trash_dir = trash_dir()?;
         let meta_path = trash_meta_path(&trash_dir);
         let shared_deletions_path = shared_deletions_path(&trash_dir);

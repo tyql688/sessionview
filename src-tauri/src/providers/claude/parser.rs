@@ -542,7 +542,7 @@ pub struct ClaudeTailResult {
 ///   is O(small constant) — usually a few hundred KB of trailing bytes
 ///   — so there's nothing meaningful to cancel before the dispatch
 ///   loop is entered.
-pub fn parse_session_tail(path: &Path, target_messages: usize) -> Option<ClaudeTailResult> {
+pub(crate) fn parse_session_tail(path: &Path, target_messages: usize) -> Option<ClaudeTailResult> {
     // Pull a small extra buffer above the requested window so a tool
     // call/result pair that happens to span the cut boundary has a
     // reasonable chance of landing fully inside the parsed range.

@@ -14,7 +14,7 @@ use crate::provider::{
     ParsedSession, ProviderError, ScanOutcome, SessionProvider, SourceState,
 };
 
-pub struct Descriptor;
+pub(crate) struct Descriptor;
 impl crate::provider::ProviderDescriptor for Descriptor {
     fn owns_source_path(&self, source_path: &str) -> bool {
         let p = source_path.replace('\\', "/");
@@ -45,7 +45,7 @@ pub struct PiProvider {
 }
 
 impl PiProvider {
-    pub fn new() -> Option<Self> {
+    pub(crate) fn new() -> Option<Self> {
         let home_dir = dirs::home_dir()?;
         Some(Self { home_dir })
     }

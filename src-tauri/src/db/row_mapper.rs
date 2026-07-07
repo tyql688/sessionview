@@ -1,6 +1,6 @@
 use crate::models::{Provider, SessionMeta};
 
-pub fn row_to_session_meta(row: &rusqlite::Row) -> rusqlite::Result<SessionMeta> {
+pub(crate) fn row_to_session_meta(row: &rusqlite::Row) -> rusqlite::Result<SessionMeta> {
     let provider = row.get::<_, String>(1)?;
     Ok(SessionMeta {
         id: row.get(0)?,

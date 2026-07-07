@@ -13,7 +13,7 @@
 /// Walk `text` and return each well-formed `[Image: source: ...]`
 /// segment in document order. Used by the image cache to find paths
 /// that need backing up and by parsers to count / validate markers.
-pub fn extract_image_source_segments(text: &str) -> Vec<String> {
+pub(crate) fn extract_image_source_segments(text: &str) -> Vec<String> {
     let mut segments = Vec::new();
     let mut remaining = text;
 
@@ -37,14 +37,14 @@ pub fn extract_image_source_segments(text: &str) -> Vec<String> {
 /// True iff `segment` is an `[Image ...]` marker without a
 /// `source:` payload — a placeholder that wants to be merged with a
 /// real source later.
-pub fn is_image_placeholder(segment: &str) -> bool {
+pub(crate) fn is_image_placeholder(segment: &str) -> bool {
     segment.starts_with("[Image") && parse_image_source_segment(segment).is_none()
 }
 
 /// Pull the path/URL/data-URI out of an `[Image: source: ...]`
 /// segment. Returns `None` for placeholders or malformed segments so
 /// callers can skip silently.
-pub fn extract_path_from_segment(segment: &str) -> Option<&str> {
+pub(crate) fn extract_path_from_segment(segment: &str) -> Option<&str> {
     let trimmed = segment.strip_prefix("[Image: source: ")?;
     let path = trimmed.strip_suffix(']')?;
     let path = path.trim();
@@ -58,7 +58,7 @@ pub fn extract_path_from_segment(segment: &str) -> Option<&str> {
 /// `[Image source: ...]`) segment into the canonical
 /// `[Image: source: <src>]` form. Returns `None` when the segment
 /// doesn't carry a non-empty source.
-pub fn parse_image_source_segment(segment: &str) -> Option<String> {
+pub(crate) fn parse_image_source_segment(segment: &str) -> Option<String> {
     if !segment.starts_with("[Image") || !segment.ends_with(']') {
         return None;
     }

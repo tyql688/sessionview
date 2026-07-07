@@ -16,7 +16,7 @@ use crate::provider::{
     SourceState, TokenStatRow,
 };
 
-pub struct Descriptor;
+pub(crate) struct Descriptor;
 impl crate::provider::ProviderDescriptor for Descriptor {
     fn owns_source_path(&self, source_path: &str) -> bool {
         source_path.replace('\\', "/").contains("/.codex/sessions/")

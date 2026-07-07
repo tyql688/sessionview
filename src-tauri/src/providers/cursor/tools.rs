@@ -18,7 +18,7 @@ use crate::provider_utils::is_system_content;
 /// Pull text out of a `message.content` value. Cursor uses either a JSON
 /// array of parts or, occasionally, a raw string. We accept both and
 /// collapse the parts into a single newline-separated string.
-pub fn extract_text_from_content(content: Option<&Value>) -> String {
+pub(crate) fn extract_text_from_content(content: Option<&Value>) -> String {
     match content {
         Some(Value::String(s)) => {
             // Some legacy records store the array as a JSON-encoded string.
@@ -38,7 +38,7 @@ pub fn extract_text_from_content(content: Option<&Value>) -> String {
 /// placeholders are dropped (Cursor emits them when reasoning is
 /// stripped server-side); non-text parts (tool_use, etc.) are skipped
 /// here — callers handle them separately.
-pub fn extract_text_from_parts(arr: &[Value]) -> String {
+pub(crate) fn extract_text_from_parts(arr: &[Value]) -> String {
     let mut chunks = Vec::new();
     for item in arr {
         if item.get("type").and_then(|v| v.as_str()) != Some("text") {
@@ -58,7 +58,7 @@ pub fn extract_text_from_parts(arr: &[Value]) -> String {
 /// Return the part array from a Cursor `message.content` field,
 /// handling the string-encoded edge case for callers that need to
 /// inspect non-text parts (tool_use).
-pub fn parse_content_array(content: Option<&Value>) -> Vec<Value> {
+pub(crate) fn parse_content_array(content: Option<&Value>) -> Vec<Value> {
     match content {
         Some(Value::Array(arr)) => arr.clone(),
         Some(Value::String(s)) if s.trim_start().starts_with('[') => {
@@ -79,7 +79,7 @@ pub fn parse_content_array(content: Option<&Value>) -> Vec<Value> {
 ///
 /// Returns the empty string when nothing user-facing survives — callers
 /// drop the message entirely in that case.
-pub fn normalise_user_text(text: &str) -> String {
+pub(crate) fn normalise_user_text(text: &str) -> String {
     let with_image_markers = rewrite_image_files_block(text);
     let prompt = extract_tag_content(&with_image_markers, "user_query")
         .map(str::to_string)
@@ -110,7 +110,7 @@ pub fn normalise_user_text(text: &str) -> String {
 /// We strip the wrapper, drop the duplicate `[Image]` markers Cursor
 /// inserts before it, and emit one canonical line per image so the
 /// frontend's existing `[Image: source: ...]` renderer picks them up.
-pub fn rewrite_image_files_block(text: &str) -> String {
+pub(crate) fn rewrite_image_files_block(text: &str) -> String {
     let Some(inner) = extract_tag_content(text, "image_files") else {
         return text.to_string();
     };
@@ -158,7 +158,7 @@ pub fn rewrite_image_files_block(text: &str) -> String {
 }
 
 /// Extract the substring between `<tag>` and `</tag>` from `text`.
-pub fn extract_tag_content<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
+pub(crate) fn extract_tag_content<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
     let open = format!("<{tag}>");
     let close = format!("</{tag}>");
     let start = text.find(&open)?;
@@ -169,7 +169,7 @@ pub fn extract_tag_content<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
 
 /// Find the workspace path embedded in `<user_info>` (one line of the
 /// form `Workspace Path: /abs/path`). Returns None when missing.
-pub fn extract_workspace_path(text: &str) -> Option<String> {
+pub(crate) fn extract_workspace_path(text: &str) -> Option<String> {
     for line in text.lines() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("Workspace Path:") {
@@ -189,7 +189,7 @@ pub fn extract_workspace_path(text: &str) -> Option<String> {
 /// Pull the first `<think>…</think>` block out of an assistant message.
 /// Cursor models emit explicit reasoning in this wrapper; the frontend
 /// renders it under `MessageRole::System` with a `[thinking]` prefix.
-pub fn extract_think_content(text: &str) -> Option<String> {
+pub(crate) fn extract_think_content(text: &str) -> Option<String> {
     let start = text.find("<think>")?;
     let after = &text[start + "<think>".len()..];
     let end = after.find("</think>").unwrap_or(after.len());
@@ -205,7 +205,7 @@ pub fn extract_think_content(text: &str) -> Option<String> {
 /// `<think>` runs (streaming interrupted before `</think>`) discard
 /// everything from the opening tag onward — partial reasoning is
 /// noise we don't want to surface as part of the assistant reply.
-pub fn strip_think_tags(text: &str) -> String {
+pub(crate) fn strip_think_tags(text: &str) -> String {
     if !text.contains("<think>") {
         return text.to_string();
     }
@@ -230,7 +230,7 @@ pub fn strip_think_tags(text: &str) -> String {
 /// Drop `[REDACTED]` placeholders Cursor leaves where reasoning was
 /// scrubbed server-side. Also collapses the blank lines they leave
 /// behind so the bubble doesn't render gaps.
-pub fn strip_redacted(text: &str) -> String {
+pub(crate) fn strip_redacted(text: &str) -> String {
     let cleaned = text.replace("[REDACTED]", "");
     cleaned
         .lines()
@@ -246,7 +246,7 @@ pub fn strip_redacted(text: &str) -> String {
 /// Translate Cursor's tool args into the canonical shape the frontend
 /// already renders for Claude / Codex / Kimi (file_path / old_string /
 /// new_string / command / etc.). Unknown tools pass through.
-pub fn remap_tool_args(tool_name: &str, args: &Value) -> Option<String> {
+pub(crate) fn remap_tool_args(tool_name: &str, args: &Value) -> Option<String> {
     // ApplyPatch ships raw patch text as a string, not an object.
     if let Value::String(s) = args {
         return Some(remap_patch_string(s));

@@ -16,7 +16,7 @@ use crate::services::image_markers::{extract_image_source_segments, extract_path
 /// Data URIs and remote URLs are returned alongside file paths; the
 /// caller (e.g. `ImageCacheService::cache_images`) filters out anything
 /// that isn't a readable local file.
-pub fn extract_image_paths(messages: &[Message]) -> Vec<String> {
+pub(crate) fn extract_image_paths(messages: &[Message]) -> Vec<String> {
     let mut paths = Vec::new();
     for msg in messages {
         for segment in extract_image_source_segments(&msg.content) {
@@ -33,7 +33,7 @@ pub fn extract_image_paths(messages: &[Message]) -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 /// Resolve the app data directory for image caching.
-pub fn image_cache_data_dir() -> Option<PathBuf> {
+pub(crate) fn image_cache_data_dir() -> Option<PathBuf> {
     dirs::data_local_dir().map(|d| d.join("cc-session"))
 }
 
@@ -41,18 +41,18 @@ pub fn image_cache_data_dir() -> Option<PathBuf> {
 // Service
 // ---------------------------------------------------------------------------
 
-pub struct ImageCacheService {
+pub(crate) struct ImageCacheService {
     cache_dir: PathBuf,
 }
 
 impl ImageCacheService {
-    pub fn new(data_dir: &Path) -> Self {
+    pub(crate) fn new(data_dir: &Path) -> Self {
         Self {
             cache_dir: data_dir.join("images"),
         }
     }
 
-    pub fn cache_name(original_path: &str) -> String {
+    pub(crate) fn cache_name(original_path: &str) -> String {
         let hash = Sha256::digest(original_path.as_bytes());
         let hex = format!("{hash:x}");
         let ext = Path::new(original_path)
@@ -66,7 +66,7 @@ impl ImageCacheService {
     /// the cache directory (idempotent — existing cache entries are
     /// left untouched). Data URIs and remote URLs naturally fall
     /// through because `Path::exists()` returns false for them.
-    pub fn cache_images(&self, messages: &[Message]) {
+    pub(crate) fn cache_images(&self, messages: &[Message]) {
         let paths = extract_image_paths(messages);
         if paths.is_empty() {
             return;
@@ -91,14 +91,14 @@ impl ImageCacheService {
         }
     }
 
-    pub fn resolve_cached_path(&self, original_path: &str) -> Option<PathBuf> {
+    pub(crate) fn resolve_cached_path(&self, original_path: &str) -> Option<PathBuf> {
         let cache_path = self.cache_dir.join(Self::cache_name(original_path));
         cache_path.exists().then_some(cache_path)
     }
 
     /// Remove every cache entry referenced by `messages`. Used when a
     /// session is permanently deleted so we don't leak disk space.
-    pub fn cleanup_images(&self, messages: &[Message]) {
+    pub(crate) fn cleanup_images(&self, messages: &[Message]) {
         let paths = extract_image_paths(messages);
         for path in &paths {
             let cache_name = Self::cache_name(path);

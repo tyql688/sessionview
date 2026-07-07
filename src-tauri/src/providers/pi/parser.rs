@@ -11,7 +11,7 @@ use crate::provider::{LoadedSession, ParsedSession};
 use super::types::*;
 
 /// Parse a Pi session JSONL file
-pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
+pub(crate) fn parse_session_file(path: &Path) -> Option<ParsedSession> {
     let (header, entries, parse_warning_count) = parse_entries(path)?;
 
     let active_branch = build_active_branch(&entries);
@@ -81,7 +81,7 @@ pub fn parse_session_file(path: &Path) -> Option<ParsedSession> {
 }
 
 /// Load messages from a Pi session file (for detail view)
-pub fn load_messages(path: &Path) -> Option<LoadedSession> {
+pub(crate) fn load_messages(path: &Path) -> Option<LoadedSession> {
     let (_header, entries, parse_warning_count) = parse_entries(path)?;
     let active_branch = build_active_branch(&entries);
     let context_branch = build_context_branch(&entries, &active_branch, path);

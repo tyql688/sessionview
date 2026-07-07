@@ -44,7 +44,7 @@ impl PersistedOutputCache {
 
     /// Read `canonical_path` content, returning a cached copy when fresh.
     /// Empty mtime triggers a fresh read (we cannot detect staleness).
-    pub fn get_or_load(&self, canonical_path: &Path) -> std::io::Result<String> {
+    pub(crate) fn get_or_load(&self, canonical_path: &Path) -> std::io::Result<String> {
         let mtime = std::fs::metadata(canonical_path)
             .ok()
             .and_then(|m| m.modified().ok());

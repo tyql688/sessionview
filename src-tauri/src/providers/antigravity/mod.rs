@@ -15,7 +15,7 @@ struct ParentInfo {
     project_name: String,
 }
 
-pub struct Descriptor;
+pub(crate) struct Descriptor;
 
 impl ProviderDescriptor for Descriptor {
     fn owns_source_path(&self, source_path: &str) -> bool {

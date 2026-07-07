@@ -7,16 +7,16 @@ use crate::provider::TokenStatRow;
 use crate::services::error::{ServiceError, ServiceResult};
 use crate::services::image_cache::ImageCacheService;
 
-pub struct SourceSyncService<'a> {
+pub(crate) struct SourceSyncService<'a> {
     db: &'a Database,
 }
 
 impl<'a> SourceSyncService<'a> {
-    pub fn new(db: &'a Database) -> Self {
+    pub(crate) fn new(db: &'a Database) -> Self {
         Self { db }
     }
 
-    pub fn sync_source_path(&self, source_path: &str) -> ServiceResult<bool> {
+    pub(crate) fn sync_source_path(&self, source_path: &str) -> ServiceResult<bool> {
         let Some(provider) = Provider::from_source_path(source_path) else {
             return Ok(false);
         };
@@ -25,7 +25,11 @@ impl<'a> SourceSyncService<'a> {
         Ok(true)
     }
 
-    pub fn sync_provider_source(&self, provider: Provider, source_path: &str) -> ServiceResult<()> {
+    pub(crate) fn sync_provider_source(
+        &self,
+        provider: Provider,
+        source_path: &str,
+    ) -> ServiceResult<()> {
         let provider_impl = provider.require_runtime()?;
 
         let mut sessions = provider_impl
@@ -102,7 +106,11 @@ impl<'a> SourceSyncService<'a> {
         Ok(())
     }
 
-    pub fn sync_provider_key(&self, provider_key: &str, source_path: &str) -> ServiceResult<()> {
+    pub(crate) fn sync_provider_key(
+        &self,
+        provider_key: &str,
+        source_path: &str,
+    ) -> ServiceResult<()> {
         let provider = Provider::parse_strict(provider_key)?;
         self.sync_provider_source(provider, source_path)
     }

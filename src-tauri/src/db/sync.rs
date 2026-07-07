@@ -155,7 +155,7 @@ impl Database {
         })
     }
 
-    pub fn sync_source_snapshot(
+    pub(crate) fn sync_source_snapshot(
         &self,
         provider: &Provider,
         source_path: &str,
@@ -192,7 +192,7 @@ impl Database {
         })
     }
 
-    pub fn rename_session(&self, id: &str, new_title: &str) -> Result<(), rusqlite::Error> {
+    pub(crate) fn rename_session(&self, id: &str, new_title: &str) -> Result<(), rusqlite::Error> {
         let title = if new_title.chars().count() > 200 {
             new_title
                 .chars()
@@ -211,7 +211,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn clear_all(&self) -> Result<(), rusqlite::Error> {
+    pub(crate) fn clear_all(&self) -> Result<(), rusqlite::Error> {
         // Delete all data and rebuild FTS index.
         // Note: VACUUM is impossible while two connections are open,
         // so free pages remain in the file but get reused by subsequent writes.
@@ -226,7 +226,7 @@ impl Database {
         })
     }
 
-    pub fn clear_usage_stats(&self) -> Result<(), rusqlite::Error> {
+    pub(crate) fn clear_usage_stats(&self) -> Result<(), rusqlite::Error> {
         let conn = self.lock_write()?;
         conn.execute("DELETE FROM session_token_stats", [])?;
         // Keep the denormalized totals consistent with the now-empty stats,
@@ -248,7 +248,7 @@ impl Database {
     }
 
     /// Delete this session and all its children from DB.
-    pub fn delete_session(&self, id: &str) -> Result<(), rusqlite::Error> {
+    pub(crate) fn delete_session(&self, id: &str) -> Result<(), rusqlite::Error> {
         let conn = self.lock_write()?;
         conn.execute("DELETE FROM favorites WHERE session_id IN (SELECT id FROM sessions WHERE parent_id = ?1)", params![id])?;
         conn.execute("DELETE FROM sessions WHERE parent_id = ?1", params![id])?;
@@ -302,7 +302,7 @@ impl Database {
     /// to "jump" on every poll cycle. The denormalized per-session totals on
     /// `sessions` are updated in the same transaction so search/list queries
     /// never see a stale aggregate.
-    pub fn replace_token_stats_batch(
+    pub(crate) fn replace_token_stats_batch(
         &self,
         batch: &[(&str, &[TokenStatRow])],
     ) -> Result<(), rusqlite::Error> {

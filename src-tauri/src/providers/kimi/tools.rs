@@ -31,7 +31,7 @@ fn strip_system_wrapper(text: &str) -> &str {
 /// string. Drops `<system>` decorations when there's also real content
 /// alongside them. Returns `(rendered, is_error)` — Format A doesn't
 /// carry an explicit error flag so the bool is always `None`.
-pub fn render_format_a_tool_output(parts: &[Value]) -> (String, Option<bool>) {
+pub(crate) fn render_format_a_tool_output(parts: &[Value]) -> (String, Option<bool>) {
     let mut texts: Vec<String> = Vec::new();
     let mut system_only: Vec<String> = Vec::new();
     for part in parts {
@@ -62,7 +62,7 @@ pub fn render_format_a_tool_output(parts: &[Value]) -> (String, Option<bool>) {
 /// `message`, then serialises the whole result if nothing readable was
 /// found. Returns `(rendered, is_error)` where `is_error` mirrors the
 /// `is_error`/`isError`/`success` flags when the tool surfaces them.
-pub fn render_format_b_tool_output(result: Option<&Value>) -> (String, Option<bool>) {
+pub(crate) fn render_format_b_tool_output(result: Option<&Value>) -> (String, Option<bool>) {
     let Some(result) = result else {
         return (String::new(), None);
     };

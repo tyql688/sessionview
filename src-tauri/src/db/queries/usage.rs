@@ -6,7 +6,7 @@ use super::{
 /// Inclusive `[start, end]` date bounds (`YYYY-MM-DD`) for usage queries.
 /// `None` on either side leaves that side unbounded.
 #[derive(Clone, Copy, Default)]
-pub struct UsageDateBounds<'a> {
+pub(crate) struct UsageDateBounds<'a> {
     pub start: Option<&'a str>,
     pub end: Option<&'a str>,
 }
@@ -15,7 +15,7 @@ pub struct UsageDateBounds<'a> {
 pub type ActivityDailyRow = (String, u64, u64, u64, f64);
 
 impl Database {
-    pub fn usage_session_count(
+    pub(crate) fn usage_session_count(
         &self,
         providers: &[String],
         bounds: UsageDateBounds<'_>,
@@ -33,7 +33,7 @@ impl Database {
         conn.query_row(&sql, param_refs.as_slice(), |row| row.get(0))
     }
 
-    pub fn usage_session_count_by_provider(
+    pub(crate) fn usage_session_count_by_provider(
         &self,
         providers: &[String],
         bounds: UsageDateBounds<'_>,
@@ -56,7 +56,7 @@ impl Database {
         rows.collect()
     }
 
-    pub fn usage_totals(
+    pub(crate) fn usage_totals(
         &self,
         providers: &[String],
         bounds: UsageDateBounds<'_>,
@@ -86,7 +86,7 @@ impl Database {
         })
     }
 
-    pub fn usage_daily(
+    pub(crate) fn usage_daily(
         &self,
         providers: &[String],
         bounds: UsageDateBounds<'_>,
@@ -118,7 +118,7 @@ impl Database {
 
     /// Per-day activity over `bounds`, grouped by date only (providers merged):
     /// distinct sessions, turns, tokens, and cost. Powers the activity calendar.
-    pub fn activity_daily(
+    pub(crate) fn activity_daily(
         &self,
         providers: &[String],
         bounds: UsageDateBounds<'_>,
@@ -158,7 +158,7 @@ impl Database {
 
     /// Distinct calendar years (descending) that have any data for `providers`,
     /// ignoring any date window. Drives the activity-calendar year selector.
-    pub fn activity_years(&self, providers: &[String]) -> Result<Vec<i32>, rusqlite::Error> {
+    pub(crate) fn activity_years(&self, providers: &[String]) -> Result<Vec<i32>, rusqlite::Error> {
         if providers.is_empty() {
             return Ok(Vec::new());
         }
@@ -373,7 +373,7 @@ impl Database {
     }
 
     /// Totals for a specific date range [start, end).
-    pub fn usage_totals_range(
+    pub(crate) fn usage_totals_range(
         &self,
         providers: &[String],
         date_start: &str,
@@ -421,7 +421,7 @@ impl Database {
     }
 
     /// Total cost for a single date (all providers).
-    pub fn cost_for_date(&self, date: &str) -> Result<f64, rusqlite::Error> {
+    pub(crate) fn cost_for_date(&self, date: &str) -> Result<f64, rusqlite::Error> {
         let conn = self.lock_read()?;
         conn.query_row(
             "SELECT COALESCE(SUM(cost_usd), 0.0) FROM session_token_stats WHERE date = ?1",
@@ -431,7 +431,10 @@ impl Database {
     }
 
     /// Token breakdown for a single date (all providers).
-    pub fn tokens_for_date(&self, date: &str) -> Result<(u64, u64, u64, u64), rusqlite::Error> {
+    pub(crate) fn tokens_for_date(
+        &self,
+        date: &str,
+    ) -> Result<(u64, u64, u64, u64), rusqlite::Error> {
         let conn = self.lock_read()?;
         conn.query_row(
             "SELECT COALESCE(SUM(input_tokens), 0), \

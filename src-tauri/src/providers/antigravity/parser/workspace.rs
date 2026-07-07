@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-pub fn load_history_workspaces() -> HashMap<String, String> {
+pub(crate) fn load_history_workspaces() -> HashMap<String, String> {
     let mut map = HashMap::new();
     let Some(home) = dirs::home_dir() else {
         return map;
@@ -62,7 +62,7 @@ pub(super) fn extract_absolute_paths_from_value(val: &Value, paths: &mut Vec<Str
     }
 }
 
-pub fn find_workspace_by_display_content(first_user_msg: &str) -> Option<String> {
+pub(crate) fn find_workspace_by_display_content(first_user_msg: &str) -> Option<String> {
     let home = dirs::home_dir()?;
     let history_path = home
         .join(".gemini")
