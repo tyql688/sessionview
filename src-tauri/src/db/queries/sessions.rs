@@ -85,18 +85,18 @@ impl Database {
         days: u32,
     ) -> Result<Vec<TrendSeries>, rusqlite::Error> {
         let conn = self.lock_read()?;
-        let now_ms = std::time::SystemTime::now()
+        let now_s = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
+            .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
-        let since_ms = now_ms - i64::from(days) * 86_400_000;
+        let since_epoch_s = now_s - i64::from(days) * 86_400;
         let mut series = Vec::new();
         for keyword in keywords {
             let trimmed = keyword.trim();
             if trimmed.is_empty() {
                 continue;
             }
-            let points = keyword_trend_counts(&conn, trimmed, since_ms)?
+            let points = keyword_trend_counts(&conn, trimmed, since_epoch_s)?
                 .into_iter()
                 .map(|(day, count)| TrendPoint { day, count })
                 .collect();
@@ -510,6 +510,77 @@ mod tests {
         assert!(
             !ids.contains(&"session-scattered"),
             "scattered words must NOT match — search is literal, not AND"
+        );
+    }
+}
+
+#[cfg(test)]
+mod trend_tests {
+    use tempfile::TempDir;
+
+    use super::super::Database;
+    use crate::models::{Provider, SessionMeta};
+    use crate::provider::ParsedSession;
+
+    fn trend_session(id: &str, updated_at_s: i64) -> ParsedSession {
+        ParsedSession {
+            meta: SessionMeta {
+                id: id.to_string(),
+                provider: Provider::Claude,
+                title: "trend probe".into(),
+                project_path: "/tmp/project".into(),
+                project_name: "project".into(),
+                created_at: updated_at_s,
+                updated_at: updated_at_s,
+                message_count: 1,
+                file_size_bytes: 0,
+                source_path: format!("/tmp/{id}.jsonl"),
+                is_sidechain: false,
+                variant_name: None,
+                model: None,
+                cc_version: None,
+                git_branch: None,
+                parent_id: None,
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+            },
+            content_text: "regression keyword trendprobe here".into(),
+            messages: Vec::new(),
+            parse_warning_count: 0,
+            child_session_ids: Vec::new(),
+            usage_events: Vec::new(),
+            source_mtime: 0,
+        }
+    }
+
+    #[test]
+    fn keyword_trends_buckets_epoch_second_timestamps() {
+        let dir = TempDir::new().unwrap();
+        let db = Database::open(dir.path()).unwrap();
+        let now_s = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        db.sync_provider_snapshot(
+            &Provider::Claude,
+            &[trend_session("trend-a", now_s - 3600)],
+            true,
+            &[],
+        )
+        .unwrap();
+
+        let series = db.keyword_trends(&["trendprobe".to_string()], 30).unwrap();
+        assert_eq!(series.len(), 1);
+        // updated_at is epoch seconds: the hit must land in a recent bucket,
+        // not fail the window check or map to a 1970 date.
+        let total: u32 = series[0].points.iter().map(|p| p.count).sum();
+        assert_eq!(total, 1, "session within window must be counted");
+        assert!(
+            series[0].points.iter().all(|p| p.day.starts_with("20")),
+            "bucket days must be modern dates, got {:?}",
+            series[0].points
         );
     }
 }

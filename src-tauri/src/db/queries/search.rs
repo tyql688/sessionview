@@ -412,12 +412,14 @@ pub(super) fn build_fts_query(raw: &str) -> Option<String> {
 pub(super) fn keyword_trend_counts(
     conn: &Connection,
     keyword: &str,
-    since_ms: i64,
+    // sessions.updated_at is stored in epoch SECONDS (verified against live
+    // data) — bucketing must not divide again.
+    since_epoch_s: i64,
 ) -> Result<Vec<(String, u32)>, rusqlite::Error> {
     let mut rows: Vec<(String, u32)> = Vec::new();
     if let Some(fts_query) = build_fts_query(keyword) {
         let mut stmt = conn.prepare(
-            "SELECT date(s.updated_at / 1000, 'unixepoch', 'localtime') AS day,
+            "SELECT date(s.updated_at, 'unixepoch', 'localtime') AS day,
                     COUNT(*) AS n
              FROM sessions_fts
              JOIN sessions s ON s.rowid = sessions_fts.rowid
@@ -425,7 +427,7 @@ pub(super) fn keyword_trend_counts(
              GROUP BY day
              ORDER BY day",
         )?;
-        let mapped = stmt.query_map(rusqlite::params![fts_query, since_ms], |row| {
+        let mapped = stmt.query_map(rusqlite::params![fts_query, since_epoch_s], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
         })?;
         for row in mapped {
@@ -437,7 +439,7 @@ pub(super) fn keyword_trend_counts(
             .replace('%', "\\%")
             .replace('_', "\\_");
         let mut stmt = conn.prepare(
-            "SELECT date(updated_at / 1000, 'unixepoch', 'localtime') AS day,
+            "SELECT date(updated_at, 'unixepoch', 'localtime') AS day,
                     COUNT(*) AS n
              FROM sessions
              WHERE updated_at >= ?2
@@ -447,7 +449,7 @@ pub(super) fn keyword_trend_counts(
              GROUP BY day
              ORDER BY day",
         )?;
-        let mapped = stmt.query_map(rusqlite::params![escaped, since_ms], |row| {
+        let mapped = stmt.query_map(rusqlite::params![escaped, since_epoch_s], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
         })?;
         for row in mapped {
