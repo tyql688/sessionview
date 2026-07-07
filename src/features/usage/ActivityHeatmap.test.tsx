@@ -59,7 +59,9 @@ describe("ActivityHeatmap", () => {
   it("renders a headline with the metric total and timeframe", () => {
     const { getByText } = setup();
     // 5 + 1 = 6 sessions over the in-range window.
-    expect(getByText("6 sessions in the last year")).toBeInTheDocument();
+    expect(getByText("Activity calendar")).toBeInTheDocument();
+    expect(getByText("6 sessions")).toBeInTheDocument();
+    expect(getByText("in the last year")).toBeInTheDocument();
   });
 
   it("lays out one cell per day of every whole week", () => {

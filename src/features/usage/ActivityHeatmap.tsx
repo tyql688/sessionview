@@ -1,4 +1,6 @@
 import { type CSSProperties, useState } from "react";
+import { CircleDollarSign, Hash } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useI18n } from "@/i18n/index";
 import type {
@@ -77,7 +79,8 @@ export function ActivityHeatmap(props: ActivityHeatmapProps) {
       ? t("usage.activityTrailing")
       : t("usage.activityInYear").replace("{year}", String(props.year));
 
-  const headline = `${valueWithNoun(props.metric, props.grid.total)} ${timeframe}`;
+  const totalLabel = valueWithNoun(props.metric, props.grid.total);
+  const headline = `${totalLabel} ${timeframe}`;
 
   /** "N tokens on Apr 9, 2026" — shared by the inspector line and cell titles. */
   const cellTooltip = (cell: HeatmapCell): string =>
@@ -94,9 +97,12 @@ export function ActivityHeatmap(props: ActivityHeatmapProps) {
 
   return (
     <section className="usage-card usage-heatmap-card">
-      <div className="usage-section-header">
+      <div className="usage-heatmap-topbar">
         <div className="usage-heatmap-heading">
-          <div className="usage-section-title">{headline}</div>
+          <div className="usage-section-title">{t("usage.activityTitle")}</div>
+          <div className="usage-section-subtitle">{timeframe}</div>
+        </div>
+        <div className="usage-heatmap-controls">
           <ToggleGroup
             className="usage-metric-toggle"
             size="sm"
@@ -118,53 +124,64 @@ export function ActivityHeatmap(props: ActivityHeatmapProps) {
                   props.metric === metric && "active",
                 )}
               >
+                {metric === "tokens" ? (
+                  <Hash aria-hidden="true" data-icon="inline-start" />
+                ) : (
+                  <CircleDollarSign
+                    aria-hidden="true"
+                    data-icon="inline-start"
+                  />
+                )}
                 {t(`usage.${metric}`)}
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
-        </div>
-        <ToggleGroup
-          className="usage-heatmap-years"
-          size="sm"
-          spacing={1}
-          value={[props.year === null ? "trailing" : String(props.year)]}
-          onValueChange={(next) => {
-            const value = next[0];
-            if (!value) return;
-            props.setYear(value === "trailing" ? null : Number(value));
-          }}
-        >
-          <ToggleGroupItem
-            value="trailing"
-            className={cn(
-              "usage-year-btn h-auto min-w-0",
-              props.year === null && "active",
-            )}
+
+          <ToggleGroup
+            className="usage-heatmap-years"
+            size="sm"
+            spacing={1}
+            value={[props.year === null ? "trailing" : String(props.year)]}
+            onValueChange={(next) => {
+              const value = next[0];
+              if (!value) return;
+              props.setYear(value === "trailing" ? null : Number(value));
+            }}
           >
-            {t("usage.activityYearTrailing")}
-          </ToggleGroupItem>
-          {props.availableYears.map((year) => (
             <ToggleGroupItem
-              key={year}
-              value={String(year)}
+              value="trailing"
               className={cn(
                 "usage-year-btn h-auto min-w-0",
-                props.year === year && "active",
+                props.year === null && "active",
               )}
             >
-              {year}
+              {t("usage.activityYearTrailing")}
             </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
+            {props.availableYears.map((year) => (
+              <ToggleGroupItem
+                key={year}
+                value={String(year)}
+                className={cn(
+                  "usage-year-btn h-auto min-w-0",
+                  props.year === year && "active",
+                )}
+              >
+                {year}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </div>
       </div>
 
-      <div className="usage-heatmap-inspector">{inspectorText}</div>
+      <div className="usage-heatmap-summary" aria-live="polite">
+        <div className="usage-heatmap-total">{totalLabel}</div>
+        <div className="usage-heatmap-inspector">{inspectorText}</div>
+      </div>
 
       {weekCount > 0 && (
         <div className="usage-heatmap-scroll">
-          <div
+          <fieldset
             className={`usage-heatmap-graph${props.loading ? " is-loading" : ""}`}
-            role="img"
             aria-label={headline}
             style={{ "--weeks": String(weekCount) } as CSSProperties}
           >
@@ -191,20 +208,37 @@ export function ActivityHeatmap(props: ActivityHeatmapProps) {
             </div>
 
             <div className="usage-heatmap-cells">
-              {flatCells.map((cell) => (
-                <div
-                  key={cell.date}
-                  className={`usage-heatmap-cell${!cell.inRange ? " is-empty" : ""}`}
-                  data-level={cell.level}
-                  title={cell.inRange ? cellTooltip(cell) : undefined}
-                  onMouseEnter={() => {
-                    if (cell.inRange) setHovered(cell);
-                  }}
-                  onMouseLeave={() => setHovered(null)}
-                />
-              ))}
+              {flatCells.map((cell) => {
+                if (!cell.inRange) {
+                  return (
+                    <span
+                      key={cell.date}
+                      className="usage-heatmap-cell is-empty"
+                      data-level={cell.level}
+                      aria-hidden="true"
+                    />
+                  );
+                }
+
+                const label = cellTooltip(cell);
+                return (
+                  <Button
+                    key={cell.date}
+                    variant="ghost"
+                    type="button"
+                    className="usage-heatmap-cell h-auto min-h-0 min-w-0 p-0 active:translate-y-0"
+                    data-level={cell.level}
+                    title={label}
+                    aria-label={label}
+                    onBlur={() => setHovered(null)}
+                    onFocus={() => setHovered(cell)}
+                    onMouseEnter={() => setHovered(cell)}
+                    onMouseLeave={() => setHovered(null)}
+                  />
+                );
+              })}
             </div>
-          </div>
+          </fieldset>
         </div>
       )}
 

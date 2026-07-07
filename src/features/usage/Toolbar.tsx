@@ -1,5 +1,4 @@
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { CSSProperties } from "react";
 import { useI18n } from "@/i18n/index";
@@ -7,6 +6,7 @@ import type { MaintenanceJob, ProviderSnapshot } from "@/lib/types";
 import type { CustomDateRange } from "@/features/usage/usageView";
 import { toLocalISODate } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
+import { DatePicker } from "@/features/usage/DatePicker";
 
 export interface ProviderChipInfo {
   color: string;
@@ -57,8 +57,6 @@ export function Toolbar(props: ToolbarProps) {
     { days: null, label: () => t("usage.rangeAll") },
   ];
 
-  // Native date inputs commit half-typed years like 0001-05-31; anything
-  // before this floor is treated as a typo and the field is restored.
   const MIN_USAGE_DATE = "2000-01-01";
 
   const enterCustomRange = () => {
@@ -73,18 +71,10 @@ export function Toolbar(props: ToolbarProps) {
     });
   };
 
-  const updateCustomRange = (
-    field: keyof CustomDateRange,
-    input: HTMLInputElement,
-  ) => {
+  const updateCustomRange = (field: keyof CustomDateRange, value: string) => {
     const current = customRange;
     if (!current) return;
-    const value = input.value;
-    if (!value || value < MIN_USAGE_DATE) {
-      // Cleared or absurd value: restore the field instead of querying with it.
-      input.value = current[field];
-      return;
-    }
+    if (!value || value < MIN_USAGE_DATE) return;
     const next = { ...current, [field]: value };
     // Keep the window ordered no matter which side the user moved.
     if (next.start > next.end) {
@@ -174,23 +164,19 @@ export function Toolbar(props: ToolbarProps) {
           </ToggleGroup>
           {customRange && (
             <div className="usage-custom-range">
-              <Input
-                type="date"
-                className="usage-date-input h-auto w-auto"
-                aria-label={t("usage.customRangeStart")}
+              <DatePicker
+                label={t("usage.customRangeStart")}
                 value={customRange.start}
                 min={MIN_USAGE_DATE}
                 max={customRange.end}
-                onChange={(e) => updateCustomRange("start", e.currentTarget)}
+                onChange={(value) => updateCustomRange("start", value)}
               />
               <span className="usage-custom-range-sep">~</span>
-              <Input
-                type="date"
-                className="usage-date-input h-auto w-auto"
-                aria-label={t("usage.customRangeEnd")}
+              <DatePicker
+                label={t("usage.customRangeEnd")}
                 value={customRange.end}
                 min={customRange.start}
-                onChange={(e) => updateCustomRange("end", e.currentTarget)}
+                onChange={(value) => updateCustomRange("end", value)}
               />
             </div>
           )}

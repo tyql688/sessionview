@@ -191,22 +191,184 @@
   font-size: 11px;
 }
 
-.usage-date-input {
+.usage-date-trigger {
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 10px;
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-editor) 92%, var(--bg-sidebar));
   color: var(--text-primary);
   border-radius: 8px;
-  padding: 6px 8px;
   font-size: 11px;
-  font-weight: 600;
-  font-family: inherit;
-  color-scheme: light dark;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  box-shadow: inset 0 1px 0
+    color-mix(in srgb, var(--bg-editor) 72%, transparent);
 }
 
-.usage-date-input:hover,
-.usage-date-input:focus {
+.usage-date-trigger:hover,
+.usage-date-trigger[data-popup-open] {
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-editor));
   border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  color: var(--text-primary);
+}
+
+.usage-date-popover {
+  width: 232px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-editor) 96%, var(--bg-sidebar));
+  color: var(--text-primary);
+  box-shadow:
+    0 14px 32px rgba(15, 23, 42, 0.14),
+    0 2px 8px rgba(15, 23, 42, 0.08);
   outline: none;
+  transform-origin: var(--transform-origin);
+  animation: usage-popover-in var(--dur-fast) var(--ease-out);
+}
+
+[data-theme="dark"] .usage-date-popover {
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.36),
+    0 2px 10px rgba(0, 0, 0, 0.28);
+}
+
+.usage-date-popover-head {
+  display: grid;
+  grid-template-columns: 28px 1fr 28px;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.usage-date-month {
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 800;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-date-nav,
+.usage-date-day {
+  border: 0;
+  font-family: inherit;
+  appearance: none;
+}
+
+.usage-date-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard);
+}
+
+.usage-date-nav:hover:not(:disabled),
+.usage-date-nav:focus-visible {
+  background: var(--bg-tab-hover);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.usage-date-nav:disabled {
+  color: var(--text-tertiary);
+  cursor: default;
+  opacity: 0.5;
+}
+
+.usage-date-nav svg {
+  width: 15px;
+  height: 15px;
+}
+
+.usage-date-weekdays,
+.usage-date-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.usage-date-weekdays {
+  margin-bottom: 4px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+}
+
+.usage-date-weekdays span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.usage-date-grid {
+  gap: 2px;
+}
+
+.usage-date-day {
+  height: 28px;
+  min-width: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard);
+}
+
+.usage-date-day.is-outside {
+  color: var(--text-tertiary);
+}
+
+.usage-date-day:hover:not(:disabled),
+.usage-date-day:focus-visible {
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.usage-date-day.is-selected {
+  background: var(--text-primary);
+  color: var(--bg-editor);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.14);
+}
+
+.usage-date-day:disabled {
+  color: color-mix(in srgb, var(--text-tertiary) 58%, transparent);
+  cursor: default;
+  opacity: 0.55;
+}
+
+.usage-date-day.is-selected:disabled {
+  opacity: 1;
+}
+
+@keyframes usage-popover-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98) translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
 .usage-toolbar-meta {
@@ -898,29 +1060,74 @@
  * Activity calendar — GitHub-style contribution heatmap.
  * ------------------------------------------------------------------------- */
 .usage-heatmap-card {
-  padding: 18px 20px;
+  --heatmap-control-bg: color-mix(
+    in srgb,
+    var(--bg-sidebar) 84%,
+    var(--bg-editor)
+  );
+  --heatmap-cell-outline: color-mix(in srgb, var(--border) 74%, transparent);
+  padding: 16px;
   display: flex;
   flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.usage-heatmap-topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .usage-heatmap-heading {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
+  gap: 4px;
+  min-width: 0;
 }
 
+.usage-heatmap-controls {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.usage-heatmap-card .usage-metric-toggle,
 .usage-heatmap-years {
   display: inline-flex;
+  align-items: center;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  border-radius: 10px;
+  background: var(--heatmap-control-bg);
+  box-shadow: inset 0 1px 0
+    color-mix(in srgb, var(--bg-editor) 70%, transparent);
+}
+
+.usage-heatmap-card .usage-metric-toggle {
+  margin-top: 0;
+}
+
+.usage-heatmap-card .usage-metric-btn {
   gap: 4px;
+  min-height: 27px;
+  padding: 0 9px;
+  border-radius: 7px;
 }
 
 .usage-year-btn {
-  padding: 3px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  min-height: 27px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
   background: transparent;
   color: var(--text-secondary);
   font-size: 11px;
@@ -933,30 +1140,57 @@
 }
 
 .usage-year-btn:hover {
-  background: var(--bg-tab-hover);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
   color: var(--text-primary);
 }
 
+.usage-heatmap-card .usage-metric-btn.active,
 .usage-year-btn.active {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--text-primary);
   color: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+
+[data-theme="dark"] .usage-heatmap-card .usage-metric-btn.active,
+[data-theme="dark"] .usage-year-btn.active {
+  color: var(--bg-editor);
+}
+
+.usage-heatmap-summary {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.usage-heatmap-total {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 20px;
+  line-height: 1.1;
+  font-weight: 800;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .usage-heatmap-inspector {
   min-height: 18px;
-  margin-bottom: 10px;
+  max-width: 58%;
   color: var(--text-secondary);
   font-size: 11px;
+  line-height: 1.35;
+  text-align: right;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .usage-heatmap-scroll {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding-bottom: 4px;
+  min-width: 0;
+  padding-top: 2px;
 }
 
 /* The grid is fluid: columns are `1fr`, so the 53 week-columns always fill the
@@ -968,10 +1202,14 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   grid-template-rows: auto auto;
-  column-gap: 6px;
+  column-gap: 7px;
   row-gap: 4px;
   width: 100%;
-  max-width: 840px;
+  max-width: none;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
   transition: opacity var(--dur-base) var(--ease-standard);
 }
 
@@ -996,6 +1234,7 @@
   grid-row: 1;
   color: var(--text-tertiary);
   font-size: 9px;
+  line-height: 1.2;
   white-space: nowrap;
 }
 
@@ -1005,6 +1244,7 @@
   display: grid;
   grid-template-rows: repeat(7, 1fr);
   row-gap: var(--cal-gap);
+  min-width: 22px;
   padding-right: 4px;
 }
 
@@ -1031,11 +1271,28 @@
 }
 
 .usage-heatmap-cell {
+  position: relative;
   min-width: 0;
-  border-radius: 2px;
+  min-height: 0;
+  border: 0;
+  border-radius: 3px;
   background: var(--cal-level-0);
-  outline: 1px solid var(--border-subtle);
+  outline: 1px solid var(--heatmap-cell-outline);
   outline-offset: -1px;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
+  appearance: none;
+  transition:
+    transform var(--dur-fast) var(--ease-standard),
+    outline-color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard);
+}
+
+button.usage-heatmap-cell {
+  cursor: pointer;
+}
+
+.usage-heatmap-cell[data-level="0"] {
+  background: color-mix(in srgb, var(--bg-sidebar) 82%, var(--bg-editor));
 }
 
 .usage-heatmap-cell[data-level="1"] {
@@ -1052,14 +1309,24 @@
 }
 
 .usage-heatmap-cell.is-empty {
-  background: transparent;
+  visibility: hidden;
   outline: none;
+  box-shadow: none;
 }
 
-.usage-heatmap-cell:not(.is-empty):not(.is-legend):hover {
-  outline: 1px solid var(--text-secondary);
+.usage-heatmap-cell:not(.is-empty):not(.is-legend):hover,
+.usage-heatmap-cell:not(.is-empty):not(.is-legend):focus-visible {
+  z-index: 1;
+  transform: scale(1.18);
+  outline: 1px solid color-mix(in srgb, var(--text-primary) 72%, transparent);
   outline-offset: 0;
-  cursor: pointer;
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--bg-editor) 88%, transparent),
+    0 4px 10px rgba(15, 23, 42, 0.16);
+}
+
+.usage-heatmap-cell:not(.is-empty):not(.is-legend):focus-visible {
+  outline: 2px solid var(--accent);
 }
 
 .usage-heatmap-footer {
@@ -1085,7 +1352,41 @@
 }
 
 .usage-heatmap-cell.is-legend {
-  display: inline-block;
-  width: 11px;
-  height: 11px;
+  display: block;
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  visibility: visible;
+}
+
+@media (max-width: 720px) {
+  .usage-heatmap-card {
+    padding: 14px;
+  }
+
+  .usage-heatmap-topbar,
+  .usage-heatmap-summary {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .usage-heatmap-controls {
+    justify-content: flex-start;
+  }
+
+  .usage-heatmap-card .usage-metric-toggle,
+  .usage-heatmap-years {
+    width: 100%;
+  }
+
+  .usage-heatmap-inspector {
+    max-width: none;
+    text-align: left;
+  }
+
+  .usage-heatmap-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
