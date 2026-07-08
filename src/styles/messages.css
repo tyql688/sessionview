@@ -47,6 +47,8 @@
   width: fit-content;
   max-width: 100%;
   box-shadow: var(--msg-bubble-shadow);
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .msg-bubble-user {
@@ -382,6 +384,8 @@
   right: 6px;
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease-standard);
+  user-select: none;
+  -webkit-user-select: none;
 }
 .msg-bubble {
   position: relative;

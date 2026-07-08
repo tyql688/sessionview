@@ -22,6 +22,8 @@
   overflow: hidden;
   font-size: 11px;
   max-width: 98%;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .msg-thinking.expanded {
@@ -29,14 +31,21 @@
 }
 
 .msg-thinking-header {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
   padding: 4px 8px;
   cursor: pointer;
   color: var(--text-secondary);
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
   border-radius: 6px;
+  max-width: 100%;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .msg-thinking-header:hover {
@@ -60,7 +69,9 @@
 }
 
 .msg-thinking-chevron {
-  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-tertiary);
   flex-shrink: 0;
 }
@@ -75,6 +86,8 @@
   word-break: break-word;
   font-style: italic;
   border-top: 0.5px solid var(--border-subtle);
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* Tool Message — collapsed: no border, just inline text */
@@ -108,6 +121,8 @@
   font-size: 11px;
   color: var(--text-tertiary);
   cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .msg-tool-header:hover {
@@ -379,6 +394,8 @@
   padding: 1px 12px;
   white-space: pre;
   word-break: normal;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* Merged Tool Row */
@@ -396,6 +413,8 @@
   cursor: pointer;
   color: var(--text-tertiary);
   border-radius: 4px;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .merged-tools-header:hover {

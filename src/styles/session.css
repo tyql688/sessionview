@@ -159,6 +159,8 @@
   overflow-y: auto;
   padding: 16px 20px 26px;
   overflow-anchor: auto;
+  user-select: text;
+  -webkit-user-select: text;
   /* Focus is programmatic (keyboard paging), never a visual affordance. */
   outline: none;
   /* The minimap is the scroll indicator; hide the native scrollbar so its thumb
@@ -207,6 +209,8 @@
   align-items: center;
   justify-content: center;
   pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .timeline-minimap-strip {

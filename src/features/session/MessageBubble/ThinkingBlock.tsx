@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useI18n } from "@/i18n/index";
 
 export function ThinkingBlock(props: { content: string }) {
@@ -13,12 +14,19 @@ export function ThinkingBlock(props: { content: string }) {
 
   return (
     <div className={`msg-thinking${expanded ? " expanded" : ""}`}>
-      <div className="msg-thinking-header" onClick={() => setExpanded(!expanded)}>
+      <button
+        type="button"
+        className="msg-thinking-header"
+        aria-expanded={expanded}
+        onClick={() => setExpanded(!expanded)}
+      >
         <span className="msg-thinking-icon">💭</span>
         <span className="msg-thinking-label">{t("timeline.thinking")}</span>
         {!expanded && <span className="msg-thinking-preview">{preview()}</span>}
-        <span className="msg-thinking-chevron">{expanded ? "▾" : "▸"}</span>
-      </div>
+        <span className="msg-thinking-chevron" aria-hidden="true">
+          {expanded ? <ChevronDown size={12} strokeWidth={1.75} /> : <ChevronRight size={12} strokeWidth={1.75} />}
+        </span>
+      </button>
       {expanded && <pre className="msg-thinking-content">{props.content}</pre>}
     </div>
   );

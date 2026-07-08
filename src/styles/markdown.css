@@ -1,7 +1,14 @@
 /* Timeline markdown output is static HTML generated from markdown-it. Keep
  * selectors scoped so transcript content cannot leak into the app shell. */
+.timeline-markdown {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 .timeline-markdown .timeline-markdown-inner {
   min-width: 0;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .timeline-markdown :where(p, ul, ol, blockquote, table, pre, .markdown-code-block, .markdown-mermaid-block) {
@@ -170,6 +177,8 @@
   border-bottom: 1px solid var(--border-subtle);
   background: none;
   color: var(--text-tertiary);
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .timeline-markdown .markdown-code-block-lang {
@@ -233,6 +242,8 @@
   font-size: 13px;
   line-height: 1.7;
   scrollbar-gutter: stable;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .timeline-markdown .markdown-code-block-body code {
@@ -288,6 +299,8 @@
   gap: 2px;
   border-bottom: 1px solid var(--border-subtle);
   padding-inline: 6px;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .timeline-markdown .markdown-mermaid-action {
