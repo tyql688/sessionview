@@ -5,7 +5,6 @@ import {
   formatToolResultMetadata,
   parseMcpToolName,
   toolDisplayName,
-  toolIcon,
   toolSummary,
 } from "@/lib/tools/index";
 import type { Message } from "@/lib/types";
@@ -28,7 +27,6 @@ describe("tools/names", () => {
       tool: "browser_take_screenshot",
       display: "browser take screenshot",
     });
-    expect(toolIcon(name)).toBe("🔌");
     expect(toolDisplayName(name)).toBe("browser take screenshot");
   });
 
@@ -62,34 +60,7 @@ describe("tools/names", () => {
     ).toBe("/fn main/ ~/repo/src");
   });
 
-  it("returns image and dynamic tool icons", () => {
-    expect(toolIcon("ImageGeneration")).toBe("🖼️");
-    expect(toolIcon("DynamicTool")).toBe("🧩");
-    expect(toolIcon("JavaScript")).toBe("🟨");
-    expect(toolIcon("ComputerUse")).toBe("🖱️");
-    expect(toolIcon("StructuredOutput")).toBe("📊");
-  });
-
-  it("prefers presentation icons from metadata", () => {
-    expect(
-      toolIcon("raw_tool", {
-        raw_name: "raw_tool",
-        canonical_name: "Unknown",
-        display_name: "Unknown",
-        category: "unknown",
-        presentation: {
-          icon: "★",
-          rawOutputPolicy: "keep",
-        },
-      }),
-    ).toBe("★");
-  });
-
   it("summarizes Kimi-specific tool fallbacks", () => {
-    expect(toolIcon("ReadMediaFile")).toBe("🖼️");
-    expect(toolIcon("TaskOutput")).toBe("📋");
-    expect(toolIcon("CronList")).toBe("⏰");
-    expect(toolIcon("SetGoalBudget")).toBe("🎯");
     expect(
       toolSummary({
         ...baseMessage,

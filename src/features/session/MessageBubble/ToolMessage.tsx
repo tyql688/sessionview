@@ -1,16 +1,10 @@
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState, useMemo, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import type { Message } from "@/lib/types";
 import { useI18n } from "@/i18n/index";
 import { readToolResultText } from "@/lib/tauri";
-import {
-  formatToolInput,
-  formatToolResultMetadata,
-  parseMcpToolName,
-  toolDisplayName,
-  toolIcon,
-  toolSummary,
-} from "@/lib/tools";
+import { formatToolInput, formatToolResultMetadata, parseMcpToolName, toolDisplayName, toolSummary } from "@/lib/tools";
 import { extractPersistedOutputPaths, loadPersistedOutput, substitutePersistedOutputs } from "@/lib/persisted-output";
 import {
   SUBAGENT_FILE_PROVIDERS,
@@ -26,6 +20,8 @@ import { parseContent } from "@/lib/message-content";
 import { SubagentInline } from "@/features/session/MessageBubble/SubagentInline";
 import { ImagePreview, LocalImage, RemoteImage, isLocalPath } from "@/features/session/MessageBubble/ImagePreview";
 import { SessionDiffView, SessionLineDiffView } from "@/features/session/MessageBubble/SessionDiffView";
+import { TerminalToolMessage } from "@/features/session/MessageBubble/TerminalToolMessage";
+import { ToolGlyph } from "@/features/session/ToolGlyph";
 
 /** Dispatch a custom event to open a subagent session by description, nickname, or agent ID. */
 function openSubagent(description: string, nickname?: string, agentId?: string, parentSessionId?: string) {
@@ -48,7 +44,28 @@ function subagentButtonLabel(
   return t("tool.openSubagentNamed", { name: identity });
 }
 
-export function ToolMessage(props: { message: Message; provider?: string; parentSessionId?: string }) {
+function toolStatusKind(status: string): "success" | "error" | "neutral" {
+  const normalized = status.toLowerCase();
+  if (["success", "completed", "ok", "done"].includes(normalized)) return "success";
+  if (["failed", "failure", "error", "cancelled", "canceled", "timeout"].includes(normalized)) return "error";
+  return "neutral";
+}
+
+interface ToolMessageProps {
+  message: Message;
+  provider?: string;
+  parentSessionId?: string;
+}
+
+export function ToolMessage(props: ToolMessageProps) {
+  if ((props.message.tool_metadata?.canonical_name ?? props.message.tool_name) === "Bash") {
+    return <TerminalToolMessage message={props.message} />;
+  }
+
+  return <GenericToolMessage {...props} />;
+}
+
+function GenericToolMessage(props: ToolMessageProps) {
   const { t } = useI18n();
   // Const copy so truthiness narrowing survives into nested JSX callbacks.
   const parentSessionId = props.parentSessionId;
@@ -108,7 +125,6 @@ export function ToolMessage(props: { message: Message; provider?: string; parent
   const name = () => props.message.tool_name || "";
   const metadata = () => props.message.tool_metadata;
   const mcp = () => metadata()?.mcp ?? parseMcpToolName(name());
-  const icon = () => toolIcon(name(), metadata());
   const displayName = () => toolDisplayName(name(), metadata());
   const summary = useMemo(() => toolSummary(props.message), [props.message]);
   const formatted = useMemo(() => formatToolInput(props.message), [props.message]);
@@ -206,16 +222,42 @@ export function ToolMessage(props: { message: Message; provider?: string; parent
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [expanded, props.message.content, props.message.tool_metadata, resultMetadata, resolvedContent],
   );
+  const canExpand = hasInput() || hasOutput() || !!resultMetadata;
+  const status = metadata()?.status?.trim() ?? "";
+  const statusKind = toolStatusKind(status);
 
   if (!hasName()) return null;
 
   return (
-    <div className={`msg-tool${expanded ? " expanded" : ""}`}>
-      <div className="msg-tool-header" onClick={() => setExpanded(!expanded)}>
-        <span className="msg-tool-icon">{icon()}</span>
-        <span className="msg-tool-name">{displayName()}</span>
-        {mcp() && <span className="msg-tool-server">{mcp()!.server}</span>}
-        {summary && <span className="msg-tool-summary">{summary}</span>}
+    <div className={`msg-tool msg-tool-${statusKind}${expanded ? " expanded" : ""}`}>
+      <div className="msg-tool-header">
+        {canExpand ? (
+          <button
+            type="button"
+            className="msg-tool-toggle-row"
+            onClick={() => setExpanded((value) => !value)}
+            aria-expanded={expanded}
+          >
+            <ToolGlyph name={name()} metadata={metadata()} className="msg-tool-icon" />
+            <span className="msg-tool-name">{displayName()}</span>
+            {mcp() && <span className="msg-tool-server">{mcp()!.server}</span>}
+            {status && <span className="msg-tool-status-dot" title={status} aria-hidden="true" />}
+            {summary && <span className="msg-tool-summary">{summary}</span>}
+            {expanded ? (
+              <ChevronDown className="msg-tool-chevron" aria-hidden="true" />
+            ) : (
+              <ChevronRight className="msg-tool-chevron" aria-hidden="true" />
+            )}
+          </button>
+        ) : (
+          <div className="msg-tool-toggle-row msg-tool-toggle-row-static">
+            <ToolGlyph name={name()} metadata={metadata()} className="msg-tool-icon" />
+            <span className="msg-tool-name">{displayName()}</span>
+            {mcp() && <span className="msg-tool-server">{mcp()!.server}</span>}
+            {status && <span className="msg-tool-status-dot" title={status} aria-hidden="true" />}
+            {summary && <span className="msg-tool-summary">{summary}</span>}
+          </div>
+        )}
         {isAgent() &&
           SUBAGENT_FILE_PROVIDERS.has(props.provider ?? "") &&
           (
@@ -276,12 +318,9 @@ export function ToolMessage(props: { message: Message; provider?: string; parent
               {t("tool.openSubagent")}
             </Button>
           ))}
-        {(hasInput() || hasOutput() || resultMetadata) && (
-          <span className="tool-expand-indicator">{expanded ? "▾" : "▸"}</span>
-        )}
       </div>
       {expanded && (
-        <>
+        <div className="msg-tool-body">
           {showInputDetail() && (
             <div className="msg-tool-detail">
               {formatted!.lines.map((line, i) => (
@@ -379,7 +418,7 @@ export function ToolMessage(props: { message: Message; provider?: string; parent
                 label={null}
               />
             ) : null)}
-        </>
+        </div>
       )}
       {previewImage && (
         <ImagePreview src={previewImage.src} source={previewImage.source} onClose={() => setPreviewImage(null)} />

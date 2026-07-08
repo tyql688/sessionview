@@ -261,7 +261,21 @@
     "openSubagentTitleId": "打开子会话 {id}",
     "loadFullResult": "加载完整结果",
     "subagentPreview": "子会话预览",
-    "openInTab": "在标签页打开"
+    "openInTab": "在标签页打开",
+    "terminal": "终端",
+    "statusSuccess": "成功",
+    "statusFailed": "失败",
+    "exitCode": "退出码 {code}",
+    "stdout": "标准输出",
+    "stderr": "错误输出",
+    "cwd": "目录",
+    "source": "来源",
+    "copyCommand": "复制命令",
+    "copyOutput": "复制输出",
+    "wrapOutput": "切换换行",
+    "noOutput": "没有输出",
+    "groupCount": "{count} 个工具",
+    "groupMore": "+{count} 类"
   },
   "markdown": {
     "copyCode": "复制代码",

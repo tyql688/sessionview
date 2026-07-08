@@ -2,50 +2,6 @@ import type { Message, ToolMetadata } from "@/lib/types";
 import { shortenHomePath } from "@/lib/formatters";
 import { firstString } from "@/lib/tools/types";
 
-const TOOL_ICONS: Record<string, string> = {
-  Read: "📄",
-  Edit: "✏️",
-  Apply_patch: "✏️",
-  Plan: "📋",
-  Write: "📝",
-  Bash: "💻",
-  Glob: "🔍",
-  Grep: "🔎",
-  Agent: "🤖",
-  WebSearch: "🌐",
-  WebFetch: "🌐",
-  ImageGeneration: "🖼️",
-  DynamicTool: "🧩",
-  JavaScript: "🟨",
-  ComputerUse: "🖱️",
-  TaskCreate: "📋",
-  TaskUpdate: "📋",
-  TaskList: "📋",
-  TaskOutput: "📋",
-  TaskStop: "🛑",
-  Workflow: "🔁",
-  StructuredOutput: "📊",
-  ToolSearch: "🧰",
-  Skill: "⚡",
-  AskUserQuestion: "❓",
-  CronCreate: "⏰",
-  CronList: "⏰",
-  CronDelete: "⏰",
-  ReadMediaFile: "🖼️",
-  EnterPlanMode: "🧭",
-  ExitPlanMode: "🧭",
-  CreateGoal: "🎯",
-  GetGoal: "🎯",
-  SetGoalBudget: "🎯",
-  UpdateGoal: "🎯",
-  SendMessage: "✉️",
-  FollowupTask: "📋",
-  ListAgents: "🤖",
-  RequestPermissions: "🔐",
-  ListMcpResourcesTool: "🔌",
-  mcp: "🔌",
-};
-
 /** Parse MCP tool name: mcp__server__tool → { server, tool, display } */
 export function parseMcpToolName(name: string): { server: string; tool: string; display: string } | null {
   if (!name.startsWith("mcp__")) return null;
@@ -63,14 +19,6 @@ function formatMcpLabel(name: string): string {
 export function toolDisplayName(name: string, metadata?: ToolMetadata): string {
   if (metadata?.display_name) return metadata.display_name;
   return formatMcpLabel(name);
-}
-
-export function toolIcon(name: string, metadata?: ToolMetadata): string {
-  if (metadata?.presentation?.icon) return metadata.presentation.icon;
-  if (metadata?.category === "mcp" || name.startsWith("mcp__")) {
-    return TOOL_ICONS.mcp;
-  }
-  return TOOL_ICONS[metadata?.canonical_name ?? name] || TOOL_ICONS[name] || "⚙";
 }
 
 function joinParts(parts: string[]): string {

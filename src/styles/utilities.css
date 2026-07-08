@@ -37,30 +37,25 @@
   text-decoration: none;
 }
 .msg-tool-subagent-link {
-  background: var(--accent);
-  border: none;
-  border-radius: 4px;
-  color: #fff;
+  background: color-mix(in srgb, var(--bg-tab-hover) 74%, transparent);
+  border: 0.5px solid color-mix(in srgb, var(--border) 58%, transparent);
+  border-radius: 6px;
+  color: var(--text-secondary);
   cursor: pointer;
-  font-size: 11px;
-  font-weight: 500;
-  padding: 1px 8px;
-  margin-left: 8px;
-  opacity: 0.85;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  margin-left: 2px;
+  opacity: 0.9;
   flex-shrink: 1;
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
 .msg-tool-subagent-link:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--bg-tab-hover) 100%, var(--bg-editor));
   opacity: 1;
-}
-
-.tool-expand-indicator {
-  margin-left: auto;
-  font-size: 10px;
-  color: var(--text-tertiary);
-  flex-shrink: 0;
 }
 .icon-faded {
   opacity: 0.4;

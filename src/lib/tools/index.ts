@@ -1,7 +1,6 @@
 export {
   parseMcpToolName,
   toolDisplayName,
-  toolIcon,
   toolSummary,
 } from "@/lib/tools/names";
 export { formatToolInput } from "@/lib/tools/input";

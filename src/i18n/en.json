@@ -261,7 +261,21 @@
     "openSubagentTitleId": "Open subagent {id}",
     "loadFullResult": "Load full result",
     "subagentPreview": "Preview subagent",
-    "openInTab": "Open in tab"
+    "openInTab": "Open in tab",
+    "terminal": "Terminal",
+    "statusSuccess": "success",
+    "statusFailed": "failed",
+    "exitCode": "exit {code}",
+    "stdout": "stdout",
+    "stderr": "stderr",
+    "cwd": "cwd",
+    "source": "source",
+    "copyCommand": "Copy command",
+    "copyOutput": "Copy output",
+    "wrapOutput": "Toggle wrapping",
+    "noOutput": "No output",
+    "groupCount": "{count} tools",
+    "groupMore": "+{count} more"
   },
   "markdown": {
     "copyCode": "Copy Code",

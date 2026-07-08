@@ -1,5 +1,5 @@
 import { fireEvent, render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { Message } from "@/lib/types";
 import { ToolMessage } from "@/features/session/MessageBubble/ToolMessage";
@@ -76,12 +76,27 @@ const bashOutputMessage: Message = {
   token_usage: null,
 };
 
+const readNoDetailMessage: Message = {
+  role: "tool",
+  content: "",
+  timestamp: null,
+  tool_name: "Read",
+  tool_input: null,
+  token_usage: null,
+  tool_metadata: {
+    raw_name: "Read",
+    canonical_name: "Read",
+    display_name: "Read",
+    category: "file",
+  },
+};
+
 describe("ToolMessage", () => {
   it("renders raw output after expansion", () => {
     const { container } = render(<ToolMessage message={bashOutputMessage} />);
 
     expect(container.querySelector(".msg-tool-output")).toBeNull();
-    const header = container.querySelector(".msg-tool-header");
+    const header = container.querySelector(".terminal-tool-toggle");
     if (!header) throw new Error("expected tool header");
 
     fireEvent.click(header);
@@ -113,12 +128,35 @@ describe("ToolMessage", () => {
       />,
     );
 
-    const header = container.querySelector(".msg-tool-header");
+    const header = container.querySelector(".terminal-tool-toggle");
     if (!header) throw new Error("expected tool header");
     fireEvent.click(header);
 
-    expect(container.querySelector(".msg-tool-result-detail")).not.toBeNull();
-    expect(container.querySelector(".msg-tool-output")).toBeNull();
+    expect(container.querySelector(".terminal-tool")).not.toBeNull();
+    expect(container.querySelector(".msg-tool-result-detail")).toBeNull();
+    expect(container.querySelector(".msg-tool-output pre")?.textContent).toBe(
+      "line one\nline two",
+    );
+  });
+
+  it("does not warn for bracket-prefixed terminal text output", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      render(
+        <ToolMessage
+          message={{
+            ...bashOutputMessage,
+            content: "[Image: source: C:/tmp/example.png]",
+          }}
+        />,
+      );
+
+      expect(
+        warn.mock.calls.some((call) => String(call[0]).includes("failed to parse terminal tool content JSON")),
+      ).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("does not suppress ordinary output when presentation policy is keep", () => {
@@ -143,13 +181,20 @@ describe("ToolMessage", () => {
       />,
     );
 
-    const header = container.querySelector(".msg-tool-header");
+    const header = container.querySelector(".msg-tool-toggle-row");
     if (!header) throw new Error("expected tool header");
     fireEvent.click(header);
 
     expect(container.querySelector(".msg-tool-output pre")?.textContent).toBe(
       "line one\nline two",
     );
+  });
+
+  it("renders tools with no expandable detail as static rows", () => {
+    const { container, queryByRole } = render(<ToolMessage message={readNoDetailMessage} />);
+
+    expect(container.querySelector(".msg-tool-toggle-row-static")).not.toBeNull();
+    expect(queryByRole("button", { name: /Read/ })).toBeNull();
   });
 
   it("includes the source parent session id when opening an antigravity child", () => {
