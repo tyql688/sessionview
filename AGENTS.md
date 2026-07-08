@@ -29,20 +29,20 @@ npm run knip                  # Release dead-code/dependency audit
 ```
 src/                       # React frontend (app shell, features, shared components, stores, i18n, lib, styles)
 src-tauri/src/
-  providers/               # claude/, codex/, antigravity/, kimi/, opencode/, cursor/, cc_mirror.rs
-  commands/                # sessions.rs, settings.rs, trash.rs, terminal.rs, usage.rs, search.rs, file_access.rs
+  providers/               # claude/, codex/, antigravity/, kimi/, opencode/, cursor/, pi/, cc_mirror.rs
+  commands/                # sessions.rs, session_tail.rs, settings.rs, trash.rs, terminal.rs, usage.rs, search.rs, file_access.rs
   services/                # provider_snapshots, session_lifecycle, session_resolution, source_sync, image_cache, terminal (platform launchers), caches
-  exporter/                # json.rs, markdown.rs, html.rs, templates.rs
+  exporter/                # json.rs, markdown.rs
   db/                      # mod.rs, sync.rs, row_mapper.rs, queries.rs + queries/{sessions,tree,favorites,search,usage}.rs
   provider.rs + provider/  # SessionProvider machinery: traits.rs, plan.rs, state.rs, tokens.rs, catalog.rs, trash.rs
-  tool_metadata.rs + tool_metadata/  # names.rs, summary.rs, result.rs, build.rs
+  tool_metadata.rs + tool_metadata/  # names.rs, summary.rs, result.rs, registry.rs, build.rs, presentation/
   indexer.rs  models.rs  provider_utils.rs  trash_state.rs  pricing.rs
 src/app/                  # shell: App, TitleBar, ActivityBar, StatusBar, keyboard/sync/subagent wiring
 src/features/             # editor/ session/ (incl. MessageBubble + timeline/Markdown) explorer/ search/ usage/ settings/ favorites/ trash/ updater/ — each owns its components, hooks, and store slices
-src/components/           # shared primitives only: ui/ (Base UI via shadcn), dialogs, ContextMenu, ToastContainer, icons.tsx
-src/stores/               # truly global slices: settings, theme, toast, providerSnapshots
+src/components/           # shared primitives only: ui/ (Base UI via shadcn), dialogs, ContextMenu, icons.tsx
+src/stores/               # truly global slices: settings, theme, toast, providerSnapshots (feature-owned slices live under src/features/*)
 src/lib/                  # pure utilities: tauri.ts (IPC), tools/, formatters, tree-builders, diff, subagent, image-cache, message-content
-src/styles/               # variables.css (theme tokens) + per-feature files (layout, editor, explorer, session, tools, code, messages, modals, search, trash, settings, feedback, images, utilities, usage); cascade order lives in index.css
+src/styles/               # variables.css (theme tokens) + per-feature files (theme, layout, editor, explorer, settings, trash, feedback, search, utilities, session, tools, images, code, messages, markdown, usage); cascade order lives in index.css
 ```
 
 ## Editor UI Architecture
@@ -53,7 +53,7 @@ App
 ├── [Left panel — conditional on activeView()]
 │   ├── Explorer                       # Session tree with single-click=preview, double-click=pin
 │   ├── FavoritesView / TrashView / BlockedView / UsagePanel / SettingsPanel
-├── SearchPanel                        # In titlebar-right, not in left panel
+├── SearchOverlay                      # Global search overlay, opened by titlebar/keyboard
 ├── EditorGroupsContainer             # Manages split view layout (max 4 groups)
 │   ├── SplitHandle                    # Draggable resize between groups
 │   └── EditorArea (per group)
@@ -62,7 +62,7 @@ App
 └── StatusBar                          # Index count, today's cost, provider info
 ```
 
-### Editor Groups Store (`src/stores/editorGroups.ts`)
+### Editor Groups Store (`src/features/editor/editorGroups.ts`)
 
 Central store for tabs, split view, and preview mode. All state is immutable (spread updates).
 

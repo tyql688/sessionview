@@ -36,7 +36,7 @@ Claude Code, Codex, Antigravity, Kimi Code, Cursor CLI, Pi, and more all store t
 - ↩️ **Resume in one click** — drop straight back into any session in your terminal
 - 📊 **Usage analytics** — cost, token, and per-model breakdowns with cache hit/write detail
 - 🎨 **Rich rendering** — Markdown, syntax highlighting, Mermaid diagrams, KaTeX math, inline images, and structured tool-call diffs
-- 📤 **Export** — JSON, Markdown, or a self-contained HTML file (dark mode, collapsible tools & thinking blocks)
+- 📤 **Export** — JSON or Markdown archives with clean message and tool-call formatting
 - 🗃️ **Session management** — rename, favorite, trash/restore, and batch operations
 - ⌨️ **Keyboard-first** — navigate and act without touching the mouse
 - 🔄 **Auto-update**, 🌐 **English / 中文**, and 🚫 **blocked folders** to hide noisy projects

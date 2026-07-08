@@ -21,6 +21,6 @@ You can expect an initial response within 72 hours.
 SessionView is a desktop app that reads local AI coding session files. Security concerns include:
 
 - Path traversal when reading session files or images
-- XSS in rendered markdown or HTML exports
+- XSS in rendered markdown or exported Markdown content
 - Command injection in terminal resume commands
 - Unauthorized file access outside expected directories
