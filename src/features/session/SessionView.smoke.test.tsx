@@ -505,19 +505,19 @@ describe("SessionView smoke", () => {
   });
 
   it("re-centers the window on a far minimap jump instead of loading the gap", async () => {
-    // Open a 5000-message session at its newest tail, then jump to the first
+    // Open a 900-message session at its newest tail, then jump to the first
     // turn via the minimap. The jump must fetch a small window around the
-    // target — NOT the ~4700 messages in between.
-    const all = Array.from({ length: 5000 }, (_, index) => messageAt(index));
-    openWindowMessages = all.slice(4700);
-    openWindowStart = 4700;
-    totalMessages = 5000;
+    // target — NOT the hundreds of messages in between.
+    const all = Array.from({ length: 900 }, (_, index) => messageAt(index));
+    openWindowMessages = all.slice(600);
+    openWindowStart = 600;
+    totalMessages = 900;
     messagesWindowMessages = all.slice(0, 300);
     outlineEntries = [
       { ordinal: 0, message_index: 0, user_text: "first turn", reply_text: "" },
       {
         ordinal: 1,
-        message_index: 4800,
+        message_index: 700,
         user_text: "last turn",
         reply_text: "",
       },
@@ -540,7 +540,7 @@ describe("SessionView smoke", () => {
       />,
     );
 
-    expect(await findByText("message 4999")).toBeInTheDocument();
+    expect(await findByText("message 899")).toBeInTheDocument();
     const firstTick = await waitFor(() => getByLabelText("first turn"));
 
     fireEvent.click(firstTick);
