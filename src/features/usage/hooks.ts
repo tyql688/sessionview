@@ -224,7 +224,12 @@ interface CalendarQuery {
   window: { start: string; end: string };
 }
 
-export function useUsageResources(selectedProviderKeys: string[]) {
+interface UsageResourcesOptions {
+  includeCalendar?: boolean;
+}
+
+export function useUsageResources(selectedProviderKeys: string[], options: UsageResourcesOptions = {}) {
+  const includeCalendar = options.includeCalendar ?? true;
   const didInitProviders = useDidInitProviders();
   const rangeDays = useRangeDays();
   const customRange = useCustomRange();
@@ -264,8 +269,8 @@ export function useUsageResources(selectedProviderKeys: string[]) {
   // midnight tick if today were read twice). Refetches on provider/window change.
   const calendarWindow = useMemo(() => dateRangeForYear(calendarYear, toLocalISODate()), [calendarYear]);
   const calendarSource = useMemo<CalendarQuery | null>(
-    () => (didInitProviders ? { providers: selectedProviderKeys, window: calendarWindow } : null),
-    [didInitProviders, selectedProviderKeys, calendarWindow],
+    () => (didInitProviders && includeCalendar ? { providers: selectedProviderKeys, window: calendarWindow } : null),
+    [didInitProviders, includeCalendar, selectedProviderKeys, calendarWindow],
   );
   const [calendar, { refetch: refetchCalendar }] = useResource(
     calendarSource,
@@ -283,11 +288,14 @@ export function useUsageResources(selectedProviderKeys: string[]) {
     }
   }, [calendar.error]);
 
-  const availableYears = useMemo(() => calendar.data?.available_years ?? [], [calendar.data]);
+  const availableYears = useMemo(
+    () => (includeCalendar ? (calendar.data?.available_years ?? []) : []),
+    [includeCalendar, calendar.data],
+  );
   const heatmapGrid = useMemo<HeatmapGrid>(() => {
     const { start, end } = calendarWindow;
-    return buildHeatmapGrid(calendar.data?.days ?? [], calendarMetric, start, end);
-  }, [calendarWindow, calendar.data, calendarMetric]);
+    return buildHeatmapGrid(includeCalendar ? (calendar.data?.days ?? []) : [], calendarMetric, start, end);
+  }, [includeCalendar, calendarWindow, calendar.data, calendarMetric]);
 
   const [sessionCount, { refetch: refetchSessionCount }] = useResource(true, () => getSessionCount());
   const [indexStats, { refetch: refetchIndexStats }] = useResource(true, () => getIndexStats());
@@ -534,21 +542,25 @@ export function useUsageDerived(deps: UsageDerivedDeps) {
       label: t("usage.input"),
       value: fmtTokens(stats.data?.total_input_tokens ?? 0),
       share: totalTokens > 0 ? fmtPct((stats.data?.total_input_tokens ?? 0) / totalTokens) : "0%",
+      shareValue: totalTokens > 0 ? (stats.data?.total_input_tokens ?? 0) / totalTokens : 0,
     },
     {
       label: t("usage.output"),
       value: fmtTokens(stats.data?.total_output_tokens ?? 0),
       share: totalTokens > 0 ? fmtPct((stats.data?.total_output_tokens ?? 0) / totalTokens) : "0%",
+      shareValue: totalTokens > 0 ? (stats.data?.total_output_tokens ?? 0) / totalTokens : 0,
     },
     {
       label: t("usage.cacheRead"),
       value: fmtTokens(stats.data?.total_cache_read_tokens ?? 0),
       share: totalTokens > 0 ? fmtPct((stats.data?.total_cache_read_tokens ?? 0) / totalTokens) : "0%",
+      shareValue: totalTokens > 0 ? (stats.data?.total_cache_read_tokens ?? 0) / totalTokens : 0,
     },
     {
       label: t("usage.cacheWrite"),
       value: fmtTokens(stats.data?.total_cache_write_tokens ?? 0),
       share: totalTokens > 0 ? fmtPct((stats.data?.total_cache_write_tokens ?? 0) / totalTokens) : "0%",
+      shareValue: totalTokens > 0 ? (stats.data?.total_cache_write_tokens ?? 0) / totalTokens : 0,
     },
   ];
 

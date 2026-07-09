@@ -1,6 +1,6 @@
 use super::{
-    Database, UsageByModelRow, UsageProjectModelDetailRow, UsageSessionModelDetailRow,
-    UsageTotalsRow,
+    Database, UsageByModelRow, UsageProjectDailyRow, UsageProjectModelDetailRow,
+    UsageProjectToolRow, UsageSessionModelDetailRow, UsageTotalsRow,
 };
 
 /// Inclusive `[start, end]` date bounds (`YYYY-MM-DD`) for usage queries.
@@ -235,6 +235,7 @@ impl Database {
         let (where_clause, params) = build_usage_where(providers, bounds);
         let sql = format!(
             "SELECT sess.project_path, sess.project_name, sess.provider, s.session_id, \
+                    COALESCE(NULLIF(s.model, ''), sess.model, ''), \
                     SUM(s.turn_count), \
                     SUM(s.input_tokens), \
                     SUM(s.output_tokens), \
@@ -257,6 +258,164 @@ impl Database {
                 project_name: row.get(1)?,
                 provider: row.get(2)?,
                 session_id: row.get(3)?,
+                model: row.get(4)?,
+                turns: row.get(5)?,
+                input_tokens: row.get(6)?,
+                output_tokens: row.get(7)?,
+                cache_read_tokens: row.get(8)?,
+                cache_write_tokens: row.get(9)?,
+                cost_usd: row.get(10)?,
+            })
+        })?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    pub(crate) fn usage_project_session_ids(
+        &self,
+        providers: &[String],
+        bounds: UsageDateBounds<'_>,
+        project_path: &str,
+    ) -> Result<Vec<String>, rusqlite::Error> {
+        let conn = self.lock_read()?;
+        let (mut where_clause, mut params) = build_usage_where(providers, bounds);
+        where_clause.push_str(&format!(" AND sess.project_path = ?{}", params.len() + 1));
+        params.push(Box::new(project_path.to_string()));
+        let sql = format!(
+            "SELECT DISTINCT s.session_id \
+             FROM session_token_stats s \
+             JOIN sessions sess ON s.session_id = sess.id{} \
+             ORDER BY sess.updated_at DESC",
+            where_clause
+        );
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    pub(crate) fn usage_project_sessions_missing_tool_stats(
+        &self,
+        providers: &[String],
+        bounds: UsageDateBounds<'_>,
+        project_path: &str,
+    ) -> Result<Vec<String>, rusqlite::Error> {
+        let conn = self.lock_read()?;
+        let (mut where_clause, mut params) = build_usage_where(providers, bounds);
+        where_clause.push_str(&format!(" AND sess.project_path = ?{}", params.len() + 1));
+        params.push(Box::new(project_path.to_string()));
+        let sql = format!(
+            "SELECT active.session_id \
+             FROM (
+                SELECT DISTINCT s.session_id, MAX(sess.updated_at) AS updated_at \
+                FROM session_token_stats s \
+                JOIN sessions sess ON s.session_id = sess.id{} \
+                GROUP BY s.session_id
+             ) active \
+             LEFT JOIN session_tool_index idx ON active.session_id = idx.session_id \
+             WHERE idx.session_id IS NULL \
+             ORDER BY active.updated_at DESC",
+            where_clause
+        );
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    pub(crate) fn usage_project_tool_usage(
+        &self,
+        providers: &[String],
+        bounds: UsageDateBounds<'_>,
+        project_path: &str,
+    ) -> Result<Vec<UsageProjectToolRow>, rusqlite::Error> {
+        let conn = self.lock_read()?;
+        let (mut where_clause, mut params) = build_usage_where(providers, bounds);
+        where_clause.push_str(&format!(" AND sess.project_path = ?{}", params.len() + 1));
+        params.push(Box::new(project_path.to_string()));
+        let sql = format!(
+            "WITH project_sessions AS (
+                SELECT DISTINCT s.session_id
+                FROM session_token_stats s
+                JOIN sessions sess ON s.session_id = sess.id{}
+             )
+             SELECT tools.tool_key,
+                    COALESCE(NULLIF(MAX(tools.label), ''), tools.tool_key),
+                    COALESCE(NULLIF(MAX(tools.category), ''), 'tool'),
+                    COALESCE(SUM(tools.count), 0),
+                    COUNT(DISTINCT tools.session_id)
+             FROM session_tool_stats tools
+             JOIN project_sessions active ON active.session_id = tools.session_id
+             GROUP BY tools.tool_key
+             ORDER BY COALESCE(SUM(tools.count), 0) DESC, tools.tool_key",
+            where_clause
+        );
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(param_refs.as_slice(), |row| {
+            Ok(UsageProjectToolRow {
+                key: row.get(0)?,
+                label: row.get(1)?,
+                category: row.get(2)?,
+                count: row.get(3)?,
+                sessions: row.get(4)?,
+            })
+        })?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    pub(crate) fn usage_project_daily(
+        &self,
+        providers: &[String],
+        bounds: UsageDateBounds<'_>,
+        project_path: &str,
+    ) -> Result<Vec<UsageProjectDailyRow>, rusqlite::Error> {
+        let conn = self.lock_read()?;
+        let (mut where_clause, mut params) = build_usage_where(providers, bounds);
+        where_clause.push_str(&format!(" AND sess.project_path = ?{}", params.len() + 1));
+        params.push(Box::new(project_path.to_string()));
+        let sql = format!(
+            "SELECT s.date, sess.provider, COALESCE(NULLIF(s.model, ''), sess.model, ''), \
+                    COUNT(DISTINCT s.session_id), \
+                    COALESCE(SUM(s.turn_count),0), \
+                    COALESCE(SUM(s.input_tokens),0), \
+                    COALESCE(SUM(s.output_tokens),0), \
+                    COALESCE(SUM(s.cache_read_tokens),0), \
+                    COALESCE(SUM(s.cache_write_tokens),0), \
+                    COALESCE(SUM(s.cost_usd),0.0) \
+             FROM session_token_stats s \
+             JOIN sessions sess ON s.session_id = sess.id{} \
+             GROUP BY s.date, sess.provider, COALESCE(NULLIF(s.model, ''), sess.model, '') \
+             ORDER BY s.date, sess.provider, COALESCE(NULLIF(s.model, ''), sess.model, '')",
+            where_clause
+        );
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(param_refs.as_slice(), |row| {
+            Ok(UsageProjectDailyRow {
+                date: row.get(0)?,
+                provider: row.get(1)?,
+                model: row.get(2)?,
+                sessions: row.get(3)?,
                 turns: row.get(4)?,
                 input_tokens: row.get(5)?,
                 output_tokens: row.get(6)?,
@@ -483,7 +642,7 @@ fn build_usage_where(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::sync::TokenStatRow;
+    use crate::db::sync::{TokenStatRow, ToolStatRow};
     use crate::models::{Provider, SessionMeta};
     use crate::provider::ParsedSession;
     use tempfile::TempDir;
@@ -622,6 +781,228 @@ mod tests {
             .activity_years(&["codex".to_string()])
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn usage_project_daily_groups_by_provider_model_with_token_breakdown() {
+        let dir = TempDir::new().unwrap();
+        let db = Database::open(dir.path()).unwrap();
+        let meta_a = sample_meta("session-a");
+        let meta_b = sample_meta("session-b");
+        let mut other_project = sample_meta("session-other-project");
+        other_project.project_path = "/tmp/other".into();
+        other_project.project_name = "other".into();
+        db.sync_provider_snapshot(
+            &Provider::Claude,
+            &[
+                parsed_session(meta_a.clone(), String::new()),
+                parsed_session(meta_b.clone(), String::new()),
+                parsed_session(other_project.clone(), String::new()),
+            ],
+            true,
+            &[],
+        )
+        .unwrap();
+
+        db.replace_token_stats(
+            &meta_a.id,
+            &[
+                TokenStatRow {
+                    date: "2026-04-09".into(),
+                    model: "claude-opus-4-6".into(),
+                    turn_count: 3,
+                    input_tokens: 100,
+                    output_tokens: 50,
+                    cache_read_tokens: 20,
+                    cache_write_tokens: 10,
+                    cost_usd: 0.10,
+                },
+                TokenStatRow {
+                    date: "2026-04-09".into(),
+                    model: "claude-sonnet-4-6".into(),
+                    turn_count: 2,
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                    cost_usd: 0.02,
+                },
+            ],
+        )
+        .unwrap();
+        db.replace_token_stats(
+            &meta_b.id,
+            &[TokenStatRow {
+                date: "2026-04-09".into(),
+                model: "claude-opus-4-6".into(),
+                turn_count: 4,
+                input_tokens: 200,
+                output_tokens: 100,
+                cache_read_tokens: 7,
+                cache_write_tokens: 3,
+                cost_usd: 0.30,
+            }],
+        )
+        .unwrap();
+        db.replace_token_stats(
+            &other_project.id,
+            &[TokenStatRow {
+                date: "2026-04-09".into(),
+                model: "claude-opus-4-6".into(),
+                turn_count: 9,
+                input_tokens: 900,
+                output_tokens: 900,
+                cache_read_tokens: 900,
+                cache_write_tokens: 900,
+                cost_usd: 9.00,
+            }],
+        )
+        .unwrap();
+
+        let rows = db
+            .usage_project_daily(
+                &[Provider::Claude.key().to_string()],
+                UsageDateBounds {
+                    start: Some("2026-04-09"),
+                    end: Some("2026-04-09"),
+                },
+                "/tmp/project",
+            )
+            .unwrap();
+
+        assert_eq!(rows.len(), 2);
+        let opus = rows
+            .iter()
+            .find(|row| row.model == "claude-opus-4-6")
+            .unwrap();
+        assert_eq!(opus.date, "2026-04-09");
+        assert_eq!(opus.provider, Provider::Claude.key());
+        assert_eq!(opus.sessions, 2);
+        assert_eq!(opus.turns, 7);
+        assert_eq!(opus.input_tokens, 300);
+        assert_eq!(opus.output_tokens, 150);
+        assert_eq!(opus.cache_read_tokens, 27);
+        assert_eq!(opus.cache_write_tokens, 13);
+        assert!((opus.cost_usd - 0.40).abs() < 1e-9);
+
+        let sonnet = rows
+            .iter()
+            .find(|row| row.model == "claude-sonnet-4-6")
+            .unwrap();
+        assert_eq!(sonnet.sessions, 1);
+        assert_eq!(sonnet.turns, 2);
+        assert_eq!(sonnet.input_tokens, 10);
+        assert_eq!(sonnet.output_tokens, 5);
+        assert_eq!(sonnet.cache_read_tokens, 0);
+        assert_eq!(sonnet.cache_write_tokens, 0);
+        assert!((sonnet.cost_usd - 0.02).abs() < 1e-9);
+    }
+
+    #[test]
+    fn usage_project_tool_usage_uses_cached_stats_without_token_join_duplication() {
+        let dir = TempDir::new().unwrap();
+        let db = Database::open(dir.path()).unwrap();
+        let meta_a = sample_meta("session-a");
+        let meta_b = sample_meta("session-b");
+        db.sync_provider_snapshot(
+            &Provider::Claude,
+            &[
+                parsed_session(meta_a.clone(), String::new()),
+                parsed_session(meta_b.clone(), String::new()),
+            ],
+            true,
+            &[],
+        )
+        .unwrap();
+
+        db.replace_token_stats(
+            &meta_a.id,
+            &[
+                TokenStatRow {
+                    date: "2026-04-09".into(),
+                    model: "claude-opus-4-6".into(),
+                    turn_count: 3,
+                    input_tokens: 100,
+                    output_tokens: 50,
+                    cache_read_tokens: 20,
+                    cache_write_tokens: 10,
+                    cost_usd: 0.10,
+                },
+                TokenStatRow {
+                    date: "2026-04-09".into(),
+                    model: "claude-sonnet-4-6".into(),
+                    turn_count: 2,
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                    cost_usd: 0.02,
+                },
+            ],
+        )
+        .unwrap();
+        db.replace_token_stats(
+            &meta_b.id,
+            &[TokenStatRow {
+                date: "2026-04-09".into(),
+                model: "claude-opus-4-6".into(),
+                turn_count: 4,
+                input_tokens: 200,
+                output_tokens: 100,
+                cache_read_tokens: 7,
+                cache_write_tokens: 3,
+                cost_usd: 0.30,
+            }],
+        )
+        .unwrap();
+
+        let providers = vec![Provider::Claude.key().to_string()];
+        let bounds = UsageDateBounds {
+            start: Some("2026-04-09"),
+            end: Some("2026-04-09"),
+        };
+        db.replace_tool_stats(
+            &meta_a.id,
+            &[
+                ToolStatRow {
+                    key: "Bash".into(),
+                    label: "Bash".into(),
+                    category: "terminal".into(),
+                    count: 2,
+                },
+                ToolStatRow {
+                    key: "Read".into(),
+                    label: "Read".into(),
+                    category: "file".into(),
+                    count: 1,
+                },
+            ],
+        )
+        .unwrap();
+        db.replace_tool_stats(
+            &meta_b.id,
+            &[ToolStatRow {
+                key: "Bash".into(),
+                label: "Bash".into(),
+                category: "terminal".into(),
+                count: 3,
+            }],
+        )
+        .unwrap();
+
+        let tools = db
+            .usage_project_tool_usage(&providers, bounds, "/tmp/project")
+            .unwrap();
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0].key, "Bash");
+        assert_eq!(
+            tools[0].count, 5,
+            "session-a has two token rows but must count once"
+        );
+        assert_eq!(tools[0].sessions, 2);
+        assert_eq!(tools[1].key, "Read");
+        assert_eq!(tools[1].count, 1);
+        assert_eq!(tools[1].sessions, 1);
     }
 
     #[test]

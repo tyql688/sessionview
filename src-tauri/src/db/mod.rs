@@ -189,10 +189,33 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_token_stats_date
                 ON session_token_stats(date);
 
+            CREATE TABLE IF NOT EXISTS session_tool_stats (
+                session_id          TEXT    NOT NULL,
+                tool_key            TEXT    NOT NULL,
+                label               TEXT    NOT NULL DEFAULT '',
+                category            TEXT    NOT NULL DEFAULT '',
+                count               INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (session_id, tool_key)
+            );
+
+            CREATE TABLE IF NOT EXISTS session_tool_index (
+                session_id          TEXT PRIMARY KEY
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_tool_stats_session
+                ON session_tool_stats(session_id);
+
             CREATE TRIGGER IF NOT EXISTS trg_token_stats_cascade
             AFTER DELETE ON sessions
             BEGIN
                 DELETE FROM session_token_stats WHERE session_id = OLD.id;
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_tool_stats_cascade
+            AFTER DELETE ON sessions
+            BEGIN
+                DELETE FROM session_tool_stats WHERE session_id = OLD.id;
+                DELETE FROM session_tool_index WHERE session_id = OLD.id;
             END;",
         )?;
 

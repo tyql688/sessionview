@@ -27,6 +27,9 @@ const BlockedView = lazy(() =>
   })),
 );
 const UsagePanel = lazy(() => import("@/features/usage").then((m) => ({ default: m.UsagePanel })));
+const FolderAnalyticsPanel = lazy(() =>
+  import("@/features/usage/FolderAnalyticsPanel").then((m) => ({ default: m.FolderAnalyticsPanel })),
+);
 import { KeyboardOverlay } from "@/app/KeyboardOverlay";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
@@ -399,14 +402,16 @@ export default function App() {
   }, []);
 
   const filteredTree = tree.filter((node) => !disabledProviders.includes(node.id as Provider));
-  const showExplorer = activeView !== "settings" && activeView !== "trash" && activeView !== "usage";
+  const showExplorer =
+    activeView !== "settings" && activeView !== "trash" && activeView !== "usage" && activeView !== "folderAnalytics";
   const showExplorerTree =
     !sidebarCollapsed &&
     activeView !== "settings" &&
     activeView !== "trash" &&
     activeView !== "favorites" &&
     activeView !== "blocked" &&
-    activeView !== "usage";
+    activeView !== "usage" &&
+    activeView !== "folderAnalytics";
 
   return (
     <ErrorBoundary
@@ -500,6 +505,17 @@ export default function App() {
                 }}
               >
                 <UsagePanel />
+              </div>
+            )}
+            {activeView === "folderAnalytics" && (
+              <div
+                style={{
+                  display: "flex",
+                  flex: "1",
+                  minWidth: "0",
+                }}
+              >
+                <FolderAnalyticsPanel />
               </div>
             )}
           </Suspense>

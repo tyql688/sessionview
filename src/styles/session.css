@@ -107,6 +107,679 @@
   cursor: help;
 }
 
+/* Session analytics side panel */
+.session-analytics-overlay {
+  background: rgb(0 0 0 / 10%);
+  backdrop-filter: blur(6px);
+}
+
+.session-analytics-dialog {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: auto;
+  display: flex;
+  width: min(560px, calc(100vw - 24px));
+  max-width: min(560px, calc(100vw - 24px));
+  height: 100vh;
+  max-height: 100vh;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+  border: 0.5px solid color-mix(in srgb, var(--border) 74%, transparent);
+  border-block: 0;
+  border-right: 0;
+  border-radius: 18px 0 0 18px;
+  background: color-mix(in srgb, var(--bg-editor) 94%, transparent);
+  padding: 0;
+  box-shadow:
+    -26px 0 72px -32px rgb(0 0 0 / 48%),
+    -8px 0 24px rgb(0 0 0 / 10%);
+  transform: translateX(0);
+  backdrop-filter: blur(28px) saturate(1.35);
+}
+
+.session-analytics-dialog[data-open] {
+  animation: session-analytics-drawer-in 180ms cubic-bezier(0.22, 0.72, 0.16, 1) both;
+}
+
+.session-analytics-dialog[data-closed] {
+  animation: session-analytics-drawer-out 140ms ease-in both;
+}
+
+.session-analytics-body {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.session-analytics-header {
+  flex: 0 0 auto;
+  border-bottom: 0.5px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-sidebar) 70%, transparent);
+  padding: 18px 52px 15px 20px;
+}
+
+.session-analytics-title-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.session-analytics-title {
+  font-size: 15px;
+}
+
+.session-analytics-subtitle {
+  max-width: 440px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-analytics-stat-grid,
+.session-analytics-main-grid,
+.session-analytics-insights {
+  margin-inline: 18px;
+}
+
+.session-analytics-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding-top: 18px;
+}
+
+.session-analytics-stat {
+  display: grid;
+  grid-template-areas:
+    "icon label"
+    "icon value"
+    "detail detail";
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 3px 10px;
+  min-width: 0;
+  padding: 13px 14px;
+  border: 0.5px solid var(--border-subtle);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-sidebar) 62%, transparent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 45%);
+}
+
+.session-analytics-stat-icon {
+  display: inline-flex;
+  grid-area: icon;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+}
+
+.session-analytics-stat-blue .session-analytics-stat-icon {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.session-analytics-stat-green .session-analytics-stat-icon {
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  color: var(--success);
+}
+
+.session-analytics-stat-amber .session-analytics-stat-icon {
+  background: color-mix(in srgb, var(--warning-amber) 16%, transparent);
+  color: var(--warning-amber);
+}
+
+.session-analytics-stat-pink .session-analytics-stat-icon {
+  background: color-mix(in srgb, var(--cc-mirror) 14%, transparent);
+  color: var(--cc-mirror);
+}
+
+.session-analytics-stat-label,
+.session-analytics-stat-detail {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  line-height: 1.25;
+}
+
+.session-analytics-stat-label {
+  grid-area: label;
+  align-self: end;
+}
+
+.session-analytics-stat-detail {
+  grid-area: detail;
+  margin-top: 7px;
+}
+
+.session-analytics-stat-value {
+  grid-area: value;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: clamp(17px, 1.6vw, 20px);
+  font-weight: 680;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.session-analytics-main-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.session-analytics-panel,
+.session-analytics-insights {
+  min-width: 0;
+  border: 0.5px solid var(--border-subtle);
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--bg-editor) 84%, var(--bg-sidebar));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 35%);
+}
+
+.session-analytics-panel {
+  padding: 15px;
+}
+
+.session-analytics-panel-wide {
+  padding-bottom: 13px;
+}
+
+.session-analytics-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-secondary);
+}
+
+.session-analytics-panel-header h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 670;
+  letter-spacing: 0;
+}
+
+.session-analytics-panel-header p {
+  margin: 3px 0 0;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.session-analytics-tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 15px;
+}
+
+.session-analytics-tool-row {
+  display: grid;
+  grid-template-columns: auto minmax(72px, 0.8fr) minmax(78px, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.session-analytics-tool-icon {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--tool-color) 13%, transparent);
+  color: var(--tool-color);
+}
+
+.session-analytics-tool-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-analytics-tool-bar {
+  position: relative;
+  height: 7px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+}
+
+.session-analytics-tool-bar span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--tool-share);
+  border-radius: inherit;
+  background: var(--tool-color);
+}
+
+.session-analytics-tool-row strong {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.session-analytics-tool-row small {
+  min-width: 34px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  text-align: right;
+}
+
+.session-analytics-token-chart {
+  margin-top: 10px;
+}
+
+.session-analytics-token-stage {
+  position: relative;
+}
+
+.session-analytics-token-chart svg {
+  display: block;
+  width: 100%;
+  height: 226px;
+}
+
+.session-analytics-axis,
+.session-analytics-grid,
+.session-analytics-x-tick {
+  stroke: color-mix(in srgb, var(--text-secondary) 20%, transparent);
+  stroke-width: 1;
+}
+
+.session-analytics-grid {
+  stroke-dasharray: 4 6;
+}
+
+.session-analytics-tick-label,
+.session-analytics-x-label {
+  fill: var(--text-tertiary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.session-analytics-token-area {
+  fill: url(#session-token-fill);
+  stroke: none;
+  opacity: 0;
+  animation: session-token-area-in 460ms ease-out 130ms forwards;
+}
+
+.session-analytics-token-bucket rect {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  animation: session-token-bar-in 520ms cubic-bezier(0.2, 0.75, 0.22, 1) both;
+  animation-delay: var(--bucket-delay);
+  transition:
+    filter 140ms ease,
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.session-analytics-token-input {
+  fill: var(--accent);
+}
+
+.session-analytics-token-output {
+  fill: var(--success);
+}
+
+.session-analytics-token-cache {
+  fill: var(--warning-amber);
+}
+
+.session-analytics-token-bucket.is-hovered rect,
+.session-analytics-token-bucket.is-active rect {
+  filter: drop-shadow(0 4px 8px color-mix(in srgb, var(--accent) 22%, transparent)) saturate(1.08);
+}
+
+.session-analytics-token-line {
+  fill: none;
+  stroke: color-mix(in srgb, var(--accent) 85%, white);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: session-token-line-draw 760ms cubic-bezier(0.22, 0.72, 0.16, 1) 220ms forwards;
+}
+
+.session-analytics-token-marker {
+  pointer-events: none;
+  color: var(--accent);
+}
+
+.session-analytics-token-marker line {
+  stroke: color-mix(in srgb, var(--accent) 50%, transparent);
+  stroke-dasharray: 4 4;
+  stroke-width: 1;
+}
+
+.session-analytics-token-marker circle {
+  fill: var(--bg-editor);
+  stroke: currentColor;
+  stroke-width: 2;
+  filter: drop-shadow(0 2px 6px color-mix(in srgb, var(--accent) 32%, transparent));
+}
+
+.session-analytics-token-hotspots {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.session-analytics-token-hotspot {
+  position: absolute;
+  top: var(--bucket-top);
+  left: var(--bucket-left);
+  width: var(--bucket-width);
+  height: var(--bucket-height);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.session-analytics-token-hotspot:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--accent) 72%, transparent);
+  outline-offset: -1px;
+}
+
+.session-analytics-token-legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.session-analytics-token-legend {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.session-analytics-token-detail {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 7px;
+  padding-top: 10px;
+  border-top: 0.5px solid var(--border-subtle);
+}
+
+.session-analytics-token-detail span {
+  min-width: 0;
+}
+
+.session-analytics-token-detail small,
+.session-analytics-token-detail strong {
+  display: block;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.session-analytics-token-detail small {
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+}
+
+.session-analytics-token-detail strong {
+  margin-top: 2px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.session-analytics-token-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.session-analytics-token-legend span::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+}
+
+.session-analytics-token-legend .input::before {
+  background: var(--accent);
+}
+
+.session-analytics-token-legend .output::before {
+  background: var(--success);
+}
+
+.session-analytics-token-legend .cache::before {
+  background: var(--warning-amber);
+}
+
+.session-analytics-token-legend .line::before {
+  height: 2px;
+  border-radius: 0;
+  background: var(--accent);
+}
+
+@keyframes session-token-bar-in {
+  from {
+    opacity: 0;
+    transform: scaleY(0.08);
+  }
+
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+@keyframes session-token-line-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes session-token-area-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes session-analytics-drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes session-analytics-drawer-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+}
+
+.session-analytics-insights {
+  margin-top: 12px;
+  margin-bottom: 22px;
+  padding: 15px;
+}
+
+.session-analytics-insight-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.session-analytics-insight {
+  display: flex;
+  gap: 9px;
+  min-width: 0;
+  padding: 10px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-sidebar) 58%, transparent);
+}
+
+.session-analytics-insight-icon {
+  display: inline-flex;
+  width: 25px;
+  height: 25px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.session-analytics-insight-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.session-analytics-insight-copy span,
+.session-analytics-insight-copy small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-analytics-insight-copy strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 670;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-analytics-loading,
+.session-analytics-error,
+.session-analytics-empty {
+  display: flex;
+  min-height: 220px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.session-analytics-error {
+  flex-direction: column;
+  color: var(--danger-strong);
+}
+
+.session-analytics-empty {
+  min-height: 180px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-sidebar) 58%, transparent);
+  text-align: center;
+}
+
+@media (max-width: 940px) {
+  .session-analytics-dialog {
+    width: min(560px, calc(100vw - 16px));
+    max-width: min(560px, calc(100vw - 16px));
+  }
+
+  .session-analytics-token-detail {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .session-analytics-dialog {
+    width: 100vw;
+    max-width: 100vw;
+    border-left: 0;
+    border-radius: 0;
+  }
+
+  .session-analytics-header {
+    padding-inline: 16px;
+    padding-right: 52px;
+  }
+
+  .session-analytics-stat-grid,
+  .session-analytics-main-grid,
+  .session-analytics-insights {
+    margin-inline: 14px;
+  }
+
+  .session-analytics-stat-grid,
+  .session-analytics-insight-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .session-analytics-tool-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .session-analytics-tool-bar,
+  .session-analytics-tool-row small {
+    display: none;
+  }
+
+  .session-analytics-subtitle {
+    white-space: normal;
+  }
+
+  .session-analytics-token-detail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-analytics-token-area,
+  .session-analytics-token-bucket rect,
+  .session-analytics-token-line {
+    animation: none;
+    opacity: 1;
+    stroke-dashoffset: 0;
+    transform: none;
+  }
+}
+
 /* Session Loading / Error */
 .session-loading {
   display: flex;

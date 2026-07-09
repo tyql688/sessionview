@@ -4,10 +4,13 @@ use anyhow::Context;
 use serde::Serialize;
 use tauri::State;
 
+use super::sessions::load_messages_cached;
 use super::AppState;
 use crate::db::queries::{UsageDateBounds, UsageProjectModelDetailRow, UsageSessionModelDetailRow};
+use crate::db::sync::build_tool_stats;
 use crate::error::CommandResult;
 use crate::models::*;
+use crate::services::load_session_meta;
 
 #[tauri::command]
 pub async fn get_usage_stats(
@@ -94,6 +97,44 @@ pub async fn get_activity_calendar(
     .await
     .context("task join error")??;
     Ok(calendar)
+}
+
+#[tauri::command]
+pub async fn get_project_tool_usage(
+    project_path: String,
+    providers: Vec<String>,
+    range_days: Option<u32>,
+    date_start: Option<String>,
+    date_end: Option<String>,
+    state: State<'_, AppState>,
+) -> CommandResult<ProjectToolUsageStats> {
+    let custom_range = parse_custom_range(date_start.as_deref(), date_end.as_deref())?;
+    let state = state.inner().clone();
+    let stats = tokio::task::spawn_blocking(move || {
+        build_project_tool_usage(&state, &project_path, &providers, range_days, custom_range)
+    })
+    .await
+    .context("task join error")??;
+    Ok(stats)
+}
+
+#[tauri::command]
+pub async fn get_project_daily_usage(
+    project_path: String,
+    providers: Vec<String>,
+    range_days: Option<u32>,
+    date_start: Option<String>,
+    date_end: Option<String>,
+    state: State<'_, AppState>,
+) -> CommandResult<Vec<ProjectDailyUsage>> {
+    let custom_range = parse_custom_range(date_start.as_deref(), date_end.as_deref())?;
+    let state = state.inner().clone();
+    let days = tokio::task::spawn_blocking(move || {
+        build_project_daily_usage(&state, &project_path, &providers, range_days, custom_range)
+    })
+    .await
+    .context("task join error")??;
+    Ok(days)
 }
 
 #[tauri::command]
@@ -295,6 +336,114 @@ fn build_usage_stats(
     })
 }
 
+fn build_project_tool_usage(
+    state: &AppState,
+    project_path: &str,
+    providers: &[String],
+    range_days: Option<u32>,
+    custom_range: Option<(chrono::NaiveDate, chrono::NaiveDate)>,
+) -> anyhow::Result<ProjectToolUsageStats> {
+    let (start_date, end_date) = match custom_range {
+        Some((start, end)) => (
+            Some(start.format("%Y-%m-%d").to_string()),
+            Some(end.format("%Y-%m-%d").to_string()),
+        ),
+        None => (range_days.and_then(cutoff_date_for_range_days), None),
+    };
+    let bounds = UsageDateBounds {
+        start: start_date.as_deref(),
+        end: end_date.as_deref(),
+    };
+    let session_ids = state
+        .db
+        .usage_project_session_ids(providers, bounds, project_path)
+        .with_context(|| format!("failed to query sessions for project_path={project_path}"))?;
+    let missing_tool_stats = state
+        .db
+        .usage_project_sessions_missing_tool_stats(providers, bounds, project_path)
+        .with_context(|| {
+            format!("failed to query tool-stat cache gaps for project_path={project_path}")
+        })?;
+    for session_id in &missing_tool_stats {
+        let meta = load_session_meta(&state.db, session_id).map_err(anyhow::Error::msg)?;
+        let (messages, _, _) = load_messages_cached(state, &meta)
+            .with_context(|| format!("failed to load messages for session {session_id}"))?;
+        let tool_stats = build_tool_stats(&messages);
+        state
+            .db
+            .replace_tool_stats(session_id, &tool_stats)
+            .with_context(|| format!("failed to cache tool stats for session {session_id}"))?;
+    }
+
+    let tools = state
+        .db
+        .usage_project_tool_usage(providers, bounds, project_path)
+        .with_context(|| format!("failed to query tool usage for project_path={project_path}"))?
+        .into_iter()
+        .map(|row| ProjectToolUsage {
+            key: row.key,
+            label: row.label,
+            category: row.category,
+            count: row.count,
+            sessions: row.sessions,
+        })
+        .collect::<Vec<_>>();
+    let tool_calls = tools.iter().map(|tool| tool.count).sum();
+
+    Ok(ProjectToolUsageStats {
+        project_path: project_path.to_string(),
+        sessions_scanned: session_ids.len() as u64,
+        tool_calls,
+        tools,
+    })
+}
+
+fn build_project_daily_usage(
+    state: &AppState,
+    project_path: &str,
+    providers: &[String],
+    range_days: Option<u32>,
+    custom_range: Option<(chrono::NaiveDate, chrono::NaiveDate)>,
+) -> anyhow::Result<Vec<ProjectDailyUsage>> {
+    let (start_date, end_date) = match custom_range {
+        Some((start, end)) => (
+            Some(start.format("%Y-%m-%d").to_string()),
+            Some(end.format("%Y-%m-%d").to_string()),
+        ),
+        None => (range_days.and_then(cutoff_date_for_range_days), None),
+    };
+    let bounds = UsageDateBounds {
+        start: start_date.as_deref(),
+        end: end_date.as_deref(),
+    };
+    let rows = state
+        .db
+        .usage_project_daily(providers, bounds, project_path)
+        .with_context(|| format!("failed to query daily usage for project_path={project_path}"))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let tokens = row.input_tokens
+                + row.output_tokens
+                + row.cache_read_tokens
+                + row.cache_write_tokens;
+            ProjectDailyUsage {
+                date: row.date,
+                provider: row.provider,
+                model: row.model,
+                sessions: row.sessions,
+                turns: row.turns,
+                input_tokens: row.input_tokens,
+                output_tokens: row.output_tokens,
+                cache_read_tokens: row.cache_read_tokens,
+                cache_write_tokens: row.cache_write_tokens,
+                tokens,
+                cost: row.cost_usd,
+            }
+        })
+        .collect())
+}
+
 fn cutoff_date_for_range_days(days: u32) -> Option<String> {
     if days == 0 {
         return None;
@@ -315,10 +464,14 @@ fn build_project_costs(project_model_rows: Vec<UsageProjectModelDetailRow>) -> V
     // show how much each tool contributed.
     let mut pp_map: HashMap<(String, String), ProjectProviderUsage> = HashMap::new();
     let mut pp_sessions: HashMap<(String, String), HashSet<String>> = HashMap::new();
+    // Per-(project_path, model) breakdown for folder detail views.
+    let mut pm_map: HashMap<(String, String), ProjectModelUsage> = HashMap::new();
+    let mut pm_sessions: HashMap<(String, String), HashSet<String>> = HashMap::new();
 
     for row in project_model_rows {
         let path = row.project_path.clone();
         let provider = row.provider.clone();
+        let model = row.model.clone();
         let tokens =
             row.input_tokens + row.output_tokens + row.cache_read_tokens + row.cache_write_tokens;
 
@@ -329,6 +482,10 @@ fn build_project_costs(project_model_rows: Vec<UsageProjectModelDetailRow>) -> V
         pp_sessions
             .entry((path.clone(), provider.clone()))
             .or_default()
+            .insert(row.session_id.clone());
+        pm_sessions
+            .entry((path.clone(), model.clone()))
+            .or_default()
             .insert(row.session_id);
 
         let entry = project_map
@@ -338,17 +495,26 @@ fn build_project_costs(project_model_rows: Vec<UsageProjectModelDetailRow>) -> V
                 project_path: path.clone(),
                 providers: Vec::new(),
                 by_provider: Vec::new(),
+                by_model: Vec::new(),
                 sessions: 0,
                 turns: 0,
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
                 tokens: 0,
                 cost: 0.0,
             });
         entry.turns += row.turns;
+        entry.input_tokens += row.input_tokens;
+        entry.output_tokens += row.output_tokens;
+        entry.cache_read_tokens += row.cache_read_tokens;
+        entry.cache_write_tokens += row.cache_write_tokens;
         entry.tokens += tokens;
         entry.cost += row.cost_usd;
 
         let pp = pp_map
-            .entry((path, provider.clone()))
+            .entry((path.clone(), provider.clone()))
             .or_insert_with(|| ProjectProviderUsage {
                 provider,
                 sessions: 0,
@@ -359,6 +525,19 @@ fn build_project_costs(project_model_rows: Vec<UsageProjectModelDetailRow>) -> V
         pp.turns += row.turns;
         pp.tokens += tokens;
         pp.cost += row.cost_usd;
+
+        let pm = pm_map
+            .entry((path, model.clone()))
+            .or_insert_with(|| ProjectModelUsage {
+                model,
+                sessions: 0,
+                turns: 0,
+                tokens: 0,
+                cost: 0.0,
+            });
+        pm.turns += row.turns;
+        pm.tokens += tokens;
+        pm.cost += row.cost_usd;
     }
 
     // Group the per-provider rows under their project, with distinct session
@@ -379,6 +558,22 @@ fn build_project_costs(project_model_rows: Vec<UsageProjectModelDetailRow>) -> V
         });
     }
 
+    let mut by_project_model: HashMap<String, Vec<ProjectModelUsage>> = HashMap::new();
+    for ((path, model), mut pm) in pm_map {
+        pm.sessions = pm_sessions
+            .get(&(path.clone(), model))
+            .map(|sessions| sessions.len() as u64)
+            .unwrap_or(0);
+        by_project_model.entry(path).or_default().push(pm);
+    }
+    for list in by_project_model.values_mut() {
+        list.sort_by(|a, b| {
+            b.cost
+                .partial_cmp(&a.cost)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+
     let mut project_costs: Vec<ProjectCost> = project_map
         .into_iter()
         .map(|(key, mut cost_row)| {
@@ -392,8 +587,13 @@ fn build_project_costs(project_model_rows: Vec<UsageProjectModelDetailRow>) -> V
             });
             let mut providers: Vec<String> = breakdown.iter().map(|p| p.provider.clone()).collect();
             providers.sort();
+            let models = by_project_model.remove(&key).unwrap_or_else(|| {
+                log::warn!("missing per-model breakdown for project_path={key}");
+                Vec::new()
+            });
             cost_row.providers = providers;
             cost_row.by_provider = breakdown;
+            cost_row.by_model = models;
             cost_row
         })
         .collect();
@@ -496,6 +696,7 @@ mod tests {
                 project_name: "drama/sessionview".to_string(),
                 provider: "claude".to_string(),
                 session_id: "session-a".to_string(),
+                model: "sonnet-4-6".to_string(),
                 turns: 12,
                 input_tokens: 100,
                 output_tokens: 50,
@@ -508,6 +709,7 @@ mod tests {
                 project_name: "drama/sessionview".to_string(),
                 provider: "claude".to_string(),
                 session_id: "session-a".to_string(),
+                model: "opus-4-6".to_string(),
                 turns: 8,
                 input_tokens: 40,
                 output_tokens: 10,
@@ -520,6 +722,7 @@ mod tests {
                 project_name: "drama/sessionview".to_string(),
                 provider: "claude".to_string(),
                 session_id: "session-b".to_string(),
+                model: "opus-4-6".to_string(),
                 turns: 4,
                 input_tokens: 20,
                 output_tokens: 10,
@@ -534,7 +737,20 @@ mod tests {
         assert_eq!(project_costs[0].sessions, 2);
         assert_eq!(project_costs[0].project_path, "/tmp/drama/sessionview");
         assert_eq!(project_costs[0].turns, 24);
+        assert_eq!(project_costs[0].input_tokens, 160);
+        assert_eq!(project_costs[0].output_tokens, 70);
+        assert_eq!(project_costs[0].cache_read_tokens, 20);
+        assert_eq!(project_costs[0].cache_write_tokens, 10);
         assert_eq!(project_costs[0].tokens, 260);
+        let by_model = &project_costs[0].by_model;
+        assert_eq!(by_model.len(), 2);
+        assert_eq!(by_model[0].model, "sonnet-4-6");
+        assert_eq!(by_model[0].sessions, 1);
+        assert_eq!(by_model[0].turns, 12);
+        assert_eq!(by_model[0].tokens, 180);
+        assert_eq!(by_model[1].model, "opus-4-6");
+        assert_eq!(by_model[1].sessions, 2);
+        assert_eq!(by_model[1].tokens, 80);
     }
 
     #[test]
@@ -545,6 +761,7 @@ mod tests {
                 project_name: "myproj".to_string(),
                 provider: "claude".to_string(),
                 session_id: "session-a".to_string(),
+                model: "claude-opus".to_string(),
                 turns: 10,
                 input_tokens: 100,
                 output_tokens: 50,
@@ -557,6 +774,7 @@ mod tests {
                 project_name: "myproj".to_string(),
                 provider: "codex".to_string(),
                 session_id: "session-b".to_string(),
+                model: "gpt-5".to_string(),
                 turns: 5,
                 input_tokens: 60,
                 output_tokens: 40,
@@ -573,6 +791,8 @@ mod tests {
         assert_eq!(project_costs[0].providers, vec!["claude", "codex"]);
         assert_eq!(project_costs[0].sessions, 2);
         assert_eq!(project_costs[0].turns, 15);
+        assert_eq!(project_costs[0].input_tokens, 160);
+        assert_eq!(project_costs[0].output_tokens, 90);
         assert_eq!(project_costs[0].tokens, 250);
         assert_eq!(project_costs[0].cost, 3.0);
         // Per-provider breakdown, sorted by cost desc (claude $2 before codex $1).
@@ -636,6 +856,7 @@ mod tests {
                 project_name: "api-server".to_string(),
                 provider: "codex".to_string(),
                 session_id: "session-a".to_string(),
+                model: "gpt-5".to_string(),
                 turns: 2,
                 input_tokens: 100,
                 output_tokens: 40,
@@ -648,6 +869,7 @@ mod tests {
                 project_name: "api-server".to_string(),
                 provider: "codex".to_string(),
                 session_id: "session-b".to_string(),
+                model: "gpt-5".to_string(),
                 turns: 3,
                 input_tokens: 120,
                 output_tokens: 60,

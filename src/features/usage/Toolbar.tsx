@@ -15,6 +15,7 @@ export interface ProviderChipInfo {
 }
 
 export interface ToolbarProps {
+  title?: string;
   activeRangeLabel: string;
   selectedProviderCount: number;
   activeMaintenanceJob: MaintenanceJob | null;
@@ -103,7 +104,7 @@ export function Toolbar(props: ToolbarProps) {
       <div className="usage-toolbar-main">
         <div className="usage-toolbar-copy">
           <div className="usage-title-row">
-            <h1 className="usage-title">{t("usage.title")}</h1>
+            <h1 className="usage-title">{props.title ?? t("usage.title")}</h1>
             <span className="usage-subtitle-pill">{props.activeRangeLabel}</span>
           </div>
           <div className="usage-toolbar-subline">

@@ -1,4 +1,5 @@
 import i18next from "i18next";
+import { useCallback } from "react";
 import { initReactI18next, useTranslation } from "react-i18next";
 import en from "@/i18n/en.json";
 import zh from "@/i18n/zh.json";
@@ -35,11 +36,17 @@ export function getLocale(): Locale {
 }
 
 export function useI18n() {
-  const { t, i18n } = useTranslation();
+  const { t: translate, i18n } = useTranslation();
+  const t = useCallback(
+    (key: string, options?: Record<string, unknown>): string => translate(key, options ?? {}),
+    [translate],
+  );
+  const setLocale = useCallback((next: Locale) => i18n.changeLanguage(next), [i18n]);
+
   return {
-    t: (key: string, options?: Record<string, unknown>): string => t(key, options ?? {}),
+    t,
     locale: i18n.language as Locale,
-    setLocale: (next: Locale) => i18n.changeLanguage(next),
+    setLocale,
   };
 }
 

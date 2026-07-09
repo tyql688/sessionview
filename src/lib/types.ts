@@ -267,6 +267,14 @@ interface ProjectProviderUsage {
   cost: number;
 }
 
+interface ProjectModelUsage {
+  model: string;
+  sessions: number;
+  turns: number;
+  tokens: number;
+  cost: number;
+}
+
 export interface ProjectCost {
   project: string;
   project_path: string;
@@ -274,8 +282,43 @@ export interface ProjectCost {
   providers: string[];
   /** Per-provider breakdown (sorted by cost desc) for the expandable row. */
   by_provider: ProjectProviderUsage[];
+  /** Per-model breakdown (sorted by cost desc) for folder analytics. */
+  by_model: ProjectModelUsage[];
   sessions: number;
   turns: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  tokens: number;
+  cost: number;
+}
+
+export interface ProjectToolUsage {
+  key: string;
+  label: string;
+  category: string;
+  count: number;
+  sessions: number;
+}
+
+export interface ProjectToolUsageStats {
+  project_path: string;
+  sessions_scanned: number;
+  tool_calls: number;
+  tools: ProjectToolUsage[];
+}
+
+export interface ProjectDailyUsage {
+  date: string;
+  provider: string;
+  model: string;
+  sessions: number;
+  turns: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
   tokens: number;
   cost: number;
 }

@@ -15,6 +15,7 @@ import { MessageBubble } from "@/features/session/MessageBubble";
 import { MergedToolRow } from "@/features/session/MergedToolRow";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ExportDialog } from "@/features/session/ExportDialog";
+import { SessionAnalyticsDialog } from "@/features/session/SessionAnalyticsDialog";
 import { setFocusMode, useFocusMode, useTerminalApp } from "@/stores/settings";
 import { toast, toastError } from "@/stores/toast";
 import { errorMessage } from "@/lib/errors";
@@ -306,6 +307,7 @@ export function SessionView(props: {
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
+  const [showAnalyticsDialog, setShowAnalyticsDialog] = useState(false);
 
   async function refreshOutline(sessionId: string, version: number, attempt = 0) {
     try {
@@ -478,6 +480,7 @@ export function SessionView(props: {
         starred={starred}
         parseWarningCount={parseWarningCount}
         onToggleFavorite={handleToggleFavorite}
+        onAnalyze={() => setShowAnalyticsDialog(true)}
         onResume={handleResume}
         onExport={() => setShowExportDialog(true)}
         onDelete={() => setShowDeleteConfirm(true)}
@@ -609,6 +612,12 @@ export function SessionView(props: {
       />
 
       <ExportDialog open={showExportDialog} session={meta} onClose={() => setShowExportDialog(false)} />
+      <SessionAnalyticsDialog
+        open={showAnalyticsDialog}
+        sessionId={props.session.id}
+        meta={meta}
+        onOpenChange={setShowAnalyticsDialog}
+      />
     </div>
   );
 }

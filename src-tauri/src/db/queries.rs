@@ -27,12 +27,36 @@ pub(crate) struct UsageProjectModelDetailRow {
     pub project_name: String,
     pub provider: String,
     pub session_id: String,
+    pub model: String,
     pub turns: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
     pub cost_usd: f64,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct UsageProjectDailyRow {
+    pub date: String,
+    pub provider: String,
+    pub model: String,
+    pub sessions: u64,
+    pub turns: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub cost_usd: f64,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct UsageProjectToolRow {
+    pub key: String,
+    pub label: String,
+    pub category: String,
+    pub count: u64,
+    pub sessions: u64,
 }
 
 #[derive(Debug, Clone)]

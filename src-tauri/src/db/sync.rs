@@ -84,6 +84,67 @@ fn indexable_content_text(messages: &[Message], fallback: &str) -> String {
 
 pub use crate::provider::TokenStatRow;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ToolStatRow {
+    pub key: String,
+    pub label: String,
+    pub category: String,
+    pub count: u64,
+}
+
+pub(crate) fn build_tool_stats(messages: &[Message]) -> Vec<ToolStatRow> {
+    let mut counters: HashMap<String, ToolStatRow> = HashMap::new();
+    for message in messages {
+        if message.role != MessageRole::Tool {
+            continue;
+        }
+        let Some((key, label, category)) = tool_identity(message) else {
+            continue;
+        };
+        let entry = counters.entry(key.clone()).or_insert(ToolStatRow {
+            key,
+            label,
+            category,
+            count: 0,
+        });
+        entry.count = entry.count.saturating_add(1);
+    }
+
+    let mut rows: Vec<ToolStatRow> = counters.into_values().collect();
+    rows.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left.label.cmp(&right.label))
+    });
+    rows
+}
+
+fn tool_identity(message: &Message) -> Option<(String, String, String)> {
+    if let Some(metadata) = message.tool_metadata.as_ref() {
+        let key = if metadata.canonical_name.trim().is_empty() {
+            metadata.raw_name.trim()
+        } else {
+            metadata.canonical_name.trim()
+        };
+        if key.is_empty() {
+            return None;
+        }
+        let label = if metadata.display_name.trim().is_empty() {
+            key.to_string()
+        } else {
+            metadata.display_name.clone()
+        };
+        return Some((key.to_string(), label, metadata.category.clone()));
+    }
+
+    let name = message.tool_name.as_deref()?.trim();
+    if name.is_empty() {
+        return None;
+    }
+    Some((name.to_string(), name.to_string(), "tool".to_string()))
+}
+
 struct ProviderSnapshotSources {
     ids_by_source: HashMap<String, HashSet<String>>,
     source_paths: Vec<String>,
@@ -262,6 +323,8 @@ impl Database {
         self.with_transaction(|conn| {
             conn.execute_batch(
                 "DELETE FROM session_token_stats;
+                 DELETE FROM session_tool_stats;
+                 DELETE FROM session_tool_index;
                  DELETE FROM favorites;
                  DELETE FROM sessions;
                  DELETE FROM meta;
@@ -273,6 +336,8 @@ impl Database {
     pub(crate) fn clear_usage_stats(&self) -> Result<(), rusqlite::Error> {
         let conn = self.lock_write()?;
         conn.execute("DELETE FROM session_token_stats", [])?;
+        conn.execute("DELETE FROM session_tool_stats", [])?;
+        conn.execute("DELETE FROM session_tool_index", [])?;
         // Keep the denormalized totals consistent with the now-empty stats,
         // and invalidate the incremental-scan freshness snapshot so the
         // following reindex re-parses every file and rewrites token stats.
@@ -339,6 +404,15 @@ impl Database {
         Ok(())
     }
 
+    pub(crate) fn replace_tool_stats(
+        &self,
+        session_id: &str,
+        stats: &[ToolStatRow],
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_write()?;
+        replace_tool_stats_on(&conn, session_id, stats)
+    }
+
     /// Replace token stats for multiple sessions atomically within a single
     /// transaction.  The frontend reads via a separate connection, so without
     /// a transaction the reader can observe a partially-updated state (e.g.
@@ -381,6 +455,37 @@ impl Database {
             Ok(())
         })
     }
+}
+
+fn replace_tool_stats_on(
+    conn: &Connection,
+    session_id: &str,
+    stats: &[ToolStatRow],
+) -> Result<(), rusqlite::Error> {
+    conn.execute(
+        "DELETE FROM session_tool_stats WHERE session_id = ?1",
+        params![session_id],
+    )?;
+    conn.execute(
+        "INSERT INTO session_tool_index (session_id) VALUES (?1)
+         ON CONFLICT(session_id) DO NOTHING",
+        params![session_id],
+    )?;
+    let mut insert = conn.prepare_cached(
+        "INSERT INTO session_tool_stats
+            (session_id, tool_key, label, category, count)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+    )?;
+    for row in stats {
+        insert.execute(params![
+            session_id,
+            row.key,
+            row.label,
+            row.category,
+            row.count as i64,
+        ])?;
+    }
+    Ok(())
 }
 
 #[derive(Default)]
@@ -439,6 +544,8 @@ fn upsert_parsed_sessions_on(
             &parsed.child_session_ids,
             parsed.source_mtime,
         )?;
+        let tool_stats = build_tool_stats(&parsed.messages);
+        replace_tool_stats_on(conn, &parsed.meta.id, &tool_stats)?;
         if outcome == UpsertOutcome::MetadataOnly {
             slim += 1;
         }

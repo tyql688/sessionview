@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { JSX } from "react";
+import { FolderKanban } from "lucide-react";
 import { useI18n } from "@/i18n/index";
 
 interface ActivityItem {
@@ -55,6 +56,10 @@ function UsageIcon() {
   );
 }
 
+function FolderAnalyticsIcon() {
+  return <FolderKanban size={20} strokeWidth={1.7} aria-hidden="true" />;
+}
+
 function SettingsIcon() {
   return (
     <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
@@ -70,6 +75,7 @@ export function ActivityBar(props: { activeView: string; onViewChange: (v: strin
     { id: "explorer", label: t("explorer.title"), icon: HomeIcon },
     { id: "favorites", label: t("favorites.title"), icon: StarIcon },
     { id: "usage", label: t("usage.title"), icon: UsageIcon },
+    { id: "folderAnalytics", label: t("usage.folderAnalyticsTitle"), icon: FolderAnalyticsIcon },
     { id: "blocked", label: t("settings.blockedFolders"), icon: BlockedIcon },
     { id: "trash", label: t("trash.title"), icon: TrashIcon },
     {

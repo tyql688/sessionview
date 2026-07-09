@@ -15,6 +15,8 @@ import type {
   TokenTotals,
   UsageStats,
   ActivityCalendar,
+  ProjectDailyUsage,
+  ProjectToolUsageStats,
   Message,
 } from "@/lib/types";
 
@@ -188,6 +190,26 @@ type BackendCommandMap = {
     UsageStats
   >;
   get_activity_calendar: CommandSpec<{ providers: string[]; dateStart: string; dateEnd: string }, ActivityCalendar>;
+  get_project_tool_usage: CommandSpec<
+    {
+      projectPath: string;
+      providers: string[];
+      rangeDays: number | null;
+      dateStart: string | null;
+      dateEnd: string | null;
+    },
+    ProjectToolUsageStats
+  >;
+  get_project_daily_usage: CommandSpec<
+    {
+      projectPath: string;
+      providers: string[];
+      rangeDays: number | null;
+      dateStart: string | null;
+      dateEnd: string | null;
+    },
+    ProjectDailyUsage[]
+  >;
   get_today_cost: CommandSpec<undefined, number>;
   get_today_tokens: CommandSpec<undefined, TodayTokens>;
 };
@@ -436,6 +458,38 @@ export async function getActivityCalendar(
 ): Promise<ActivityCalendar> {
   return invokeCommand("get_activity_calendar", {
     providers,
+    dateStart,
+    dateEnd,
+  });
+}
+
+export async function getProjectToolUsage(
+  projectPath: string,
+  providers: string[],
+  rangeDays: number | null,
+  dateStart: string | null = null,
+  dateEnd: string | null = null,
+): Promise<ProjectToolUsageStats> {
+  return invokeCommand("get_project_tool_usage", {
+    projectPath,
+    providers,
+    rangeDays,
+    dateStart,
+    dateEnd,
+  });
+}
+
+export async function getProjectDailyUsage(
+  projectPath: string,
+  providers: string[],
+  rangeDays: number | null,
+  dateStart: string | null = null,
+  dateEnd: string | null = null,
+): Promise<ProjectDailyUsage[]> {
+  return invokeCommand("get_project_daily_usage", {
+    projectPath,
+    providers,
+    rangeDays,
     dateStart,
     dateEnd,
   });

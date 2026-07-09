@@ -644,8 +644,15 @@ pub struct ProjectCost {
     /// Per-provider breakdown for this project (sorted by cost desc), so the
     /// merged row can be expanded to show how much each tool contributed.
     pub by_provider: Vec<ProjectProviderUsage>,
+    /// Per-model breakdown for this project (sorted by cost desc), used by the
+    /// folder analytics detail view.
+    pub by_model: Vec<ProjectModelUsage>,
     pub sessions: u64,
     pub turns: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
     pub tokens: u64,
     pub cost: f64,
 }
@@ -655,6 +662,47 @@ pub struct ProjectProviderUsage {
     pub provider: String,
     pub sessions: u64,
     pub turns: u64,
+    pub tokens: u64,
+    pub cost: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectModelUsage {
+    pub model: String,
+    pub sessions: u64,
+    pub turns: u64,
+    pub tokens: u64,
+    pub cost: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectToolUsageStats {
+    pub project_path: String,
+    pub sessions_scanned: u64,
+    pub tool_calls: u64,
+    pub tools: Vec<ProjectToolUsage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectToolUsage {
+    pub key: String,
+    pub label: String,
+    pub category: String,
+    pub count: u64,
+    pub sessions: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectDailyUsage {
+    pub date: String,
+    pub provider: String,
+    pub model: String,
+    pub sessions: u64,
+    pub turns: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
     pub tokens: u64,
     pub cost: f64,
 }

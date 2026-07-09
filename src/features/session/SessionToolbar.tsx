@@ -1,5 +1,5 @@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Download, SquareTerminal, Star, Trash2 } from "lucide-react";
+import { ChartColumn, Download, SquareTerminal, Star, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getResumeCommand } from "@/lib/tauri";
@@ -15,6 +15,7 @@ export function SessionToolbar(props: {
   starred: boolean | null;
   parseWarningCount: number;
   onToggleFavorite: () => void;
+  onAnalyze: () => void;
   onResume: () => void;
   onExport: () => void;
   onDelete: () => void;
@@ -85,6 +86,12 @@ export function SessionToolbar(props: {
                     ? t("session.favoriteRemove")
                     : t("session.favoriteAdd")}
               </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger render={<Button variant="ghost" size="icon-sm" onClick={props.onAnalyze} />}>
+                <ChartColumn className="size-4" aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{t("session.analytics")}</TooltipContent>
             </Tooltip>
             {!(props.meta.is_sidechain && props.meta.provider === "kimi") && (
               <>
