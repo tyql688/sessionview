@@ -9,8 +9,8 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  padding: 12px 20px;
-  border-bottom: 0.5px solid var(--border-subtle);
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border-subtle);
   position: sticky;
   top: 0;
   background: var(--bg-editor);
@@ -21,8 +21,8 @@
 .session-breadcrumb {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
+  gap: 5px;
+  font-size: 14px;
   flex: 1;
   min-width: 0;
 }
@@ -31,23 +31,23 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .breadcrumb-title {
   color: var(--text-primary);
-  font-weight: 500;
-  font-size: 14px;
-  line-height: 1.4;
+  font-weight: 650;
+  font-size: 16px;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
 .breadcrumb-provider {
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .breadcrumb-sep {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 .breadcrumb-project {
@@ -58,7 +58,7 @@
 
 .session-actions {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   flex-shrink: 0;
   white-space: nowrap;
 }
@@ -67,22 +67,22 @@
 .session-info {
   display: flex;
   align-items: baseline;
-  gap: 20px;
-  padding: 12px 20px;
-  font-size: 11.5px;
+  gap: 14px;
+  padding: 11px 24px;
+  font-size: 12.5px;
   color: var(--text-secondary);
   border-bottom: 0.5px solid var(--border-subtle);
   flex-wrap: wrap;
 }
 
 .info-sep {
-  color: var(--text-tertiary);
+  color: color-mix(in srgb, var(--text-secondary) 62%, transparent);
 }
 
 .session-info-path {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 
@@ -97,13 +97,13 @@
 }
 
 .session-info-sidechain {
-  color: var(--text-tertiary);
-  font-size: 11px;
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .session-info-parse-warn {
   color: var(--warning-amber);
-  font-size: 11px;
+  font-size: 12px;
   cursor: help;
 }
 
@@ -114,8 +114,8 @@
   justify-content: center;
   gap: 10px;
   padding: 60px 20px;
-  color: var(--text-tertiary);
-  font-size: 13px;
+  color: var(--text-secondary);
+  font-size: 14px;
 }
 
 .spinner {
@@ -136,7 +136,7 @@
 .session-error {
   padding: 40px 20px;
   color: var(--danger-strong);
-  font-size: 13px;
+  font-size: 14px;
   text-align: center;
 }
 
@@ -157,7 +157,7 @@
 .session-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px 26px;
+  padding: 18px 24px 28px;
   overflow-anchor: auto;
   user-select: text;
   -webkit-user-select: text;
@@ -178,7 +178,7 @@
   display: flex;
   width: 100%;
   flex-direction: column;
-  padding-bottom: 10px;
+  padding-bottom: 12px;
   /* Off-screen rows skip layout+paint; the estimate reserves their height so
    * scrolling stays full-length and stable. `auto` makes the browser remember
    * each row's real size once painted, so revisits don't re-estimate. */
@@ -196,7 +196,7 @@
   text-align: center;
   color: var(--text-secondary);
   padding: 40px 0;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 /* Timeline minimap */
@@ -331,7 +331,7 @@
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -348,28 +348,28 @@
 
 /* Session info meta tags */
 .session-info-model {
-  opacity: 0.8;
+  opacity: 1;
   overflow-wrap: anywhere;
 }
 
 .session-info-version {
-  opacity: 0.6;
+  opacity: 0.82;
   font-variant-numeric: tabular-nums;
 }
 
 .session-info-branch {
-  opacity: 0.8;
+  opacity: 1;
   overflow-wrap: anywhere;
 }
 
 .session-focus-toggle {
-  height: 28px;
+  height: 30px;
   padding: 0 10px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background: var(--bg-secondary);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
 }
@@ -390,16 +390,16 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 20px;
+  padding: 6px 24px;
   border-bottom: 0.5px solid var(--border-subtle);
   flex-shrink: 0;
   background: var(--bg-editor);
 }
 .session-search-input {
   flex: 1;
-  font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 4px;
+  font-size: 13px;
+  padding: 5px 9px;
+  border-radius: 6px;
   border: 0.5px solid var(--border);
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -410,8 +410,8 @@
   box-shadow: 0 0 0 1px var(--accent);
 }
 .session-search-count {
-  font-size: 11px;
-  color: var(--text-tertiary);
+  font-size: 12px;
+  color: var(--text-secondary);
   white-space: nowrap;
   min-width: 60px;
   text-align: center;
@@ -423,7 +423,7 @@
   padding: 2px 6px;
   cursor: pointer;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
 }
 .session-search-nav:hover {
   background: var(--bg-tab-hover);

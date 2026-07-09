@@ -3,7 +3,7 @@
   display: inline-block;
   padding: 2px 8px;
   margin: 4px 10px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--accent);
   background: transparent;
   border: none;
@@ -20,7 +20,7 @@
   margin: 1px 0;
   border-radius: 6px;
   overflow: hidden;
-  font-size: 11px;
+  font-size: 12px;
   max-width: 98%;
   user-select: text;
   -webkit-user-select: text;
@@ -37,7 +37,7 @@
   gap: 4px;
   padding: 4px 8px;
   cursor: pointer;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font: inherit;
   text-align: left;
   background: transparent;
@@ -57,13 +57,13 @@
 }
 
 .msg-thinking-label {
-  font-weight: 500;
+  font-weight: 650;
   flex-shrink: 0;
   font-style: italic;
 }
 
 .msg-thinking-preview {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -72,14 +72,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   flex-shrink: 0;
 }
 
 .msg-thinking-content {
   padding: 8px 12px;
   margin: 0;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.5;
   color: var(--text-secondary);
   white-space: pre-wrap;
@@ -97,7 +97,7 @@
   margin: 0;
   overflow: visible;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   user-select: text;
   -webkit-user-select: text;
 }
@@ -124,11 +124,11 @@
   flex-wrap: wrap;
   gap: 4px 6px;
   max-width: 100%;
-  min-height: 24px;
+  min-height: 26px;
 }
 
 .msg-tool.expanded .msg-tool-header {
-  min-height: 30px;
+  min-height: 32px;
   border-bottom: 0.5px solid color-mix(in srgb, var(--border) 70%, transparent);
 }
 
@@ -139,8 +139,8 @@
   gap: 6px;
   min-width: 0;
   max-width: 100%;
-  min-height: 24px;
-  padding: 3px 6px;
+  min-height: 26px;
+  padding: 4px 7px;
   color: inherit;
   font: inherit;
   text-align: left;
@@ -153,8 +153,8 @@
 }
 
 .msg-tool.expanded .msg-tool-toggle-row {
-  min-height: 30px;
-  padding: 5px 8px;
+  min-height: 32px;
+  padding: 6px 9px;
   border-radius: 0;
 }
 
@@ -172,21 +172,21 @@
 
 .msg-tool-icon,
 .msg-tool-chevron {
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 14px;
   flex-shrink: 0;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 .msg-tool-name {
   flex-shrink: 0;
-  color: var(--text-secondary);
-  font-weight: 650;
+  color: var(--text-primary);
+  font-weight: 700;
 }
 
 .msg-tool-server {
-  font-size: 10px;
-  color: var(--text-tertiary);
+  font-size: 11px;
+  color: var(--text-secondary);
   background: color-mix(in srgb, var(--bg-tab-hover) 72%, transparent);
   border: 0.5px solid color-mix(in srgb, var(--border) 55%, transparent);
   border-radius: 5px;
@@ -214,7 +214,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -226,15 +226,15 @@
 .msg-tool-input,
 .msg-tool-output {
   margin: 0;
-  padding: 9px 10px;
+  padding: 10px 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.48;
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 300px;
   overflow-y: auto;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   background: color-mix(in srgb, var(--bg-editor) 93%, var(--bg-sidebar));
   user-select: text;
   -webkit-user-select: text;
@@ -258,7 +258,7 @@
   margin: 0;
   overflow: visible;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   user-select: text;
   -webkit-user-select: text;
 }
@@ -278,11 +278,11 @@
 .terminal-tool-header {
   display: flex;
   align-items: stretch;
-  min-height: 24px;
+  min-height: 26px;
 }
 
 .terminal-tool.expanded .terminal-tool-header {
-  min-height: 30px;
+  min-height: 32px;
 }
 
 .terminal-tool.expanded .terminal-tool-header {
@@ -295,8 +295,8 @@
   gap: 6px;
   min-width: 0;
   flex: 1;
-  min-height: 24px;
-  padding: 3px 6px;
+  min-height: 26px;
+  padding: 4px 7px;
   color: inherit;
   font: inherit;
   text-align: left;
@@ -309,8 +309,8 @@
 }
 
 .terminal-tool.expanded .terminal-tool-toggle {
-  min-height: 30px;
-  padding: 5px 8px;
+  min-height: 32px;
+  padding: 6px 9px;
   border-radius: 0;
 }
 
@@ -358,16 +358,16 @@
 
 .terminal-tool-icon,
 .terminal-tool-chevron {
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 14px;
   flex-shrink: 0;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 .terminal-tool-name {
   flex-shrink: 0;
-  color: var(--text-secondary);
-  font-weight: 650;
+  color: var(--text-primary);
+  font-weight: 700;
 }
 
 .terminal-tool-status-dot {
@@ -389,7 +389,7 @@
 .terminal-tool-summary {
   min-width: 0;
   overflow: hidden;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -398,7 +398,7 @@
 .terminal-tool-meta {
   flex-shrink: 0;
   margin-left: auto;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -435,7 +435,7 @@
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
   gap: 6px;
-  padding: 8px 10px;
+  padding: 9px 12px;
   border-bottom: 0.5px solid color-mix(in srgb, var(--border) 68%, transparent);
   background: color-mix(in srgb, var(--bg-sidebar) 40%, transparent);
 }
@@ -452,7 +452,7 @@
   margin: 0;
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -470,10 +470,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 27px;
-  padding: 4px 8px 4px 10px;
-  color: var(--text-tertiary);
-  font-size: 10px;
+  min-height: 29px;
+  padding: 5px 9px 5px 12px;
+  color: var(--text-secondary);
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.02em;
 }
@@ -483,7 +483,7 @@
   margin: 0;
   padding: 0;
   overflow: auto;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   background: color-mix(in srgb, var(--bg-editor) 92%, var(--bg-sidebar));
   border-top: 0;
 }
@@ -492,11 +492,11 @@
   min-width: max-content;
   max-height: 340px;
   margin: 0;
-  padding: 10px 12px 12px;
+  padding: 11px 13px 13px;
   overflow: auto;
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.48;
   white-space: pre;
   word-break: normal;
@@ -523,8 +523,8 @@
 
 .terminal-tool-empty {
   padding: 12px;
-  color: var(--text-tertiary);
-  font-size: 11px;
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .terminal-tool-footer {
@@ -533,8 +533,8 @@
   flex-wrap: wrap;
   gap: 8px 12px;
   padding: 7px 10px;
-  color: var(--text-tertiary);
-  font-size: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
   border-top: 0.5px solid color-mix(in srgb, var(--border) 58%, transparent);
 }
 
@@ -554,7 +554,7 @@
   padding: 8px 10px;
   color: var(--danger-strong);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-size: 12px;
   white-space: pre-wrap;
   border-top: 0.5px solid color-mix(in srgb, var(--danger-strong) 20%, transparent);
 }
@@ -577,13 +577,13 @@
   grid-template-columns: minmax(58px, max-content) minmax(0, 1fr);
   gap: 8px;
   padding: 3px 0;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
 .msg-tool-field-label {
-  color: var(--text-tertiary);
-  font-size: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
   font-weight: 650;
   text-transform: uppercase;
   letter-spacing: 0.02em;
@@ -593,8 +593,8 @@
 .msg-tool-field-value {
   margin: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  color: var(--text-secondary);
+  font-size: 12px;
+  color: var(--text-primary);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -639,7 +639,7 @@
   gap: 0;
   border-right: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
   background: color-mix(in srgb, var(--bg-sidebar) 92%, var(--bg-editor));
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -654,7 +654,7 @@
   justify-content: flex-end;
   gap: 8px;
   padding: 0 10px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -689,11 +689,11 @@
   display: grid;
   grid-template-columns: 64px minmax(0, 1fr);
   min-width: max-content;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   background: color-mix(in srgb, var(--bg-sidebar) 76%, var(--bg-editor));
   border-top: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
-  font-size: 11px;
+  font-size: 12px;
   user-select: none;
 }
 
@@ -710,7 +710,7 @@
 .msg-tool-diff-section-text {
   padding: 3px 10px;
   overflow: hidden;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   text-overflow: ellipsis;
   white-space: pre;
 }
@@ -786,7 +786,7 @@
 /* Merged Tool Row */
 .merged-tools {
   margin: 1px 0;
-  font-size: 11px;
+  font-size: 12px;
   max-width: 98%;
 }
 
@@ -796,11 +796,11 @@
   flex-wrap: wrap;
   gap: 5px;
   max-width: 100%;
-  min-height: 22px;
-  padding: 2px 5px;
+  min-height: 24px;
+  padding: 3px 6px;
   cursor: pointer;
   font: inherit;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   text-align: left;
   background: transparent;
   border: 0;
@@ -815,8 +815,8 @@
 
 .merged-tools-count {
   flex-shrink: 0;
-  color: var(--text-tertiary);
-  font-weight: 550;
+  color: var(--text-secondary);
+  font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
 
@@ -848,8 +848,8 @@
 }
 
 .merged-tools-token-icon {
-  width: 12px;
-  height: 12px;
+  width: 13px;
+  height: 13px;
   flex-shrink: 0;
   color: color-mix(in srgb, var(--text-tertiary) 82%, transparent);
 }
@@ -857,8 +857,8 @@
 .merged-tools-token-label {
   min-width: 0;
   overflow: hidden;
-  color: var(--text-secondary);
-  font-weight: 600;
+  color: var(--text-primary);
+  font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

@@ -7,16 +7,18 @@
 }
 
 .settings-sidebar {
-  width: 180px;
+  width: 200px;
   background: var(--bg-explorer);
   border-right: 0.5px solid var(--border);
-  padding: 16px 0;
+  padding: 14px 0;
 }
 
 .settings-nav-item {
   display: block;
-  width: 100%;
-  padding: 8px 20px;
+  width: calc(100% - 16px);
+  min-height: 34px;
+  margin: 1px 8px;
+  padding: 8px 14px;
   font-size: 13px;
   color: var(--text-secondary);
   background: none;
@@ -24,20 +26,27 @@
   text-align: left;
   cursor: pointer;
   font-family: inherit;
+  border-radius: 0;
+  transition:
+    background var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard);
 }
 
 .settings-nav-item:hover {
-  background: var(--bg-tab-hover);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-tab-hover));
+  color: var(--text-primary);
 }
 .settings-nav-item.active {
   color: var(--text-primary);
-  background: var(--accent-light);
-  font-weight: 500;
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  font-weight: 650;
+  box-shadow: none;
 }
 
 .settings-content {
   flex: 1;
-  padding: 24px 32px;
+  padding: 28px 36px;
   overflow-y: auto;
 }
 
@@ -45,8 +54,8 @@
   margin-bottom: 32px;
 }
 .settings-section-title {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 700;
   color: var(--text-primary);
   margin-bottom: 16px;
 }
@@ -55,19 +64,19 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 0;
+  padding: 12px 0;
   border-bottom: 0.5px solid var(--border-subtle);
 }
 
 .settings-label {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-primary);
 }
 
 .settings-desc {
-  font-size: 11px;
-  color: var(--text-tertiary);
-  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 3px;
 }
 
 .settings-open-folder {
@@ -78,7 +87,7 @@
   height: 18px;
   border: none;
   background: transparent;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   cursor: pointer;
   border-radius: 3px;
   opacity: 0.6;
@@ -94,15 +103,15 @@
 }
 
 .settings-stat {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
 
 .settings-help-text {
   margin-top: 10px;
-  color: var(--text-tertiary);
-  font-size: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -111,9 +120,9 @@
   margin-bottom: 20px;
 }
 .settings-shortcuts-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-bottom: 8px;
@@ -122,8 +131,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 0;
-  font-size: 13px;
+  padding: 8px 0;
+  font-size: 14px;
   color: var(--text-primary);
   border-bottom: 0.5px solid var(--border-subtle);
 }
@@ -132,7 +141,7 @@
 }
 .settings-shortcut-row kbd {
   font-family: inherit;
-  font-size: 11px;
+  font-size: 12px;
   padding: 2px 8px;
   background: var(--bg-tab-hover);
   border: 0.5px solid var(--border);

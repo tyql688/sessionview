@@ -5,12 +5,12 @@
 }
 .count-badge {
   margin-left: auto;
-  font-size: 10px;
-  color: var(--text-tertiary);
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 .count-badge-accent {
   margin-left: auto;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--accent);
 }
 .flex-center-gap-sm {
@@ -26,8 +26,8 @@
 .loading-center {
   padding: 40px 20px;
   text-align: center;
-  color: var(--text-tertiary);
-  font-size: 13px;
+  color: var(--text-secondary);
+  font-size: 14px;
 }
 .text-danger {
   color: var(--danger);
@@ -42,7 +42,7 @@
   border-radius: 6px;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   padding: 1px 6px;
   margin-left: 2px;

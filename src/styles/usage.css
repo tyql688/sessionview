@@ -1,17 +1,17 @@
 .usage-panel {
   flex: 1;
   overflow-y: auto;
-  padding: 24px 28px 40px;
+  padding: 24px 30px 40px;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent) 4%, transparent), transparent 220px), var(--bg-editor);
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, transparent), transparent 220px), var(--bg-editor);
   color: var(--text-primary);
 }
 
 .usage-card {
-  background: color-mix(in srgb, var(--bg-editor) 92%, var(--bg-sidebar));
+  background: color-mix(in srgb, var(--bg-editor) 96%, var(--bg-sidebar));
   border: 1px solid var(--border);
-  border-radius: 16px;
-  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.02);
+  border-radius: 12px;
+  box-shadow: var(--shadow-1);
 }
 
 .usage-toolbar-card,
@@ -43,10 +43,10 @@
 }
 
 .usage-title {
-  font-size: 18px;
+  font-size: 19px;
   line-height: 1.1;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .usage-subtitle-pill,
@@ -59,7 +59,7 @@
   border-radius: 999px;
   background: var(--bg-sidebar);
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -83,12 +83,12 @@
 
 .usage-toolbar-subline {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .usage-subtitle {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .usage-status-pill,
@@ -100,7 +100,7 @@
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-sidebar) 82%, var(--bg-editor));
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.35;
 }
 
@@ -151,7 +151,7 @@
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1;
   padding: 8px 12px;
@@ -194,7 +194,7 @@
   background: color-mix(in srgb, var(--bg-editor) 92%, var(--bg-sidebar));
   color: var(--text-primary);
   border-radius: 8px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bg-editor) 72%, transparent);
@@ -237,7 +237,7 @@
 
 .usage-date-month {
   text-align: center;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.2;
   font-weight: 800;
   letter-spacing: 0;
@@ -274,7 +274,7 @@
 }
 
 .usage-date-nav:disabled {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   cursor: default;
   opacity: 0.5;
 }
@@ -292,8 +292,8 @@
 
 .usage-date-weekdays {
   margin-bottom: 4px;
-  color: var(--text-tertiary);
-  font-size: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
   font-weight: 700;
   line-height: 1;
   text-align: center;
@@ -316,7 +316,7 @@
   border-radius: 7px;
   background: transparent;
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
@@ -327,7 +327,7 @@
 }
 
 .usage-date-day.is-outside {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 .usage-date-day:hover:not(:disabled),
@@ -370,13 +370,13 @@
   align-items: center;
   gap: 8px;
   min-height: 34px;
-  padding: 0 11px;
+  padding: 0 12px;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   transition:
     border-color 0.18s ease,
@@ -426,9 +426,9 @@
   padding: 1px 6px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--bg-sidebar) 82%, transparent);
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   text-align: center;
-  font-size: 10px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -447,7 +447,7 @@
 .usage-empty-text,
 .usage-empty-inline {
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 14px;
   text-align: center;
 }
 
@@ -460,8 +460,8 @@
 .usage-summary-card {
   padding: 16px 18px;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 140px),
-    color-mix(in srgb, var(--bg-editor) 94%, var(--bg-sidebar));
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, transparent), transparent 140px),
+    color-mix(in srgb, var(--bg-editor) 97%, var(--bg-sidebar));
 }
 
 .usage-summary-row {
@@ -499,13 +499,13 @@
   font-size: clamp(28px, 3.4vw, 36px);
   line-height: 1;
   font-weight: 800;
-  letter-spacing: -0.05em;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 
 .usage-cost-detail {
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
   max-width: 460px;
 }
@@ -520,7 +520,7 @@
 .usage-summary-stat,
 .usage-breakdown-item {
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   background: color-mix(in srgb, var(--bg-sidebar) 84%, var(--bg-editor));
 }
@@ -529,7 +529,7 @@
 .usage-breakdown-label {
   display: block;
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -551,7 +551,7 @@
   min-height: 16px;
   margin-top: 4px;
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -571,7 +571,7 @@
   min-height: 0;
   padding-top: 6px;
   padding-bottom: 6px;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .usage-trend {
@@ -630,14 +630,14 @@
 }
 
 .usage-section-title {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
 }
 
 .usage-section-subtitle {
   margin-top: 4px;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .usage-metric-toggle {
@@ -658,7 +658,7 @@
 .usage-chart-hint,
 .usage-chart-inspector-date {
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .usage-chart-inspector-total {
@@ -686,7 +686,7 @@
 
 .usage-chart-inspector-item {
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .usage-chart-inspector-item strong {
@@ -698,8 +698,8 @@
 .usage-chart-wrap {
   position: relative;
   padding: 16px 16px 12px;
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--bg-sidebar) 88%, var(--bg-editor));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-sidebar) 68%, var(--bg-editor));
 }
 
 .usage-daily-bars {
@@ -744,8 +744,8 @@
   display: flex;
   gap: 4px;
   margin-top: 8px;
-  color: var(--text-tertiary);
-  font-size: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
 }
 
 .usage-bar-labels > span {
@@ -769,7 +769,7 @@
 
 .usage-legend-item {
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .usage-spotlight-list {
@@ -806,7 +806,7 @@
 }
 
 .usage-spotlight-tokens {
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -843,7 +843,7 @@
   border-radius: 999px;
   min-width: 34px;
   padding: 5px 9px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   transition:
@@ -860,7 +860,7 @@
 .usage-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -868,7 +868,7 @@
   padding: 10px 8px;
   border-bottom: 1px solid var(--border);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.01em;
   text-align: left;
@@ -888,8 +888,8 @@
 
 .usage-sort-icon {
   margin-left: 6px;
-  color: var(--text-tertiary);
-  font-size: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
 }
 
 .usage-table td {
@@ -918,8 +918,8 @@
   display: inline-block;
   width: 14px;
   margin-right: 2px;
-  color: var(--text-tertiary);
-  font-size: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
 }
 
 .usage-subrow td {
@@ -945,7 +945,7 @@
   border-radius: 999px;
   background: var(--bg-sidebar);
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   white-space: normal;
   overflow-wrap: anywhere;
@@ -966,7 +966,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--danger) 12%, var(--bg-editor));
   color: var(--danger);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.02em;
   text-transform: uppercase;
@@ -982,11 +982,11 @@
 .usage-entity-title {
   font-weight: 600;
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .usage-entity-subtitle {
-  font-size: 11px;
+  font-size: 12px;
   overflow-wrap: anywhere;
   user-select: text;
   -webkit-user-select: text;
@@ -1056,7 +1056,7 @@
  * Activity calendar — GitHub-style contribution heatmap.
  * ------------------------------------------------------------------------- */
 .usage-heatmap-card {
-  --heatmap-control-bg: color-mix(in srgb, var(--bg-sidebar) 84%, var(--bg-editor));
+  --heatmap-control-bg: color-mix(in srgb, var(--bg-sidebar) 72%, var(--bg-editor));
   --heatmap-cell-outline: color-mix(in srgb, var(--border) 74%, transparent);
   padding: 16px;
   display: flex;
@@ -1121,7 +1121,7 @@
   border-radius: 7px;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
@@ -1172,7 +1172,7 @@
   min-height: 18px;
   max-width: 58%;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.35;
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -1223,8 +1223,8 @@
 
 .usage-heatmap-month {
   grid-row: 1;
-  color: var(--text-tertiary);
-  font-size: 9px;
+  color: var(--text-secondary);
+  font-size: 11px;
   line-height: 1.2;
   white-space: nowrap;
 }
@@ -1242,8 +1242,8 @@
 .usage-heatmap-weekday {
   display: flex;
   align-items: center;
-  color: var(--text-tertiary);
-  font-size: 9px;
+  color: var(--text-secondary);
+  font-size: 11px;
   white-space: nowrap;
 }
 
@@ -1331,15 +1331,15 @@ button.usage-heatmap-cell {
 .usage-heatmap-empty {
   margin-right: auto;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .usage-heatmap-legend {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--text-tertiary);
-  font-size: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
 }
 
 .usage-heatmap-cell.is-legend {

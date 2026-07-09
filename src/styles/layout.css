@@ -1,6 +1,6 @@
 body {
   font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-primary);
   background: var(--bg-window);
   overflow: hidden;
@@ -20,7 +20,7 @@ body {
 
 /* Titlebar — uses native overlay mode (macOS traffic lights need extra left padding) */
 .titlebar {
-  height: 34px;
+  height: 36px;
   display: flex;
   align-items: center;
   padding: 0 12px;
@@ -47,8 +47,8 @@ body {
 
 .app-name {
   font-family: var(--font-family);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 650;
   line-height: 1;
   color: var(--text-secondary);
   letter-spacing: 0;
@@ -77,11 +77,11 @@ body {
 
 /* Activity Bar */
 .activity-bar {
-  width: 48px;
+  width: 52px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding-top: 8px;
+  padding-top: 10px;
   background: var(--bg-sidebar);
   border-right: 0.5px solid var(--border);
   flex-shrink: 0;
@@ -92,7 +92,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
 }
 
 .activity-bar-spacer {
@@ -103,8 +103,8 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding-bottom: 8px;
+  gap: 5px;
+  padding-bottom: 10px;
 }
 
 .activity-btn {
@@ -112,12 +112,12 @@ body {
   align-items: center;
   justify-content: center;
   width: 40px;
-  height: 36px;
+  height: 40px;
   border: none;
   background: transparent;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: 10px;
   transition:
     color 0.15s,
     background 0.15s;
@@ -125,36 +125,27 @@ body {
 }
 
 .activity-btn:hover {
-  color: var(--text-secondary);
-  background: var(--bg-tab-hover);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-tab-hover));
 }
 
 .activity-btn.active {
   color: var(--text-primary);
-}
-
-.activity-btn.active::before {
-  content: "";
-  position: absolute;
-  left: -4px;
-  top: 6px;
-  bottom: 6px;
-  width: 2px;
-  background: var(--accent);
-  border-radius: 0 1px 1px 0;
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  box-shadow: none;
 }
 
 /* Status Bar */
 .statusbar {
-  height: 26px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 12px;
   background: var(--bg-sidebar);
   border-top: 0.5px solid var(--border);
-  font-size: 11px;
-  color: var(--text-tertiary);
+  font-size: 12px;
+  color: var(--text-secondary);
   flex-shrink: 0;
 }
 
@@ -199,7 +190,7 @@ body {
 }
 
 .status-separator {
-  color: var(--text-tertiary);
+  color: color-mix(in srgb, var(--text-secondary) 70%, transparent);
 }
 
 .status-today {
@@ -237,8 +228,8 @@ body {
 .locale-btn {
   border: none;
   background: transparent;
-  color: var(--text-tertiary);
-  font-size: 11px;
+  color: var(--text-secondary);
+  font-size: 12px;
   cursor: pointer;
   padding: 1px 4px;
   border-radius: 3px;
@@ -258,8 +249,8 @@ body {
 }
 
 .locale-divider {
-  color: var(--text-tertiary);
-  font-size: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
 }
 
 .theme-toggle {
@@ -282,7 +273,7 @@ body {
   background: transparent;
   cursor: pointer;
   color: var(--accent);
-  font-size: 11px;
+  font-size: 12px;
   font-family: var(--font-family);
   padding: 0 4px;
   height: 18px;

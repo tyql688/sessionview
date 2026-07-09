@@ -1,7 +1,7 @@
 /* Explorer */
 .explorer {
-  width: 260px;
-  min-width: 160px;
+  width: 280px;
+  min-width: 220px;
   max-width: 50vw;
   display: flex;
   flex-direction: column;
@@ -29,12 +29,12 @@
 }
 
 .explorer-header {
-  padding: 10px 14px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-secondary);
+  min-height: 40px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--text-primary);
   border-bottom: 0.5px solid var(--border-subtle);
   flex-shrink: 0;
   display: flex;
@@ -52,7 +52,7 @@
 .explorer-tree {
   flex: 1;
   overflow-y: auto;
-  padding: 4px 0;
+  padding: 6px 0 8px;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -61,8 +61,8 @@
 .blocked-view {
   display: flex;
   flex-direction: column;
-  width: 260px;
-  min-width: 160px;
+  width: 280px;
+  min-width: 220px;
   max-width: 50vw;
   background: var(--bg-explorer);
   border-right: 0.5px solid var(--border);
@@ -72,24 +72,25 @@
 .blocked-list {
   flex: 1;
   overflow-y: auto;
-  padding: 4px 0;
+  padding: 6px 0 8px;
 }
 .blocked-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  font-size: 12px;
+  gap: 8px;
+  min-height: 30px;
+  padding: 6px 12px;
+  font-size: 13px;
   color: var(--text-primary);
   cursor: default;
-  border-radius: 4px;
-  margin: 0 4px;
+  border-radius: 7px;
+  margin: 1px 6px;
 }
 .blocked-item:hover {
   background: var(--bg-tab-hover);
 }
 .blocked-item-icon {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   flex-shrink: 0;
   opacity: 0.6;
 }
@@ -122,39 +123,52 @@
 .tree-node {
   display: flex;
   align-items: center;
-  gap: 4px;
-  width: 100%;
-  height: 26px;
+  gap: 6px;
+  width: calc(100% - 12px);
+  height: 30px;
   border: none;
   background: transparent;
-  color: var(--text-primary);
-  font-size: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
   cursor: pointer;
   text-align: left;
-  padding-right: 8px;
-  transition: background 0.1s;
-  letter-spacing: -0.01em;
+  padding-right: 10px;
+  transition:
+    background var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard);
+  letter-spacing: 0;
   font-family: inherit;
+  border-radius: 0;
+  margin: 1px 6px;
   user-select: none;
   -webkit-user-select: none;
 }
 
+.tree-node-directory {
+  width: calc(100% - 8px);
+  margin-inline: 4px;
+}
+
 .tree-node.selected {
-  background: rgba(0, 122, 255, 0.12);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  color: var(--text-primary);
+  box-shadow: none;
 }
 
 .tree-node.selected:hover {
-  background: rgba(0, 122, 255, 0.15);
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
 }
 
 .tree-node:hover {
-  background: var(--bg-tab-hover);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-tab-hover));
+  color: var(--text-primary);
 }
 
 .tree-node.active {
-  background: var(--accent-light);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  color: var(--text-primary);
+  box-shadow: none;
 }
 
 .tree-node.active .tree-node-icon {
@@ -181,8 +195,17 @@
   white-space: nowrap;
 }
 
+.tree-node-provider .tree-node-label,
+.tree-node-project .tree-node-label {
+  color: var(--text-primary);
+}
+
+.tree-node-session .tree-node-label {
+  font-weight: 500;
+}
+
 .tree-node-label.bold {
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .tree-provider-cluster {
@@ -193,8 +216,8 @@
 }
 
 .tree-provider-cluster-dot {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   border: 1px solid var(--bg-explorer);
 }
@@ -205,16 +228,16 @@
 
 .tree-node-time {
   flex-shrink: 0;
-  font-size: 10px;
-  color: var(--text-tertiary);
+  font-size: 11px;
+  color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
 
 .tree-node-count {
-  font-size: 10px;
-  color: var(--text-tertiary);
-  background: var(--bg-tab-hover);
-  padding: 0 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-sidebar) 80%, var(--bg-editor));
+  padding: 1px 7px;
   border-radius: 10px;
   min-width: 20px;
   text-align: center;
@@ -223,45 +246,45 @@
 }
 
 .tree-node-sidechain {
-  font-size: 11px;
-  color: var(--text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-secondary);
   flex-shrink: 0;
-  opacity: 0.7;
+  opacity: 0.82;
 }
 
 .tree-node-icon-time {
-  opacity: 0.5;
+  color: var(--text-secondary);
+  opacity: 0.85;
 }
 
 .tree-node-icon-orphan {
-  font-size: 14px;
-  color: var(--text-tertiary);
-  opacity: 0.6;
+  color: var(--text-secondary);
+  opacity: 0.85;
   width: 16px;
-  text-align: center;
 }
 
 .tree-node-icon-orphan-folder {
-  font-size: 14px;
+  display: flex;
+  align-items: center;
   color: var(--text-warning, #e5a00d);
-  opacity: 0.7;
+  opacity: 0.9;
   width: 16px;
-  text-align: center;
 }
 
 .provider-dot {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
   flex-shrink: 0;
 }
 
 .provider-dot.provider-logo {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   background: none;
   border-radius: 0;
 }
@@ -269,7 +292,7 @@
 .chevron {
   flex-shrink: 0;
   transition: transform 0.15s;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 .chevron.expanded {

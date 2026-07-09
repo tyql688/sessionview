@@ -469,6 +469,7 @@ export function Explorer(props: {
             onSessionClick={handleSessionClick}
             onSessionDblClick={handleSessionDblClick}
             sessionProviderDot={grouping === "directory"}
+            directoryGrouping={grouping === "directory"}
           />
         ))}
       </div>

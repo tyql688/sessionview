@@ -64,7 +64,7 @@
 }
 
 .timeline-markdown li::marker {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 .timeline-markdown li > :where(p, ul, ol, blockquote, table, pre, .markdown-code-block):first-child {
@@ -176,7 +176,7 @@
   justify-content: space-between;
   border-bottom: 1px solid var(--border-subtle);
   background: none;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   user-select: none;
   -webkit-user-select: none;
 }
@@ -184,8 +184,8 @@
 .timeline-markdown .markdown-code-block-lang {
   padding: 6px 12px;
   font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
+  font-size: 12px;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
@@ -201,9 +201,9 @@
   border: 0;
   border-radius: var(--radius-sm);
   background: none;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   cursor: pointer;
-  opacity: 0.55;
+  opacity: 0.72;
   transition:
     opacity var(--dur-fast) var(--ease-standard),
     color var(--dur-fast) var(--ease-standard),
@@ -313,7 +313,7 @@
   border: 0;
   border-radius: var(--radius-sm);
   background: none;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   cursor: pointer;
   opacity: 0.7;
   transition:

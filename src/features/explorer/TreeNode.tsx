@@ -50,6 +50,23 @@ function ClockIcon() {
   );
 }
 
+function SidechainIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path d="M7 5v6a4 4 0 004 4h6" />
+      <path d="M14 11l4 4-4 4" />
+    </svg>
+  );
+}
+
 function formatSessionLabel(raw: string, fallback = "Untitled"): string {
   let label = raw;
   label = label.replace(/^##\s*TASK:\s*/i, "");
@@ -106,6 +123,9 @@ export function TreeNodeComponent(props: {
   /** Directory grouping merges providers, so each session row identifies its
    * provider with a colored dot instead of the generic chat icon. */
   sessionProviderDot?: boolean;
+  /** Directory grouping is visually denser because the root already carries
+   * the working directory identity. */
+  directoryGrouping?: boolean;
 }) {
   const { t } = useI18n();
   const hasChildren = () => props.node.children.length > 0;
@@ -176,13 +196,18 @@ export function TreeNodeComponent(props: {
   };
 
   const nodeSelected = () => isSession() && isSelected(props.node.id);
+  const indentLeft = () => {
+    const unit = props.directoryGrouping ? 14 : 16;
+    const base = props.directoryGrouping ? 4 : 8;
+    return props.depth * unit + base;
+  };
 
   return (
     <div className="tree-node-wrapper">
       <Button
         variant="ghost"
-        className={`tree-node justify-start rounded-none active:translate-y-0 tree-node-${props.node.node_type}${isSession() && props.activeSessionId === props.node.id ? " active" : ""}${nodeSelected() ? " selected" : ""}`}
-        style={{ paddingLeft: `${props.depth * 16 + 8}px` }}
+        className={`tree-node justify-start rounded-none active:translate-y-0 tree-node-${props.node.node_type}${props.directoryGrouping ? " tree-node-directory" : ""}${isSession() && props.activeSessionId === props.node.id ? " active" : ""}${nodeSelected() ? " selected" : ""}`}
+        style={{ paddingLeft: `${indentLeft()}px` }}
         onClick={handleClick}
         onDoubleClick={handleDblClick}
         onContextMenu={handleContextMenu}
@@ -210,14 +235,20 @@ export function TreeNodeComponent(props: {
               ))}
             </span>
           )}
-        {isOrphanFolder() && <span className="tree-node-icon tree-node-icon-orphan-folder">⤷</span>}
+        {isOrphanFolder() && (
+          <span className="tree-node-icon tree-node-icon-orphan-folder">
+            <SidechainIcon />
+          </span>
+        )}
         {props.node.node_type === "project" && !props.node.project_path && (
           <span className="tree-node-icon tree-node-icon-time">
             <ClockIcon />
           </span>
         )}
         {props.node.node_type === "session" && isSession() && props.node.is_sidechain && !isSubagentParent() && (
-          <span className="tree-node-icon tree-node-icon-orphan">⤷</span>
+          <span className="tree-node-icon tree-node-icon-orphan">
+            <SidechainIcon />
+          </span>
         )}
         {props.node.node_type === "session" &&
           !(props.node.is_sidechain && !isSubagentParent()) &&
@@ -240,7 +271,7 @@ export function TreeNodeComponent(props: {
 
         {props.node.is_sidechain && (
           <span className="tree-node-sidechain" title={t("common.subagentSession")}>
-            ⤷
+            <SidechainIcon />
           </span>
         )}
         {isSession() && props.node.updated_at !== undefined && (
@@ -265,6 +296,7 @@ export function TreeNodeComponent(props: {
             onSessionClick={props.onSessionClick}
             onSessionDblClick={props.onSessionDblClick}
             sessionProviderDot={props.sessionProviderDot}
+            directoryGrouping={props.directoryGrouping}
           />
         ))}
       {/* Provider/project children use expand/collapse */}
@@ -285,6 +317,7 @@ export function TreeNodeComponent(props: {
             onSessionClick={props.onSessionClick}
             onSessionDblClick={props.onSessionDblClick}
             sessionProviderDot={props.sessionProviderDot}
+            directoryGrouping={props.directoryGrouping}
           />
         ))}
     </div>

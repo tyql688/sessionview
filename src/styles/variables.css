@@ -25,13 +25,13 @@
   --font-sans: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --font-family: var(--font-sans); /* legacy alias */
-  --text-2xs: 10px;
-  --text-xs: 11px;
-  --text-sm: 12px;
-  --text-md: 13px;
-  --text-base: 14px;
-  --text-lg: 16px;
-  --text-xl: 18px;
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-base: 15px;
+  --text-lg: 17px;
+  --text-xl: 19px;
 
   /* Motion */
   --dur-fast: 120ms;
@@ -44,19 +44,19 @@
 /* Light theme (default) */
 :root,
 [data-theme="light"] {
-  --bg-window: rgba(246, 246, 248, 0.95);
-  --bg-sidebar: rgba(242, 242, 245, 0.95);
-  --bg-explorer: rgba(248, 248, 250, 0.95);
+  --bg-window: rgba(247, 248, 251, 0.96);
+  --bg-sidebar: rgba(238, 241, 246, 0.96);
+  --bg-explorer: rgba(244, 247, 251, 0.96);
   --bg-editor: #ffffff;
   --bg-tab-active: #ffffff;
-  --bg-tab-hover: rgba(0, 0, 0, 0.03);
-  --border: rgba(0, 0, 0, 0.08);
-  --border-subtle: rgba(0, 0, 0, 0.04);
+  --bg-tab-hover: rgba(20, 35, 55, 0.055);
+  --border: rgba(24, 39, 57, 0.12);
+  --border-subtle: rgba(24, 39, 57, 0.07);
   --text-primary: #1d1d1f;
-  --text-secondary: #6e6e73;
-  --text-tertiary: #aeaeb2;
-  --accent: #007aff;
-  --accent-light: rgba(0, 122, 255, 0.08);
+  --text-secondary: #4d5561;
+  --text-tertiary: #747d8a;
+  --accent: #0a7cff;
+  --accent-light: rgba(10, 124, 255, 0.12);
   --claude: #d97757;
   --codex: #10b981;
   --antigravity: #4f46e5;
@@ -65,7 +65,7 @@
   --cursor: #3b82f6;
   --cc-mirror: #f472b6;
   --pi: #000000;
-  --code-bg: #f3f4f6;
+  --code-bg: #f1f4f8;
   --code-text: #24292e;
   --inline-code-bg: rgba(0, 0, 0, 0.06);
   --inline-code-text: #d63384;
@@ -96,8 +96,8 @@
   --msg-command-bg: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(5, 150, 105, 0.08));
   --msg-command-border: rgba(16, 185, 129, 0.24);
   --msg-command-shadow: 0 8px 20px rgba(16, 185, 129, 0.08);
-  --msg-assistant-bg: #f3f5f9;
-  --msg-assistant-border: rgba(0, 0, 0, 0.07);
+  --msg-assistant-bg: #f6f8fb;
+  --msg-assistant-border: rgba(24, 39, 57, 0.1);
   --code-token-default: #24292e;
   --code-token-keyword: #d73a49;
   --code-token-title: #6f42c1;
@@ -160,17 +160,17 @@
 
 /* Dark theme */
 [data-theme="dark"] {
-  --bg-window: rgba(30, 30, 32, 0.95);
-  --bg-sidebar: rgba(37, 37, 40, 0.95);
-  --bg-explorer: rgba(33, 33, 36, 0.95);
-  --bg-editor: #1e1e1e;
-  --bg-tab-active: #1e1e1e;
-  --bg-tab-hover: rgba(255, 255, 255, 0.04);
-  --border: rgba(255, 255, 255, 0.08);
-  --border-subtle: rgba(255, 255, 255, 0.04);
-  --text-primary: #e5e5e7;
-  --text-secondary: #a1a1a6;
-  --text-tertiary: #636366;
+  --bg-window: rgba(28, 30, 35, 0.96);
+  --bg-sidebar: rgba(35, 38, 44, 0.96);
+  --bg-explorer: rgba(31, 34, 40, 0.96);
+  --bg-editor: #191b20;
+  --bg-tab-active: #191b20;
+  --bg-tab-hover: rgba(255, 255, 255, 0.065);
+  --border: rgba(255, 255, 255, 0.12);
+  --border-subtle: rgba(255, 255, 255, 0.075);
+  --text-primary: #f1f3f5;
+  --text-secondary: #c0c5cd;
+  --text-tertiary: #8a929d;
   --accent: #0a84ff;
   --accent-light: rgba(10, 132, 255, 0.12);
   --claude: #e8956a;

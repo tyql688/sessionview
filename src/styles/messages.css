@@ -32,7 +32,7 @@
 }
 
 .msg-avatar-assistant {
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 /* Message Bubble */
@@ -99,7 +99,7 @@
 .msg-text h6 {
   margin: 1.1em 0 0.55em;
   line-height: 1.25;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .msg-text h1 {
@@ -220,8 +220,8 @@
 /* System Message */
 .msg-system {
   text-align: center;
-  color: var(--text-tertiary);
-  font-size: 11px;
+  color: var(--text-secondary);
+  font-size: 12px;
   padding: 4px 0;
 }
 
@@ -232,21 +232,22 @@
   gap: 4px;
   padding: 2px 10px;
   border-radius: 10px;
-  background: var(--bg-subtle);
+  background: color-mix(in srgb, var(--bg-sidebar) 70%, transparent);
+  border: 0.5px solid var(--border-subtle);
 }
 
 .msg-system-tag .sys-icon {
-  font-size: 10px;
-  opacity: 0.7;
+  font-size: 11px;
+  opacity: 0.85;
 }
 
 .msg-system-tag .sys-label {
-  font-weight: 500;
-  opacity: 0.8;
+  font-weight: 650;
+  opacity: 1;
 }
 
 .msg-system-tag .sys-detail {
-  opacity: 0.6;
+  opacity: 0.86;
   overflow-wrap: anywhere;
 }
 
@@ -328,7 +329,7 @@
 /* Table */
 .msg-table {
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 13px;
   margin: 0.4rem 0 1rem;
   width: 100%;
   max-width: 100%;
@@ -348,7 +349,7 @@
 .msg-table th {
   background: var(--bg-tab-hover);
   font-weight: 600;
-  font-size: 11px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: var(--text-secondary);
@@ -406,9 +407,9 @@
 }
 
 .msg-bubble-ts {
-  font-size: 11px;
-  color: var(--text-tertiary);
-  opacity: 0.7;
+  font-size: 12px;
+  color: var(--text-secondary);
+  opacity: 0.82;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   user-select: none;
@@ -438,7 +439,7 @@
 
 .msg-load-more-btn {
   font-family: inherit;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--accent);
   background: var(--bg-tab-hover);
   border: 0.5px solid var(--border);
@@ -455,8 +456,8 @@
 /* Time Separators */
 .msg-time-separator {
   text-align: center;
-  font-size: 11px;
-  color: var(--text-tertiary);
+  font-size: 12px;
+  color: var(--text-secondary);
   padding: 8px 0;
   position: relative;
 }
@@ -487,9 +488,9 @@
 }
 
 .msg-model-label {
-  font-size: 11px;
-  color: var(--text-tertiary);
-  opacity: 0.7;
+  font-size: 12px;
+  color: var(--text-secondary);
+  opacity: 0.9;
   font-variant-numeric: tabular-nums;
 }
 
@@ -497,7 +498,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
   font-weight: 500;
