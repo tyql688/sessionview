@@ -57,6 +57,7 @@ export function EditorArea(props: {
   }, [tabIdsKey]);
 
   const modKey = isMac ? "\u2318" : "Ctrl+";
+  const shiftKey = isMac ? "\u21E7" : "Shift+";
 
   return (
     <div
@@ -157,7 +158,11 @@ export function EditorArea(props: {
               )}
             <div className="editor-empty-shortcuts">
               <span className="editor-shortcut-hint">
-                <kbd>⇧{modKey}F</kbd> {t("keyboard.search")}
+                <kbd>
+                  {modKey}
+                  {shiftKey}F
+                </kbd>{" "}
+                {t("keyboard.search")}
               </span>
               <span className="editor-shortcut-hint">
                 <kbd>{modKey}1-9</kbd> {t("keyboard.switchTab")}
