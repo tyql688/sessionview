@@ -1,7 +1,7 @@
 {
   "name": "sessionview",
   "private": true,
-  "version": "0.5.3",
+  "version": "0.6.0",
   "description": "Desktop app for browsing local AI coding sessions",
   "author": "yury <yury.zero.21@gmail.com>",
   "type": "module",
