@@ -415,8 +415,8 @@ export function SessionView(props: {
   }, [loadOlder, loadNewer]);
   useEffect(() => () => cancelAnimationFrame(scrollRafRef.current), []);
   // Paint-ahead band: `content-visibility: auto` skips off-screen paint, which
-  // flashes blank on fast scroll. An IntersectionObserver with a tall rootMargin
-  // force-paints rows within ~1.5 screens of the viewport (and lets their
+  // flashes blank on fast scroll. A wide IntersectionObserver rootMargin
+  // force-paints rows several screens ahead of the viewport (and lets their
   // estimate→real height correction settle off-screen), so a row is ready before
   // it scrolls in. Re-observes when the row set changes (pagination / filter).
   useEffect(() => {
@@ -428,7 +428,7 @@ export function SessionView(props: {
           (entry.target as HTMLElement).classList.toggle("paint-ahead", entry.isIntersecting);
         }
       },
-      { root, rootMargin: "1500px 0px 1500px 0px" },
+      { root, rootMargin: "5000px 0px 5000px 0px" },
     );
     for (const row of root.querySelectorAll(".session-entry")) io.observe(row);
     return () => io.disconnect();
