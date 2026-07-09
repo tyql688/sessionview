@@ -10,6 +10,13 @@ vi.mock("@/features/session/timeline/Markdown", () => ({
   Markdown: (props: { text: string }) => markdownMock(props),
 }));
 
+vi.mock("@/features/session/MessageBubble/ImagePreview", () => ({
+  ImagePreview: () => null,
+  LocalImage: () => null,
+  RemoteImage: () => null,
+  isLocalPath: (src: string) => src.startsWith("/"),
+}));
+
 import { MessageBubble } from "@/features/session/MessageBubble/index";
 
 function message(overrides: Partial<Message>): Message {

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock tauri plugins before importing the store
 vi.mock("@tauri-apps/plugin-updater", () => ({
@@ -12,6 +12,12 @@ vi.mock("@tauri-apps/plugin-process", () => ({
 describe("updater store", () => {
   beforeEach(() => {
     vi.resetModules();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it("starts in idle phase", async () => {

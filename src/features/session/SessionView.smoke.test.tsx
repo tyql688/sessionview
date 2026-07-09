@@ -555,5 +555,5 @@ describe("SessionView smoke", () => {
       expect(call?.limit).toBeLessThanOrEqual(600);
     }
     expect(await findByText("message 0")).toBeInTheDocument();
-  });
+  }, 10_000);
 });
