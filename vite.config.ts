@@ -10,6 +10,12 @@ export default defineConfig({
       "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
+  // Lazy routes contain several large third-party modules. Scan all app
+  // sources up front so discovering one later cannot invalidate in-flight
+  // dynamic imports and force the Tauri webview through an error-boundary reload.
+  optimizeDeps: {
+    entries: ["src/**/*.{ts,tsx}", "!src/**/*.test.{ts,tsx}"],
+  },
   plugins: [
     tailwindcss(),
     react(),
