@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.6.1] - Unreleased
+
+### Added
+
+- Codex 0.144 multi-agent sessions: nested subagents keep their hierarchy in
+  the tree at any depth, spawn/send tool rows link straight to the child
+  session, reasoning renders as collapsible thinking blocks, and inter-agent
+  mail shows its readable routing header.
+- Session-wide role counts in the filter toolbar — fixed numbers for the whole
+  session instead of counts that grew while scrolling.
+- Common keyboard shortcuts: Cmd+B toggles the sidebar, Cmd+D toggles
+  favorite, Cmd+Shift+T reopens closed tabs, Cmd+G / Cmd+Shift+G step through
+  search matches, Cmd+P opens global search.
+
+### Changed
+
+- Subagents now collapse under their parent session by default; the chevron
+  expands them level by level.
+- Keyboard shortcut hints render with platform-correct modifier order from a
+  single manifest shared by the overlay and Settings (#20).
+
+### Fixed
+
+- Rebuilt the session timeline on a bottom-anchored (column-reverse) scroller:
+  fast scrolling no longer blanks or teleports at the top edge, bubbles no
+  longer reflow after opening, and loading history lands without freezing the
+  frame. Scroll anchoring is now handled explicitly for WKWebView.
+- Cmd+Backspace typed inside a text field no longer opens the session-delete
+  confirm, and single-letter shortcuts work with CapsLock on.
+
 ## [0.6.0] - 2026-07-09
 
 0.6.0 is a major refresh of SessionView: a new React-based desktop UI, stronger
