@@ -1,7 +1,15 @@
 import type { Message, ToolMetadata } from "@/lib/types";
 
 /** Providers where subagents are stored as separate session files (can be opened). */
-export const SUBAGENT_FILE_PROVIDERS = new Set(["claude", "codex", "kimi", "cursor", "cc-mirror", "antigravity"]);
+export const SUBAGENT_FILE_PROVIDERS = new Set([
+  "claude",
+  "codex",
+  "kimi",
+  "cursor",
+  "cc-mirror",
+  "antigravity",
+  "grok",
+]);
 
 /**
  * Subagent metadata extracted from an Agent tool message. Each field is

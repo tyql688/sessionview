@@ -122,6 +122,7 @@ mod tests {
                 Provider::Kimi,
                 Provider::Cursor,
                 Provider::Pi,
+                Provider::Grok,
             ]
         );
         assert_eq!(snapshots.len(), Provider::all().len());

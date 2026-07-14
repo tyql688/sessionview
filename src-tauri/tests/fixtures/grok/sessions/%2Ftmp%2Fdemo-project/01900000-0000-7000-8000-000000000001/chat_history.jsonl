@@ -1,0 +1,18 @@
+{"type":"system","content":"You are Grok. You are an interactive CLI tool."}
+{"type":"user","content":[{"type":"text","text":"<user_info>\nOS Version: macos\nWorkspace Path: /tmp/demo-project\n</user_info>"}]}
+{"type":"user","content":[{"type":"text","text":"<system-reminder>\nMCP servers connected: none\n</system-reminder>"}],"synthetic_reason":"system_reminder"}
+{"type":"user","content":[{"type":"text","text":"<user_query>\ncheck the demo files\n</user_query>"}],"prompt_index":0}
+{"type":"reasoning","id":"rs_00000000-0000-0000-0000-000000000001","summary":[{"type":"summary_text","text":"The user wants me to check the files. I should list the directory."}],"encrypted_content":"AAAA","status":"completed"}
+{"type":"assistant","content":"Let me check the files.","model_id":"grok-4.5","model_fingerprint":"fp_demo","reasoning_effort":"high"}
+{"type":"assistant","content":"","model_id":"grok-4.5","model_fingerprint":"fp_demo","reasoning_effort":"high","tool_calls":[{"id":"call-00000000-0000-0000-0000-000000000001-0","name":"run_terminal_command","arguments":"{\"command\":\"ls -la\",\"description\":\"List files\"}"},{"id":"call-00000000-0000-0000-0000-000000000001-1","name":"read_file","arguments":"{\"target_file\":\"/tmp/demo-project/README.md\"}"}]}
+{"type":"tool_result","tool_call_id":"call-00000000-0000-0000-0000-000000000001-0","content":"total 8\n-rw-r--r-- README.md"}
+{"type":"tool_result","tool_call_id":"call-00000000-0000-0000-0000-000000000001-1","content":"# Demo Project\n"}
+{"type":"assistant","content":"The project contains a single README.md file.","model_id":"grok-4.5","model_fingerprint":"fp_demo","reasoning_effort":"high"}
+{"type":"assistant","content":"","model_id":"grok-4.5","model_fingerprint":"fp_demo","reasoning_effort":"high","tool_calls":[{"id":"call-00000000-0000-0000-0000-000000000001-2","name":"spawn_subagent","arguments":"{\"description\":\"Demo child task\",\"prompt\":\"Count the lines in README.md\",\"subagent_type\":\"general-purpose\"}"}]}
+{"type":"tool_result","tool_call_id":"call-00000000-0000-0000-0000-000000000001-2","content":"Subagent started in background.\nsubagent_id: 01900000-0000-7000-8000-000000000002\ntype: general-purpose\ndescription: Demo child task"}
+{"type":"user","content":[{"type":"text","text":"<image_files>\nThe following images were provided by the user and saved to the workspace for future use:\n1. /tmp/fake-home/.grok/sessions/%2Ftmp%2Fdemo-project/01900000-0000-7000-8000-000000000001/assets/image-00000000-0000-0000-0000-000000000001.png\n\nThese images can be copied elsewhere if needed.\n</image_files>"},{"type":"image","url":"data:image/png;base64,AAAA"}],"prompt_index":1}
+{"type":"assistant","content":"Nice screenshot — the layout looks fine.","model_id":"grok-4.5","model_fingerprint":"fp_demo","reasoning_effort":"high"}
+{"type":"user","content":[{"type":"text","text":"<user_info>\nOS Version: macos\nWorkspace Path: /tmp/demo-project\n</user_info>"}],"synthetic_reason":"compaction_meta"}
+{"type":"user","content":[{"type":"text","text":"<user_query>\nlegacy prompt preserved by compaction\n</user_query>"}]}
+{"type":"user","content":[{"type":"text","text":"This session is being continued from a previous conversation that ran out of context. Summary: scaffolded the demo project."}],"synthetic_reason":"compaction_meta"}
+{"type":"assistant","content":"Continuing from the compacted context.","model_id":"grok-4.5","model_fingerprint":"fp_demo","reasoning_effort":"high"}

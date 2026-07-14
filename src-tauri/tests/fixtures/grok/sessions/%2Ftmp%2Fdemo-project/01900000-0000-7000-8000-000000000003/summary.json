@@ -1,0 +1,19 @@
+{
+  "info": {
+    "id": "01900000-0000-7000-8000-000000000003",
+    "cwd": "/tmp/demo-project"
+  },
+  "session_summary": "hello",
+  "created_at": "2026-07-02T08:00:00.000000Z",
+  "updated_at": "2026-07-02T09:00:00.000000Z",
+  "num_messages": 6,
+  "num_chat_messages": 6,
+  "current_model_id": "grok-4.5",
+  "chat_format_version": 1,
+  "grok_home": "/tmp/fake-home/.grok",
+  "last_active_at": "2026-07-02T09:00:00.000000Z",
+  "generated_title": "Compacted demo session",
+  "agent_name": "grok-build-plan",
+  "sandbox_profile": "off",
+  "reasoning_effort": "high"
+}

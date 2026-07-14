@@ -71,6 +71,7 @@ describe("providerSnapshots store", () => {
       "kimi",
       "cursor",
       "pi",
+      "grok",
     ]);
   });
 

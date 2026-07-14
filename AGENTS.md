@@ -5,7 +5,8 @@ repository. `CLAUDE.md` includes this file via `@AGENTS.md`.
 
 SessionView is a desktop app that brings local AI coding sessions from many
 tools — Claude Code, Codex, Antigravity, Kimi Code, Cursor, OpenCode, CC-Mirror,
-and Pi — into one place to read, search, analyze usage, export, and resume.
+Pi, and Grok Build — into one place to read, search, analyze usage, export, and
+resume.
 Stack: Tauri 2 + React 19 (with React Compiler) + Rust + SQLite (FTS5).
 Enforcement-mapped coding standards live in `style/ts.md` and `style/rust.md`;
 when this file and those disagree, those win.

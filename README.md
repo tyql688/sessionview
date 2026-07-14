@@ -33,7 +33,7 @@ Your data stays local. SessionView builds a local index for search and analytics
 
 ## What you can do
 
-- **Browse one workspace across tools**: Claude Code, Codex CLI, Antigravity, Kimi Code, Cursor CLI, OpenCode, CC-Mirror, and Pi.
+- **Browse one workspace across tools**: Claude Code, Codex CLI, Antigravity, Kimi Code, Cursor CLI, OpenCode, CC-Mirror, Pi, and Grok Build.
 - **Read sessions like documents**: Markdown, code blocks, Mermaid, KaTeX, inline images, reasoning blocks, and structured tool-call output.
 - **Search without digging through folders**: global full-text search plus in-session find.
 - **Understand the work**: token timelines, tool-call mix, context/cache pressure, cost trends, and model breakdowns.
@@ -59,7 +59,7 @@ Track daily spend, model-level token totals, cache reads/writes, and provider tr
 
 ## Supported Tools
 
-SessionView currently reads local history from Claude Code, Codex CLI, Antigravity, Kimi Code, Cursor CLI, OpenCode, CC-Mirror, and Pi.
+SessionView currently reads local history from Claude Code, Codex CLI, Antigravity, Kimi Code, Cursor CLI, OpenCode, CC-Mirror, Pi, and Grok Build.
 
 When a tool exposes enough information, SessionView can also resume the selected session in the matching terminal agent. CC-Mirror follows its configured variant. Parsing depth depends on what each tool records locally, but SessionView normalizes messages, tool calls, reasoning/thinking blocks, token usage, images, and child sessions wherever the source data exposes them.
 

@@ -1,0 +1,6 @@
+{"type":"system","content":"You are Grok."}
+{"type":"user","content":[{"type":"text","text":"<user_info>\nOS Version: macos\nWorkspace Path: /tmp/demo-project\n</user_info>"}],"synthetic_reason":"compaction_meta"}
+{"type":"user","content":[{"type":"text","text":"<user_query>\nlist the demo files\n</user_query>"}]}
+{"type":"user","content":[{"type":"text","text":"This session is being continued from a previous conversation that ran out of context. Summary: greeted and listed files."}],"synthetic_reason":"compaction_meta"}
+{"type":"user","content":[{"type":"text","text":"<user_query>\nwhat next?\n</user_query>"}],"prompt_index":2}
+{"type":"assistant","content":"Continuing after compaction.","model_id":"grok-4.5","model_fingerprint":"fp_demo","reasoning_effort":"high"}

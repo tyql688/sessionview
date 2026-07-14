@@ -34,7 +34,8 @@
           "$HOME/.kimi-code/**",
           "$HOME/.cursor/**",
           "$HOME/.cc-mirror/**",
-          "$HOME/.pi/**"
+          "$HOME/.pi/**",
+          "$HOME/.grok/**"
         ]
       }
     }

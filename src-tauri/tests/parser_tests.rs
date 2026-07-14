@@ -8,6 +8,7 @@ use sessionview_lib::provider::{SessionProvider, SourceState};
 use sessionview_lib::providers::antigravity::AntigravityProvider;
 use sessionview_lib::providers::claude::ClaudeProvider;
 use sessionview_lib::providers::codex::CodexProvider;
+use sessionview_lib::providers::grok::GrokProvider;
 use sessionview_lib::providers::kimi::KimiProvider;
 use sessionview_lib::providers::opencode::OpenCodeProvider;
 
@@ -2169,4 +2170,461 @@ fn round2_generated_tool_metadata_smoke_test() {
             .as_deref(),
         Some("file_patch")
     );
+}
+
+// ---------------------------------------------------------------------------
+// Grok parser tests (fixtures under tests/fixtures/grok/)
+// ---------------------------------------------------------------------------
+
+fn grok_fixture_provider() -> GrokProvider {
+    GrokProvider::with_root(fixtures_dir().join("grok"))
+}
+
+const GROK_BASIC_ID: &str = "01900000-0000-7000-8000-000000000001";
+
+fn parse_grok_fixture_session(session_id: &str) -> sessionview_lib::provider::ParsedSession {
+    let provider = grok_fixture_provider();
+    let sessions = provider.scan_all().expect("grok fixture scan must succeed");
+    sessions
+        .into_iter()
+        .find(|s| s.meta.id == session_id)
+        .unwrap_or_else(|| panic!("session {session_id} missing from grok fixture scan"))
+}
+
+#[test]
+fn grok_scans_fixture_session_with_summary_metadata() {
+    let session = parse_grok_fixture_session(GROK_BASIC_ID);
+    assert_eq!(session.meta.provider, Provider::Grok);
+    assert_eq!(session.meta.title, "Demo project check");
+    assert_eq!(session.meta.project_path, "/tmp/demo-project");
+    assert_eq!(session.meta.project_name, "demo-project");
+    assert_eq!(session.meta.model.as_deref(), Some("grok-4.5"));
+    assert!(!session.meta.is_sidechain);
+    assert!(session.meta.created_at > 0);
+    assert!(session.meta.updated_at >= session.meta.created_at);
+    assert_eq!(session.parse_warning_count, 0);
+}
+
+#[test]
+fn grok_skips_synthetic_context_and_strips_user_query_wrapper() {
+    let session = parse_grok_fixture_session(GROK_BASIC_ID);
+    let users: Vec<&Message> = session
+        .messages
+        .iter()
+        .filter(|m| m.role == MessageRole::User)
+        .collect();
+    // <user_info> preamble and system reminder are CLI-injected, not user
+    // content — prompt_index-bearing entries survive, plus compaction-
+    // preserved prompts recognized by their <user_query> wrapper.
+    assert_eq!(users.len(), 3);
+    assert_eq!(users[0].content, "check the demo files");
+    assert_eq!(users[2].content, "legacy prompt preserved by compaction");
+    assert!(
+        users[2].timestamp.is_none(),
+        "index-less prompts have no anchor"
+    );
+    // Timestamp anchored from updates.jsonl user_message_chunk (epoch 1782892830).
+    assert_eq!(
+        users[0].timestamp.as_deref(),
+        Some("2026-07-01T08:00:30+00:00")
+    );
+}
+
+#[test]
+fn grok_reasoning_summary_emitted_as_thinking_system_message() {
+    let session = parse_grok_fixture_session(GROK_BASIC_ID);
+    let thinking = session
+        .messages
+        .iter()
+        .find(|m| m.role == MessageRole::System && m.content.starts_with("[thinking]\n"))
+        .expect("reasoning summary must surface as [thinking] system message");
+    assert!(thinking.content.contains("list the directory"));
+}
+
+#[test]
+fn grok_tool_calls_merge_results_and_map_canonical_names() {
+    let session = parse_grok_fixture_session(GROK_BASIC_ID);
+    let bash = session
+        .messages
+        .iter()
+        .find(|m| m.tool_name.as_deref() == Some("Bash"))
+        .expect("run_terminal_command must canonicalize to Bash");
+    assert!(bash.content.contains("README.md"), "result must be merged");
+    assert_eq!(
+        bash.timestamp.as_deref(),
+        Some("2026-07-01T08:01:00+00:00"),
+        "tool timestamp anchored from updates.jsonl tool_call"
+    );
+    let read = session
+        .messages
+        .iter()
+        .find(|m| m.tool_name.as_deref() == Some("Read"))
+        .expect("read_file must canonicalize to Read");
+    assert!(read.content.contains("# Demo Project"));
+}
+
+#[test]
+fn grok_usage_events_from_turn_completed_model_usage() {
+    let session = parse_grok_fixture_session(GROK_BASIC_ID);
+    assert_eq!(session.usage_events.len(), 1);
+    let event = &session.usage_events[0];
+    assert_eq!(event.model, "grok-4.5");
+    assert_eq!(event.input_tokens, 13312);
+    assert_eq!(event.output_tokens, 106);
+    assert_eq!(event.cache_read_input_tokens, 11264);
+
+    // compute_token_stats keeps input/cache_read disjoint (input includes cache).
+    let provider = grok_fixture_provider();
+    let rows = provider.compute_token_stats(&session, None, None);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].input_tokens, 13312 - 11264);
+    assert_eq!(rows[0].output_tokens, 106);
+    assert_eq!(rows[0].cache_read_tokens, 11264);
+    assert_eq!(rows[0].turn_count, 1);
+}
+
+#[test]
+fn grok_load_messages_totals_come_from_usage_events() {
+    let provider = grok_fixture_provider();
+    let session = parse_grok_fixture_session(GROK_BASIC_ID);
+    let loaded = provider
+        .load_messages(GROK_BASIC_ID, &session.meta.source_path)
+        .expect("grok fixture must load messages");
+    assert_eq!(loaded.token_totals.input_tokens, 13312 - 11264);
+    assert_eq!(loaded.token_totals.output_tokens, 106);
+    assert_eq!(loaded.token_totals.cache_read_tokens, 11264);
+}
+
+#[test]
+fn grok_scan_incremental_short_circuits_unchanged_and_reparses_on_title_change() {
+    use std::collections::HashMap;
+
+    let provider = grok_fixture_provider();
+
+    let fresh_state_of = |session: &sessionview_lib::provider::ParsedSession| SourceState {
+        size: session.meta.file_size_bytes,
+        mtime: {
+            let metadata =
+                fs::metadata(&session.meta.source_path).expect("fixture chat file must stat");
+            let modified = metadata.modified().expect("fixture mtime must exist");
+            modified
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("mtime after epoch")
+                .as_secs() as i64
+        },
+        title: Some(session.meta.title.clone()),
+    };
+
+    // All fixture sessions unchanged + matching titles → full short-circuit.
+    let sessions = provider.scan_all().expect("grok fixture scan");
+    let mut known = HashMap::new();
+    for session in &sessions {
+        known.insert(session.meta.source_path.clone(), fresh_state_of(session));
+    }
+    let outcome = provider.scan_incremental(&known).expect("incremental scan");
+    assert!(outcome.parsed.is_empty());
+    assert_eq!(outcome.unchanged_source_paths.len(), sessions.len());
+
+    // Unchanged file but stored title disagrees with summary.json → that
+    // session (and only that session) is promoted to a re-parse.
+    let parent_path = sessions
+        .iter()
+        .find(|s| s.meta.id == GROK_BASIC_ID)
+        .expect("parent fixture present")
+        .meta
+        .source_path
+        .clone();
+    let mut stale = known.clone();
+    stale.get_mut(&parent_path).expect("parent state").title = Some("old stored title".to_string());
+    let outcome = provider.scan_incremental(&stale).expect("incremental scan");
+    assert_eq!(outcome.parsed.len(), 1);
+    assert_eq!(outcome.parsed[0].meta.id, GROK_BASIC_ID);
+    assert_eq!(outcome.unchanged_source_paths.len(), sessions.len() - 1);
+}
+
+const GROK_CHILD_ID: &str = "01900000-0000-7000-8000-000000000002";
+
+#[test]
+fn grok_subagent_child_links_to_parent_and_uses_description_title() {
+    let child = parse_grok_fixture_session(GROK_CHILD_ID);
+    assert!(child.meta.is_sidechain);
+    assert_eq!(child.meta.parent_id.as_deref(), Some(GROK_BASIC_ID));
+    // Parent-side meta.json description beats the child's generated_title.
+    assert_eq!(child.meta.title, "Demo child task");
+}
+
+#[test]
+fn grok_parent_surfaces_child_session_ids_and_agent_id_metadata() {
+    let parent = parse_grok_fixture_session(GROK_BASIC_ID);
+    assert_eq!(parent.child_session_ids, vec![GROK_CHILD_ID.to_string()]);
+
+    let spawn = parent
+        .messages
+        .iter()
+        .find(|m| m.tool_name.as_deref() == Some("Agent"))
+        .expect("spawn_subagent must canonicalize to Agent");
+    assert!(spawn.content.contains("Subagent started"));
+    let structured = spawn
+        .tool_metadata
+        .as_ref()
+        .and_then(|m| m.structured.as_ref())
+        .expect("spawn result must carry structured metadata");
+    assert_eq!(
+        structured.get("agentId").and_then(|v| v.as_str()),
+        Some(GROK_CHILD_ID),
+        "subagent_id line must be promoted to structured.agentId"
+    );
+}
+
+#[test]
+fn grok_deletion_plan_trashes_children_and_sweeps_both_session_dirs() {
+    use sessionview_lib::provider::FileAction;
+
+    let provider = grok_fixture_provider();
+    let parent = parse_grok_fixture_session(GROK_BASIC_ID);
+    let child = parse_grok_fixture_session(GROK_CHILD_ID);
+
+    let plan = provider.deletion_plan(&parent.meta, std::slice::from_ref(&child.meta));
+    assert_eq!(plan.file_action, FileAction::Remove);
+    assert_eq!(plan.child_plans.len(), 1);
+    assert_eq!(plan.child_plans[0].id, GROK_CHILD_ID);
+    assert_eq!(plan.child_plans[0].file_action, FileAction::Remove);
+    let parent_dir = PathBuf::from(&parent.meta.source_path)
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let child_dir = PathBuf::from(&child.meta.source_path)
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    assert_eq!(plan.cleanup_dirs, vec![parent_dir, child_dir]);
+}
+
+#[test]
+fn grok_turn_usage_attached_to_final_assistant_message() {
+    let session = parse_grok_fixture_session(GROK_BASIC_ID);
+    let closing = session
+        .messages
+        .iter()
+        .find(|m| m.content.contains("single README.md"))
+        .expect("turn-closing assistant message present");
+    let usage = closing
+        .token_usage
+        .as_ref()
+        .expect("turn totals must attach to the turn's final assistant message");
+    // inputTokens includes cachedReadTokens — stored disjoint.
+    assert_eq!(usage.input_tokens, 13312 - 11264);
+    assert_eq!(usage.output_tokens, 106);
+    assert_eq!(usage.cache_read_input_tokens, 11264);
+    assert_eq!(usage.cache_creation_input_tokens, 0);
+    // Turn-end timestamp lands on the message that had none.
+    assert_eq!(
+        closing.timestamp.as_deref(),
+        Some("2026-07-01T08:02:00+00:00")
+    );
+    // Mid-turn assistant messages carry no usage.
+    let mid_turn = session
+        .messages
+        .iter()
+        .find(|m| m.content == "Let me check the files.")
+        .expect("mid-turn assistant message present");
+    assert!(mid_turn.token_usage.is_none());
+}
+
+#[test]
+fn grok_image_prompt_pairs_saved_asset_paths() {
+    let session = parse_grok_fixture_session(GROK_BASIC_ID);
+    let image_prompt = session
+        .messages
+        .iter()
+        .filter(|m| m.role == MessageRole::User)
+        .nth(1)
+        .expect("image prompt present");
+    assert_eq!(
+        image_prompt.content,
+        "[Image: source: /tmp/fake-home/.grok/sessions/%2Ftmp%2Fdemo-project/01900000-0000-7000-8000-000000000001/assets/image-00000000-0000-0000-0000-000000000001.png]",
+        "image block must pair with the <image_files> saved path; the CLI-generated list text is dropped"
+    );
+}
+
+#[test]
+fn grok_task_output_result_suppresses_duplicate_raw_output() {
+    let session = parse_grok_fixture_session(GROK_BASIC_ID);
+    // The spawn tool's Agent result keeps its kind; TaskOutput-style results
+    // (get_command_or_subagent_output) mark terminal_output so the UI hides
+    // the raw copy that the result detail already shows. Covered here via
+    // metadata on a synthetic enrich to avoid inflating the fixture.
+    use sessionview_lib::tool_metadata::{
+        build_tool_metadata, enrich_tool_metadata, ToolCallFacts, ToolResultFacts,
+    };
+    let mut metadata = build_tool_metadata(ToolCallFacts {
+        provider: Provider::Grok,
+        raw_name: "get_command_or_subagent_output",
+        input: None,
+        call_id: Some("call-1"),
+        assistant_id: None,
+    });
+    assert_eq!(metadata.canonical_name, "TaskOutput");
+    let result = serde_json::json!({"toolCallId": "call-1", "output": "=== Task done ==="});
+    enrich_tool_metadata(
+        &mut metadata,
+        ToolResultFacts {
+            raw_result: Some(&result),
+            is_error: None,
+            status: None,
+            artifact_path: None,
+        },
+    );
+    assert_eq!(metadata.result_kind.as_deref(), Some("terminal_output"));
+    let _ = session;
+}
+
+#[test]
+fn grok_non_terminal_results_stay_out_of_structured_output() {
+    let session = parse_grok_fixture_session(GROK_BASIC_ID);
+    // Glob (list-like) results render as the raw output block only —
+    // structured.output would duplicate the same text in the detail lines.
+    let read = session
+        .messages
+        .iter()
+        .find(|m| m.tool_name.as_deref() == Some("Read"))
+        .expect("Read tool message present");
+    let structured = read
+        .tool_metadata
+        .as_ref()
+        .and_then(|m| m.structured.as_ref());
+    assert!(
+        structured.and_then(|s| s.get("output")).is_none(),
+        "non-terminal tools must not mirror raw output into structured"
+    );
+    // Bash keeps output in structured: its terminal_output kind suppresses
+    // the raw copy, so the detail line is the only render.
+    let bash = session
+        .messages
+        .iter()
+        .find(|m| m.tool_name.as_deref() == Some("Bash"))
+        .expect("Bash tool message present");
+    let bash_meta = bash.tool_metadata.as_ref().expect("bash metadata");
+    assert_eq!(bash_meta.result_kind.as_deref(), Some("terminal_output"));
+    assert!(bash_meta
+        .structured
+        .as_ref()
+        .and_then(|s| s.get("output"))
+        .is_some());
+}
+
+#[test]
+fn grok_compaction_summary_surfaces_and_reinjected_context_is_skipped() {
+    let session = parse_grok_fixture_session(GROK_BASIC_ID);
+    let compaction = session
+        .messages
+        .iter()
+        .find(|m| m.role == MessageRole::System && m.content.starts_with("[Compaction] "))
+        .expect("compaction summary must surface as a system message");
+    assert!(compaction.content.contains("scaffolded the demo project"));
+    // The compaction_meta re-injection of <user_info> stays hidden.
+    assert!(!session
+        .messages
+        .iter()
+        .any(|m| m.content.contains("<user_info>")));
+}
+
+const GROK_COMPACTED_ID: &str = "01900000-0000-7000-8000-000000000003";
+
+#[test]
+fn grok_compacted_session_reconstructs_history_from_updates() {
+    let session = parse_grok_fixture_session(GROK_COMPACTED_ID);
+    let contents: Vec<&str> = session
+        .messages
+        .iter()
+        .map(|m| m.content.as_str())
+        .collect();
+
+    // Pre-compaction turns rebuilt from updates.jsonl, in order, ahead of
+    // the surviving transcript.
+    let hello = contents
+        .iter()
+        .position(|c| *c == "hello")
+        .expect("reconstructed prompt 0");
+    let listing = contents
+        .iter()
+        .position(|c| c.contains("demo project contains README.md"))
+        .expect("reconstructed assistant answer");
+    let compaction_note = contents
+        .iter()
+        .position(|c| c.starts_with("[Compaction] "))
+        .expect("compaction summary note");
+    let tail = contents
+        .iter()
+        .position(|c| *c == "what next?")
+        .expect("surviving prompt");
+    assert!(hello < listing && listing < compaction_note && compaction_note < tail);
+
+    // Reconstructed tool call: canonical name + result from rawOutput variant.
+    let glob = session
+        .messages
+        .iter()
+        .find(|m| m.tool_name.as_deref() == Some("Glob"))
+        .expect("reconstructed list_dir call");
+    assert!(glob.content.contains("README.md"));
+    assert_eq!(
+        glob.timestamp.as_deref(),
+        Some("2026-07-02T08:01:50+00:00"),
+        "tool timestamp from updates wrapper"
+    );
+
+    // The verbatim prompt grok preserved in the compacted transcript
+    // ("list the demo files") must not appear twice.
+    assert_eq!(
+        contents
+            .iter()
+            .filter(|c| **c == "list the demo files")
+            .count(),
+        1,
+        "preserved verbatim prompt must not duplicate the reconstruction"
+    );
+
+    // Reconstructed turns keep their usage.
+    let greeting = session
+        .messages
+        .iter()
+        .find(|m| m.content == "Hi! How can I help?")
+        .expect("reconstructed greeting");
+    let usage = greeting.token_usage.as_ref().expect("turn usage attached");
+    assert_eq!(usage.input_tokens, 1000 - 800);
+    assert_eq!(usage.output_tokens, 20);
+    assert_eq!(usage.cache_read_input_tokens, 800);
+
+    // All three turns land in usage_events for the stats layer.
+    assert_eq!(session.usage_events.len(), 3);
+}
+
+#[test]
+fn grok_restored_session_parses_without_summary_json() {
+    // Trash-restore brings back only chat_history.jsonl; id and cwd are
+    // recovered from the path (dir name / percent-encoded parent dir).
+    let tmp = tempfile::tempdir().unwrap();
+    let session_dir = tmp
+        .path()
+        .join("sessions")
+        .join("%2Ftmp%2Fdemo-project")
+        .join("01900000-0000-7000-8000-00000000000f");
+    fs::create_dir_all(&session_dir).unwrap();
+    fs::write(
+        session_dir.join("chat_history.jsonl"),
+        concat!(
+            "{\"type\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<user_query>\\nrestored prompt\\n</user_query>\"}],\"prompt_index\":0}\n",
+            "{\"type\":\"assistant\",\"content\":\"Restored answer.\",\"model_id\":\"grok-4.5\"}\n",
+        ),
+    )
+    .unwrap();
+
+    let provider = GrokProvider::with_root(tmp.path().to_path_buf());
+    let sessions = provider.scan_all().expect("scan restored session");
+    assert_eq!(sessions.len(), 1);
+    let meta = &sessions[0].meta;
+    assert_eq!(meta.id, "01900000-0000-7000-8000-00000000000f");
+    assert_eq!(meta.project_path, "/tmp/demo-project");
+    assert_eq!(meta.title, "restored prompt");
+    assert!(meta.created_at > 0);
 }

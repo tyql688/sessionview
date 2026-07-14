@@ -45,6 +45,10 @@ fn build_pi_runtime() -> Option<Box<dyn SessionProvider>> {
     crate::providers::pi::PiProvider::new().map(|p| Box::new(p) as Box<dyn SessionProvider>)
 }
 
+fn build_grok_runtime() -> Option<Box<dyn SessionProvider>> {
+    crate::providers::grok::GrokProvider::new().map(|p| Box::new(p) as Box<dyn SessionProvider>)
+}
+
 fn provider_catalog() -> &'static [ProviderCatalogEntry] {
     &PROVIDER_CATALOG
 }
@@ -63,6 +67,7 @@ fn provider_entry(provider: &Provider) -> &'static ProviderCatalogEntry {
         Provider::Cursor => &PROVIDER_CATALOG[5],
         Provider::CcMirror => &PROVIDER_CATALOG[6],
         Provider::Pi => &PROVIDER_CATALOG[7],
+        Provider::Grok => &PROVIDER_CATALOG[8],
     }
 }
 
@@ -70,7 +75,7 @@ fn provider_entry_for_key(key: &str) -> Option<&'static ProviderCatalogEntry> {
     provider_catalog().iter().find(|entry| entry.key == key)
 }
 
-static PROVIDER_KINDS: [Provider; 8] = [
+static PROVIDER_KINDS: [Provider; 9] = [
     Provider::Claude,
     Provider::Codex,
     Provider::Antigravity,
@@ -79,9 +84,10 @@ static PROVIDER_KINDS: [Provider; 8] = [
     Provider::Cursor,
     Provider::CcMirror,
     Provider::Pi,
+    Provider::Grok,
 ];
 
-static PROVIDER_CATALOG: [ProviderCatalogEntry; 8] = [
+static PROVIDER_CATALOG: [ProviderCatalogEntry; 9] = [
     ProviderCatalogEntry {
         kind: Provider::Claude,
         key: "claude",
@@ -137,6 +143,13 @@ static PROVIDER_CATALOG: [ProviderCatalogEntry; 8] = [
         label: "Pi",
         descriptor: &crate::providers::pi::Descriptor,
         build_runtime: build_pi_runtime,
+    },
+    ProviderCatalogEntry {
+        kind: Provider::Grok,
+        key: "grok",
+        label: "Grok Build",
+        descriptor: &crate::providers::grok::Descriptor,
+        build_runtime: build_grok_runtime,
     },
 ];
 
@@ -255,6 +268,10 @@ mod tests {
             (
                 "/home/user/.kimi-code/sessions/wd_proj_abc/session_uuid/agents/main/wire.jsonl",
                 Some(Provider::Kimi),
+            ),
+            (
+                "/home/user/.grok/sessions/%2Ftmp%2Fproj/01900000-aaaa-bbbb-cccc-000000000000/chat_history.jsonl",
+                Some(Provider::Grok),
             ),
             (
                 "/home/user/.cc-mirror/variant/config/projects/foo/abc.jsonl",

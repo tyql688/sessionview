@@ -1,0 +1,17 @@
+{
+  "subagent_id": "01900000-0000-7000-8000-000000000002",
+  "parent_session_id": "01900000-0000-7000-8000-000000000001",
+  "child_session_id": "01900000-0000-7000-8000-000000000002",
+  "subagent_type": "general-purpose",
+  "description": "Demo child task",
+  "prompt": "Count the lines in README.md",
+  "status": "completed",
+  "started_at": "2026-07-01T08:03:00.000000Z",
+  "completed_at": "2026-07-01T08:04:00.000000Z",
+  "duration_ms": 60000,
+  "tool_calls": 1,
+  "turns": 1,
+  "effective_context_source": "new",
+  "child_cwd": "/tmp/demo-project",
+  "effective_model_id": "grok-4.5"
+}

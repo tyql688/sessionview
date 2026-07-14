@@ -1,4 +1,4 @@
-import { Antigravity, Claude, Codex, Cursor, Kimi, OpenCode } from "@lobehub/icons";
+import { Antigravity, Claude, Codex, Cursor, Grok, Kimi, OpenCode } from "@lobehub/icons";
 import type { JSX } from "react";
 import type { Provider } from "@/lib/types";
 import { getProviderColor } from "@/stores/providerSnapshots";
@@ -38,8 +38,9 @@ function CcMirrorIcon({ size }: { size: number }) {
 
 // Provider brand logos. Mainstream providers use official @lobehub/icons
 // colored variants (the app's provider colors match their brand colors); Pi and
-// cc-mirror keep custom SVGs above. Kimi's brand mark is black-on-light /
-// white-on-dark, so it uses the monochrome variant tinted by text-primary.
+// cc-mirror keep custom SVGs above. Kimi's and Grok's brand marks are
+// black-on-light / white-on-dark, so they use the monochrome variant tinted
+// by text-primary.
 const PROVIDER_ICONS: Record<Provider, (size: number) => JSX.Element> = {
   claude: (size) => <Claude.Color size={size} />,
   codex: (size) => <Codex.Color size={size} />,
@@ -54,6 +55,11 @@ const PROVIDER_ICONS: Record<Provider, (size: number) => JSX.Element> = {
   cursor: (size) => <Cursor size={size} />,
   "cc-mirror": (size) => <CcMirrorIcon size={size} />,
   pi: (size) => <PiIcon size={size} />,
+  grok: (size) => (
+    <span style={{ color: "var(--text-primary)", display: "inline-flex" }}>
+      <Grok size={size} />
+    </span>
+  ),
 };
 
 export function ProviderIcon(props: { provider: Provider; size?: number }) {
