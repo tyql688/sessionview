@@ -52,6 +52,11 @@ pub(super) fn result_kind_for_tool(
         || result.get("stderr").is_some()
         || result.get("exitCode").is_some()
         || (canonical_name == "Bash" && result.get("output").is_some())
+        // TaskOutput results ARE terminal output (a background command /
+        // subagent's captured stream). Without this the result detail's
+        // "output" line and the raw output section render the same text
+        // twice — the detail already carries it, so suppress the raw copy.
+        || (canonical_name == "TaskOutput" && result.get("output").is_some())
     {
         return Some("terminal_output".to_string());
     }
