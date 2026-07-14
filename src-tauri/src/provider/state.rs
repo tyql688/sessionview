@@ -18,10 +18,18 @@ use super::UsageEvent;
 /// nanoseconds + the whole-DB size). Each such provider only ever compares
 /// the value it wrote — via its own `scan_incremental`, never the
 /// seconds-based `source_state_matches` helper — so the units never mix.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// `title` carries the provider-derived title currently stored for the
+/// session backing this path, or `None` when the stored title must not be
+/// compared against provider metadata (user-customized titles, unknown
+/// rows). Providers whose titles live in a side file that can change
+/// without touching the session file itself (Codex's
+/// `session_index.jsonl`) compare it to decide whether an otherwise
+/// unchanged file still needs a re-parse.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceState {
     pub size: u64,
     pub mtime: i64,
+    pub title: Option<String>,
 }
 
 /// Returned by `SessionProvider::scan_all`. `parsed` carries the

@@ -138,19 +138,23 @@ impl Database {
     {
         let conn = self.lock_read()?;
         let mut stmt = conn.prepare(
-            "SELECT source_path, file_size_bytes, source_mtime
+            "SELECT source_path, file_size_bytes, source_mtime,
+                    CASE WHEN title_custom = 1 THEN NULL ELSE title END
                FROM sessions
-              WHERE provider = ?1 AND source_path != ''",
+              WHERE provider = ?1 AND source_path != ''
+              ORDER BY is_sidechain ASC",
         )?;
         let rows = stmt.query_map(params![provider_key], |row| {
             let path: String = row.get(0)?;
             let size: i64 = row.get(1)?;
             let mtime: i64 = row.get(2)?;
+            let title: Option<String> = row.get(3)?;
             Ok((
                 path,
                 crate::provider::SourceState {
                     size: size.max(0) as u64,
                     mtime,
+                    title,
                 },
             ))
         })?;
@@ -158,8 +162,9 @@ impl Database {
         for row in rows {
             let (path, state) = row?;
             // Multiple session IDs can share one source_path (e.g. parent +
-            // subagent rows backed by the same JSONL). Any of them sufficing
-            // to mark the file "alive" — keep the first/latest state seen.
+            // subagent rows backed by the same JSONL). Any of them suffices
+            // to mark the file "alive"; parent rows sort first (is_sidechain
+            // ASC) so their title is the one kept for comparison.
             out.entry(path).or_insert(state);
         }
         Ok(out)

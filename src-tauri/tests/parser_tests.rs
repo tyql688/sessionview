@@ -1629,6 +1629,7 @@ fn opencode_incremental_scan_skips_unchanged_database() {
         SourceState {
             size: sessions[0].meta.file_size_bytes,
             mtime: sessions[0].source_mtime,
+            title: None,
         },
     )]);
 
@@ -1654,6 +1655,7 @@ fn opencode_incremental_scan_ignores_empty_wal_mtime() {
         SourceState {
             size: sessions[0].meta.file_size_bytes,
             mtime: sessions[0].source_mtime,
+            title: None,
         },
     )]);
 
@@ -1682,6 +1684,7 @@ fn opencode_incremental_scan_reparses_changed_database() {
         SourceState {
             size: sessions[0].meta.file_size_bytes,
             mtime: sessions[0].source_mtime,
+            title: None,
         },
     )]);
 
@@ -1771,6 +1774,7 @@ fn opencode_incremental_scan_detects_wal_only_append() {
         SourceState {
             size: baseline[0].meta.file_size_bytes,
             mtime: baseline[0].source_mtime,
+            title: None,
         },
     )]);
 

@@ -303,6 +303,17 @@ impl CodexScanAccum {
 
 impl CodexProvider {
     pub fn parse_session_file(&self, path: &PathBuf) -> Option<ParsedSession> {
+        self.parse_session_file_with_index(path, &self.load_session_index())
+    }
+
+    /// Full-file parse with a pre-loaded `session_index.jsonl` title map
+    /// (session id → thread name), so batch scans read the index once
+    /// instead of per file.
+    pub(crate) fn parse_session_file_with_index(
+        &self,
+        path: &PathBuf,
+        index_titles: &std::collections::HashMap<String, String>,
+    ) -> Option<ParsedSession> {
         let file = match File::open(path) {
             Ok(file) => file,
             Err(error) => {
@@ -394,7 +405,17 @@ impl CodexProvider {
             )
         });
 
-        let title = thread_name
+        // Title priority: the sidecar `~/.codex/session_index.jsonl` entry
+        // for this session id (Codex rewrites it on rename, so it is the
+        // freshest source), then the inline `thread_name_updated` event
+        // (only a minority of rollouts carry one), then the subagent
+        // nickname, then the first user message fallback. Index-first also
+        // keeps `scan_incremental`'s stored-title-vs-index comparison
+        // convergent: one re-parse after a rename, not one per scan.
+        let title = index_titles
+            .get(&session_id)
+            .cloned()
+            .or(thread_name)
             .or(agent_nickname.as_deref().map(|n| n.to_string()))
             .unwrap_or_else(|| session_title(first_user_message.as_deref()));
 

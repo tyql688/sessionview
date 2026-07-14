@@ -110,6 +110,7 @@ fn file_state(path: &Path) -> Result<SourceState, ProviderError> {
     Ok(SourceState {
         size: metadata.len(),
         mtime,
+        title: None,
     })
 }
 
@@ -118,10 +119,18 @@ fn opencode_db_state(db_path: &Path) -> Result<SourceState, ProviderError> {
     let wal_path = PathBuf::from(format!("{}-wal", db_path.to_string_lossy()));
     let wal_state = match file_state(&wal_path) {
         // Opening SQLite can touch an empty WAL without changing visible data.
-        Ok(state) if state.size == 0 => SourceState { size: 0, mtime: 0 },
+        Ok(state) if state.size == 0 => SourceState {
+            size: 0,
+            mtime: 0,
+            title: None,
+        },
         Ok(state) => state,
         Err(ProviderError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-            SourceState { size: 0, mtime: 0 }
+            SourceState {
+                size: 0,
+                mtime: 0,
+                title: None,
+            }
         }
         Err(error) => return Err(error),
     };
@@ -129,6 +138,7 @@ fn opencode_db_state(db_path: &Path) -> Result<SourceState, ProviderError> {
     Ok(SourceState {
         size: db_state.size.saturating_add(wal_state.size),
         mtime: db_state.mtime.max(wal_state.mtime),
+        title: None,
     })
 }
 
