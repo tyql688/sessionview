@@ -50,6 +50,11 @@
       "icons/icon.ico",
       "icons/icon.png"
     ],
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows/nsis-hooks.nsh"
+      }
+    },
     "macOS": {
       "entitlements": "Entitlements.plist"
     }
