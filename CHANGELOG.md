@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.3] - Unreleased
+
+### Fixed
+
+- Improved Mermaid diagrams with theme-aware rendering and reliable source
+  copying.
+- Removed SessionView's legacy Windows app-data directory when users select
+  "Delete application data" during uninstall, without deleting it during app
+  updates.
+
 ## [0.6.2] - 2026-07-14
 
 ### Removed
