@@ -1,4 +1,5 @@
 pub mod error;
+pub mod events;
 pub(crate) mod image_cache;
 pub(crate) mod image_markers;
 pub mod load_cancel;
@@ -13,6 +14,7 @@ pub mod tail_reader;
 pub(crate) mod terminal;
 
 pub use error::{ServiceError, ServiceResult};
+pub use events::{EventBus, NullEventBus};
 pub use persisted_output_cache::PersistedOutputCache;
 pub(crate) use provider_snapshots::ProviderSnapshotService;
 pub use session_cache::SessionCache;

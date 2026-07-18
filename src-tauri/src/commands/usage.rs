@@ -2,7 +2,6 @@ mod aggregate;
 
 use anyhow::Context;
 use serde::Serialize;
-use tauri::State;
 
 use super::sessions::load_messages_cached;
 use super::AppState;
@@ -13,18 +12,16 @@ use crate::models::*;
 use crate::services::load_session_meta;
 use aggregate::{build_project_costs, build_recent_sessions};
 
-#[tauri::command]
 pub async fn get_usage_stats(
     providers: Vec<String>,
     range_days: Option<u32>,
     date_start: Option<String>,
     date_end: Option<String>,
-    state: State<'_, AppState>,
+    state: AppState,
 ) -> CommandResult<UsageStats> {
     // Tauri commands are a trust boundary: reject malformed dates instead of
     // silently passing them into SQL string comparisons.
     let custom_range = parse_custom_range(date_start.as_deref(), date_end.as_deref())?;
-    let state = state.inner().clone();
     let stats = tokio::task::spawn_blocking(move || {
         build_usage_stats(&state, &providers, range_days, custom_range)
     })
@@ -58,16 +55,14 @@ fn parse_custom_range(
 /// date_end]` (inclusive) plus the years that have data. The window is computed
 /// on the frontend from the selected year, so the calendar is independent of
 /// the usage panel's range filter.
-#[tauri::command]
 pub async fn get_activity_calendar(
     providers: Vec<String>,
     date_start: String,
     date_end: String,
-    state: State<'_, AppState>,
+    state: AppState,
 ) -> CommandResult<ActivityCalendar> {
     // Trust boundary: reject malformed dates instead of passing them into SQL.
     parse_custom_range(Some(&date_start), Some(&date_end))?;
-    let state = state.inner().clone();
     let calendar = tokio::task::spawn_blocking(move || -> anyhow::Result<ActivityCalendar> {
         let bounds = UsageDateBounds {
             start: Some(&date_start),
@@ -100,17 +95,15 @@ pub async fn get_activity_calendar(
     Ok(calendar)
 }
 
-#[tauri::command]
 pub async fn get_project_tool_usage(
     project_path: String,
     providers: Vec<String>,
     range_days: Option<u32>,
     date_start: Option<String>,
     date_end: Option<String>,
-    state: State<'_, AppState>,
+    state: AppState,
 ) -> CommandResult<ProjectToolUsageStats> {
     let custom_range = parse_custom_range(date_start.as_deref(), date_end.as_deref())?;
-    let state = state.inner().clone();
     let stats = tokio::task::spawn_blocking(move || {
         build_project_tool_usage(&state, &project_path, &providers, range_days, custom_range)
     })
@@ -119,17 +112,15 @@ pub async fn get_project_tool_usage(
     Ok(stats)
 }
 
-#[tauri::command]
 pub async fn get_project_daily_usage(
     project_path: String,
     providers: Vec<String>,
     range_days: Option<u32>,
     date_start: Option<String>,
     date_end: Option<String>,
-    state: State<'_, AppState>,
+    state: AppState,
 ) -> CommandResult<Vec<ProjectDailyUsage>> {
     let custom_range = parse_custom_range(date_start.as_deref(), date_end.as_deref())?;
-    let state = state.inner().clone();
     let days = tokio::task::spawn_blocking(move || {
         build_project_daily_usage(&state, &project_path, &providers, range_days, custom_range)
     })
@@ -138,9 +129,7 @@ pub async fn get_project_daily_usage(
     Ok(days)
 }
 
-#[tauri::command]
-pub async fn get_today_cost(state: State<'_, AppState>) -> CommandResult<f64> {
-    let state = state.inner().clone();
+pub async fn get_today_cost(state: AppState) -> CommandResult<f64> {
     let cost = tokio::task::spawn_blocking(move || -> anyhow::Result<f64> {
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let cost = state
@@ -162,9 +151,7 @@ pub struct TodayTokens {
     pub cache_write: u64,
 }
 
-#[tauri::command]
-pub async fn get_today_tokens(state: State<'_, AppState>) -> CommandResult<TodayTokens> {
-    let state = state.inner().clone();
+pub async fn get_today_tokens(state: AppState) -> CommandResult<TodayTokens> {
     let tokens = tokio::task::spawn_blocking(move || -> anyhow::Result<TodayTokens> {
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let (input, output, cache_read, cache_write) = state

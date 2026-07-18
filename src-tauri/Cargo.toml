@@ -12,12 +12,44 @@ crate-type = ["lib", "cdylib", "staticlib"]
 [[bin]]
 name = "sessionview"
 path = "src/main.rs"
+required-features = ["gui"]
+
+[[bin]]
+name = "sessionview-headless"
+path = "src/bin/headless.rs"
+required-features = ["headless"]
+
+[features]
+default = ["gui"]
+# Tauri desktop shell.
+gui = [
+    "dep:tauri",
+    "dep:tauri-plugin-opener",
+    "dep:tauri-plugin-dialog",
+    "dep:tauri-plugin-window-state",
+    "dep:tauri-plugin-updater",
+    "dep:tauri-plugin-process",
+]
+# HTTP server shell (no webview / webkit linkage).
+headless = [
+    "dep:axum",
+    "dep:clap",
+    "dep:rust-embed",
+    "dep:tokio-stream",
+    "dep:mime_guess",
+    "dep:env_logger",
+    "tokio/rt-multi-thread",
+    "tokio/net",
+    "tokio/macros",
+    "tokio/signal",
+    "tokio/sync",
+]
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset", "test"] }
-tauri-plugin-opener = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-window-state = "2"
+tauri = { version = "2", features = ["protocol-asset", "test"], optional = true }
+tauri-plugin-opener = { version = "2", optional = true }
+tauri-plugin-dialog = { version = "2", optional = true }
+tauri-plugin-window-state = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
@@ -31,9 +63,15 @@ thiserror = "2"
 anyhow = "1"
 base64 = "0.22"
 zip = { version = "2", default-features = false, features = ["deflate"] }
-tauri-plugin-updater = "2.10.0"
-tauri-plugin-process = "2.3.1"
+tauri-plugin-updater = { version = "2.10.0", optional = true }
+tauri-plugin-process = { version = "2.3.1", optional = true }
 tokio = { version = "1", features = ["rt"] }
+axum = { version = "0.8", optional = true }
+clap = { version = "4", features = ["derive", "env"], optional = true }
+rust-embed = { version = "8", features = ["interpolate-folder-path"], optional = true }
+tokio-stream = { version = "0.1", features = ["sync"], optional = true }
+mime_guess = { version = "2", optional = true }
+env_logger = { version = "0.11", optional = true }
 log = "0.4"
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }

@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Context};
-use tauri::State;
 
 use crate::db::Database;
 use crate::error::{CommandError, CommandResult};
@@ -13,12 +12,7 @@ struct ResumeTarget {
     cwd: Option<String>,
 }
 
-#[tauri::command]
-pub async fn get_resume_command(
-    session_id: String,
-    state: State<'_, AppState>,
-) -> CommandResult<String> {
-    let state = state.inner().clone();
+pub async fn get_resume_command(session_id: String, state: AppState) -> CommandResult<String> {
     tokio::task::spawn_blocking(move || get_resume_command_for_db(&state.db, &session_id))
         .await
         .context("task join error")?
@@ -66,13 +60,11 @@ pub(crate) fn get_resume_command_for_db(db: &Database, session_id: &str) -> anyh
 }
 
 /// Resume a session: looks up cwd from DB, builds command, launches terminal
-#[tauri::command]
 pub async fn resume_session(
     session_id: String,
     terminal_app: String,
-    state: State<'_, AppState>,
+    state: AppState,
 ) -> CommandResult<()> {
-    let state = state.inner().clone();
     tokio::task::spawn_blocking(move || -> CommandResult<()> {
         let target = resolve_resume_target(&state.db, &session_id)?;
         terminal::launch_terminal(&terminal_app, &target.command, target.cwd.as_deref())?;
@@ -82,7 +74,6 @@ pub async fn resume_session(
     .context("task join error")?
 }
 
-#[tauri::command]
 pub async fn detect_terminal() -> String {
     tokio::task::spawn_blocking(detect_terminal_sync)
         .await

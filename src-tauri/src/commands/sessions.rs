@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use serde::Serialize;
-use tauri::State;
 
 use crate::db::Database;
 use crate::error::{CommandError, CommandResult};
@@ -48,11 +47,9 @@ pub struct SessionOpenWindow {
     pub window: SessionMessagesWindow,
 }
 
-#[tauri::command]
-pub async fn reindex(state: State<'_, AppState>) -> CommandResult<usize> {
+pub async fn reindex(state: AppState) -> CommandResult<usize> {
     use std::sync::atomic::Ordering;
 
-    let state = state.inner().clone();
     if state.maintenance_running.swap(true, Ordering::SeqCst) {
         return Err(CommandError::from(anyhow!(
             "maintenance task already running"
@@ -68,15 +65,13 @@ pub async fn reindex(state: State<'_, AppState>) -> CommandResult<usize> {
     result
 }
 
-#[tauri::command]
 pub async fn reindex_providers(
     providers: Vec<String>,
     aggressive: Option<bool>,
-    state: State<'_, AppState>,
+    state: AppState,
 ) -> CommandResult<usize> {
     use std::sync::atomic::Ordering;
 
-    let state = state.inner().clone();
     if state.maintenance_running.swap(true, Ordering::SeqCst) {
         return Err(CommandError::from(anyhow!(
             "maintenance task already running"
@@ -105,22 +100,18 @@ pub async fn reindex_providers(
     result
 }
 
-#[tauri::command]
-pub async fn get_tree(state: State<'_, AppState>) -> CommandResult<Vec<crate::models::TreeNode>> {
-    let state = state.inner().clone();
+pub async fn get_tree(state: AppState) -> CommandResult<Vec<crate::models::TreeNode>> {
     tokio::task::spawn_blocking(move || state.indexer.build_tree())
         .await
         .context("task join error")?
         .map_err(CommandError::from)
 }
 
-#[tauri::command]
 pub async fn get_session_detail(
     session_id: String,
     request_seq: Option<u64>,
-    state: State<'_, AppState>,
+    state: AppState,
 ) -> CommandResult<SessionDetail> {
-    let state = state.inner().clone();
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<SessionDetail> {
         let meta = load_session_meta(&state.db, &session_id).map_err(anyhow::Error::msg)?;
         let source_path = meta.source_path.clone();
@@ -151,12 +142,7 @@ pub async fn get_session_detail(
         .map_err(CommandError::from)
 }
 
-#[tauri::command]
-pub async fn get_session_meta(
-    session_id: String,
-    state: State<'_, AppState>,
-) -> CommandResult<SessionMeta> {
-    let state = state.inner().clone();
+pub async fn get_session_meta(session_id: String, state: AppState) -> CommandResult<SessionMeta> {
     tokio::task::spawn_blocking(move || -> anyhow::Result<SessionMeta> {
         load_session_meta(&state.db, &session_id).map_err(anyhow::Error::msg)
     })
@@ -165,16 +151,14 @@ pub async fn get_session_meta(
     .map_err(CommandError::from)
 }
 
-#[tauri::command]
 pub async fn get_session_open_window(
     session_id: String,
     offset: i64,
     limit: usize,
     request_id: Option<String>,
     request_seq: Option<u64>,
-    state: State<'_, AppState>,
+    state: AppState,
 ) -> CommandResult<SessionOpenWindow> {
-    let state = state.inner().clone();
     tokio::task::spawn_blocking(move || -> anyhow::Result<SessionOpenWindow> {
         let mut meta = load_session_meta(&state.db, &session_id).map_err(anyhow::Error::msg)?;
         let source_path = meta.source_path.clone();
@@ -220,16 +204,14 @@ pub async fn get_session_open_window(
     .map_err(CommandError::from)
 }
 
-#[tauri::command]
 pub async fn get_session_messages_window(
     session_id: String,
     offset: i64,
     limit: usize,
     request_id: Option<String>,
     request_seq: Option<u64>,
-    state: State<'_, AppState>,
+    state: AppState,
 ) -> CommandResult<SessionMessagesWindow> {
-    let state = state.inner().clone();
     tokio::task::spawn_blocking(move || -> anyhow::Result<SessionMessagesWindow> {
         let meta = load_session_meta(&state.db, &session_id).map_err(anyhow::Error::msg)?;
         let source_path = meta.source_path.clone();
@@ -274,13 +256,11 @@ pub async fn get_session_messages_window(
     .map_err(CommandError::from)
 }
 
-#[tauri::command]
 pub async fn get_session_turn_outline(
     session_id: String,
     request_seq: Option<u64>,
-    state: State<'_, AppState>,
+    state: AppState,
 ) -> CommandResult<SessionTurnOutline> {
-    let state = state.inner().clone();
     tokio::task::spawn_blocking(move || -> anyhow::Result<SessionTurnOutline> {
         let meta = load_session_meta(&state.db, &session_id).map_err(anyhow::Error::msg)?;
         let source_path = meta.source_path.clone();
@@ -309,11 +289,10 @@ pub async fn get_session_turn_outline(
     .map_err(CommandError::from)
 }
 
-#[tauri::command]
 pub async fn cancel_session_load(
     session_id: String,
     request_id: Option<String>,
-    state: State<'_, AppState>,
+    state: AppState,
 ) -> CommandResult<()> {
     let map = match state.load_tokens.lock() {
         Ok(g) => g,
@@ -331,12 +310,10 @@ pub async fn cancel_session_load(
     Ok(())
 }
 
-#[tauri::command]
 pub async fn get_child_sessions(
     parent_id: String,
-    state: State<'_, AppState>,
+    state: AppState,
 ) -> CommandResult<Vec<SessionMeta>> {
-    let state = state.inner().clone();
     tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<SessionMeta>> {
         let mut sessions = state
             .db
@@ -361,12 +338,10 @@ pub async fn get_child_sessions(
     .map_err(CommandError::from)
 }
 
-#[tauri::command]
 pub async fn get_child_session_counts(
     parent_ids: Vec<String>,
-    state: State<'_, AppState>,
+    state: AppState,
 ) -> CommandResult<HashMap<String, u64>> {
-    let state = state.inner().clone();
     tokio::task::spawn_blocking(move || {
         state
             .db
@@ -378,13 +353,11 @@ pub async fn get_child_session_counts(
     .map_err(CommandError::from)
 }
 
-#[tauri::command]
 pub async fn rename_session(
     session_id: String,
     new_title: String,
-    state: State<'_, AppState>,
+    state: AppState,
 ) -> CommandResult<()> {
-    let state = state.inner().clone();
     tokio::task::spawn_blocking(move || {
         state
             .db
@@ -396,9 +369,7 @@ pub async fn rename_session(
     .map_err(CommandError::from)
 }
 
-#[tauri::command]
-pub async fn get_session_count(state: State<'_, AppState>) -> CommandResult<u64> {
-    let state = state.inner().clone();
+pub async fn get_session_count(state: AppState) -> CommandResult<u64> {
     let count = tokio::task::spawn_blocking(move || {
         state
             .db
@@ -411,12 +382,7 @@ pub async fn get_session_count(state: State<'_, AppState>) -> CommandResult<u64>
     Ok(count)
 }
 
-#[tauri::command]
-pub async fn toggle_favorite(
-    session_id: String,
-    state: State<'_, AppState>,
-) -> CommandResult<bool> {
-    let state = state.inner().clone();
+pub async fn toggle_favorite(session_id: String, state: AppState) -> CommandResult<bool> {
     tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
         let is_fav = state
             .db
@@ -442,12 +408,10 @@ pub async fn toggle_favorite(
     .map_err(CommandError::from)
 }
 
-#[tauri::command]
 pub async fn list_recent_sessions(
     limit: usize,
-    state: State<'_, AppState>,
+    state: AppState,
 ) -> CommandResult<Vec<SessionMeta>> {
-    let state = state.inner().clone();
     tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<SessionMeta>> {
         let mut sessions = state
             .db
@@ -461,9 +425,7 @@ pub async fn list_recent_sessions(
     .map_err(CommandError::from)
 }
 
-#[tauri::command]
-pub async fn list_favorites(state: State<'_, AppState>) -> CommandResult<Vec<SessionMeta>> {
-    let state = state.inner().clone();
+pub async fn list_favorites(state: AppState) -> CommandResult<Vec<SessionMeta>> {
     tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<SessionMeta>> {
         let mut sessions = state
             .db
@@ -477,9 +439,7 @@ pub async fn list_favorites(state: State<'_, AppState>) -> CommandResult<Vec<Ses
     .map_err(CommandError::from)
 }
 
-#[tauri::command]
-pub async fn is_favorite(session_id: String, state: State<'_, AppState>) -> CommandResult<bool> {
-    let state = state.inner().clone();
+pub async fn is_favorite(session_id: String, state: AppState) -> CommandResult<bool> {
     tokio::task::spawn_blocking(move || {
         state
             .db

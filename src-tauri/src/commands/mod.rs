@@ -1,4 +1,6 @@
 mod file_access;
+#[cfg(feature = "gui")]
+pub mod gui;
 mod search;
 mod session_tail;
 mod sessions;
@@ -13,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use crate::db::Database;
 use crate::indexer::Indexer;
 use crate::services::load_cancel::CancelFlag;
-use crate::services::{PersistedOutputCache, SessionCache};
+use crate::services::{EventBus, PersistedOutputCache, SessionCache};
 
 #[derive(Clone)]
 pub struct LoadToken {
@@ -30,6 +32,8 @@ pub struct LoadToken {
 pub struct AppState {
     pub db: Arc<Database>,
     pub indexer: Indexer,
+    /// Backend→frontend event channel; shell-specific (Tauri emit vs SSE).
+    pub events: Arc<dyn EventBus>,
     pub maintenance_running: Arc<AtomicBool>,
     /// In-memory LRU of parsed message vectors. Populated by paged session
     /// loaders and checked against source metadata before reuse.

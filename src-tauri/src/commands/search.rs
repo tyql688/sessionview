@@ -1,17 +1,14 @@
 use anyhow::Context;
-use tauri::State;
 
 use crate::error::CommandResult;
 use crate::models::{SearchFilters, SearchResult};
 
 use super::AppState;
 
-#[tauri::command]
 pub async fn search_sessions(
     filters: SearchFilters,
-    state: State<'_, AppState>,
+    state: AppState,
 ) -> CommandResult<Vec<SearchResult>> {
-    let state = state.inner().clone();
     tokio::task::spawn_blocking(move || {
         state
             .db

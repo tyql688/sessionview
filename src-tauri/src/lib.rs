@@ -8,10 +8,15 @@ pub mod pricing;
 pub mod provider;
 pub mod provider_utils;
 pub mod providers;
+#[cfg(feature = "headless")]
+pub mod server;
 pub mod services;
 pub mod tool_metadata;
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use anyhow::Context;
 
 /// Test helpers — exposes private functions for integration tests.
 #[doc(hidden)]
@@ -44,39 +49,31 @@ pub mod command_test_helpers {
 use commands::AppState;
 use db::Database;
 use indexer::Indexer;
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-use tauri::Manager;
+use services::EventBus;
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    let data_dir = match dirs::data_local_dir() {
-        Some(d) => d.join("sessionview"),
-        None => {
-            log::error!("failed to resolve local data dir");
-            std::process::exit(1);
-        }
-    };
+/// Per-user data directory shared by the GUI and headless shells — pointing
+/// both at the same SQLite index is what makes them interchangeable without
+/// re-indexing or duplicated storage.
+pub fn default_data_dir() -> anyhow::Result<PathBuf> {
+    dirs::data_local_dir()
+        .map(|d| d.join("sessionview"))
+        .context("failed to resolve local data dir")
+}
 
-    if let Err(e) = std::fs::create_dir_all(&data_dir) {
-        log::error!("failed to create data dir: {e}");
-        std::process::exit(1);
-    }
+/// Build the shared application state (database, indexer, caches). Both
+/// shells call this with their own `EventBus` implementation.
+pub fn build_app_state(data_dir: &Path, events: Arc<dyn EventBus>) -> anyhow::Result<AppState> {
+    std::fs::create_dir_all(data_dir)
+        .with_context(|| format!("failed to create data dir {}", data_dir.display()))?;
 
-    let db = match Database::open(&data_dir) {
-        Ok(db) => Arc::new(db),
-        Err(e) => {
-            log::error!("failed to open database: {e}");
-            std::process::exit(1);
-        }
-    };
-
+    let db = Arc::new(Database::open(data_dir).context("failed to open database")?);
     let providers = provider::all_runtimes();
+    let indexer = Indexer::new(Arc::clone(&db), providers, data_dir.to_path_buf());
 
-    let indexer = Indexer::new(Arc::clone(&db), providers, data_dir.clone());
-
-    let state = AppState {
-        db: Arc::clone(&db),
+    Ok(AppState {
+        db,
         indexer,
+        events,
         maintenance_running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         session_cache: Arc::new(crate::services::SessionCache::new(8)),
         // 16 entries / 32 MiB cap — covers a typical viewing burst without
@@ -87,7 +84,25 @@ pub fn run() {
         )),
         load_tokens: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         promote_in_flight: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-    };
+    })
+}
+
+/// Forwards backend events to the Tauri webview.
+#[cfg(feature = "gui")]
+struct TauriEventBus(tauri::AppHandle);
+
+#[cfg(feature = "gui")]
+impl EventBus for TauriEventBus {
+    fn emit(&self, event: &str, payload: serde_json::Value) {
+        use tauri::Emitter;
+        let _ = self.0.emit(event, payload);
+    }
+}
+
+#[cfg(feature = "gui")]
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    use tauri::Manager;
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -95,54 +110,55 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .manage(state)
         .invoke_handler(tauri::generate_handler![
-            commands::reindex,
-            commands::reindex_providers,
-            commands::get_tree,
-            commands::get_session_detail,
-            commands::get_session_meta,
-            commands::get_session_open_window,
-            commands::get_session_messages_window,
-            commands::get_session_turn_outline,
-            commands::cancel_session_load,
-            commands::get_child_sessions,
-            commands::get_child_session_counts,
-            commands::search_sessions,
-            commands::rename_session,
-            commands::get_session_count,
-            commands::export_session,
-            commands::get_index_stats,
-            commands::get_pricing_catalog_status,
-            commands::start_rebuild_index,
-            commands::refresh_pricing_catalog,
-            commands::clear_index,
-            commands::clear_usage_stats,
-            commands::start_refresh_usage,
-            commands::get_provider_snapshots,
-            commands::get_resume_command,
-            commands::detect_terminal,
-            commands::resume_session,
-            commands::export_sessions_batch,
-            commands::toggle_favorite,
-            commands::list_recent_sessions,
-            commands::list_favorites,
-            commands::is_favorite,
-            commands::read_image_base64,
-            commands::read_tool_result_text,
-            commands::resolve_persisted_output,
-            commands::open_in_folder,
-            commands::open_external,
-            commands::get_usage_stats,
-            commands::get_activity_calendar,
-            commands::get_project_tool_usage,
-            commands::get_project_daily_usage,
-            commands::get_today_cost,
-            commands::get_today_tokens,
+            commands::gui::reindex,
+            commands::gui::reindex_providers,
+            commands::gui::get_tree,
+            commands::gui::get_session_detail,
+            commands::gui::get_session_meta,
+            commands::gui::get_session_open_window,
+            commands::gui::get_session_messages_window,
+            commands::gui::get_session_turn_outline,
+            commands::gui::cancel_session_load,
+            commands::gui::get_child_sessions,
+            commands::gui::get_child_session_counts,
+            commands::gui::search_sessions,
+            commands::gui::rename_session,
+            commands::gui::get_session_count,
+            commands::gui::export_session,
+            commands::gui::get_index_stats,
+            commands::gui::get_pricing_catalog_status,
+            commands::gui::start_rebuild_index,
+            commands::gui::refresh_pricing_catalog,
+            commands::gui::clear_index,
+            commands::gui::clear_usage_stats,
+            commands::gui::start_refresh_usage,
+            commands::gui::get_provider_snapshots,
+            commands::gui::get_resume_command,
+            commands::gui::detect_terminal,
+            commands::gui::resume_session,
+            commands::gui::export_sessions_batch,
+            commands::gui::toggle_favorite,
+            commands::gui::list_recent_sessions,
+            commands::gui::list_favorites,
+            commands::gui::is_favorite,
+            commands::gui::read_image_base64,
+            commands::gui::read_tool_result_text,
+            commands::gui::resolve_persisted_output,
+            commands::gui::open_in_folder,
+            commands::gui::open_external,
+            commands::gui::get_usage_stats,
+            commands::gui::get_activity_calendar,
+            commands::gui::get_project_tool_usage,
+            commands::gui::get_project_daily_usage,
+            commands::gui::get_today_cost,
+            commands::gui::get_today_tokens,
         ])
         .setup(|app| {
-            #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-            let _ = app;
+            let data_dir = default_data_dir()?;
+            let events: Arc<dyn EventBus> = Arc::new(TauriEventBus(app.handle().clone()));
+            let state = build_app_state(&data_dir, events)?;
+            app.manage(state);
 
             // On Windows, hide native decorations so the custom titlebar is the only one.
             #[cfg(target_os = "windows")]
