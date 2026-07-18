@@ -334,3 +334,71 @@ pub async fn dispatch(
         _ => Err(DispatchError::UnknownCommand),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::services::NullEventBus;
+
+    fn test_state(dir: &std::path::Path) -> AppState {
+        crate::build_app_state(dir, Arc::new(NullEventBus)).unwrap()
+    }
+
+    #[tokio::test]
+    async fn dispatch_rejects_unknown_command() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let result = dispatch(test_state(dir.path()), "open_external", Value::Null).await;
+        assert!(matches!(result, Err(DispatchError::UnknownCommand)));
+    }
+
+    #[tokio::test]
+    async fn dispatch_rejects_malformed_args() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let result = dispatch(
+            test_state(dir.path()),
+            "get_session_meta",
+            serde_json::json!({ "sessionId": 42 }),
+        )
+        .await;
+        match result {
+            Err(DispatchError::BadArgs(message)) => {
+                assert!(message.contains("invalid arguments"), "got: {message}");
+            }
+            _ => panic!("expected BadArgs"),
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatch_runs_no_arg_commands_against_empty_index() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let result = dispatch(
+            test_state(dir.path()),
+            "get_session_count",
+            Value::Object(serde_json::Map::new()),
+        )
+        .await;
+        match result {
+            Ok(value) => assert_eq!(value, serde_json::json!(0)),
+            Err(_) => panic!("expected Ok(0)"),
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatch_surfaces_command_errors() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let result = dispatch(
+            test_state(dir.path()),
+            "get_session_meta",
+            serde_json::json!({ "sessionId": "missing-session" }),
+        )
+        .await;
+        match result {
+            Err(DispatchError::Command(e)) => {
+                assert!(format!("{:#}", e.0).contains("session not found"));
+            }
+            _ => panic!("expected Command error"),
+        }
+    }
+}
