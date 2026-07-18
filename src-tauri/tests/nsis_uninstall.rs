@@ -26,6 +26,7 @@ fn nsis_hook_deletes_sessionview_data_only_when_requested() {
             "${If} $DeleteAppDataCheckboxState = 1",
             "${AndIf} $UpdateMode <> 1",
             "RMDir /r \"$LOCALAPPDATA\\sessionview\"",
+            "RMDir /r \"$PROFILE\\.sessionview\"",
             "${EndIf}",
             "!macroend",
         ]

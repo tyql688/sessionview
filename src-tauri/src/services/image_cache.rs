@@ -32,9 +32,10 @@ pub(crate) fn extract_image_paths(messages: &[Message]) -> Vec<String> {
 // Data directory helper
 // ---------------------------------------------------------------------------
 
-/// Resolve the app data directory for image caching.
+/// Resolve the app data directory for image caching. Mirrors
+/// `crate::default_data_dir()` (`~/.sessionview` on every platform).
 pub(crate) fn image_cache_data_dir() -> Option<PathBuf> {
-    dirs::data_local_dir().map(|d| d.join("sessionview"))
+    dirs::home_dir().map(|d| d.join(".sessionview"))
 }
 
 // ---------------------------------------------------------------------------

@@ -79,6 +79,20 @@ SessionView 当前读取 Claude Code、Codex CLI、Antigravity、Kimi Code、Cur
 > xattr -cr "/Applications/SessionView.app"
 > ```
 
+### Headless（浏览器模式）
+
+更喜欢浏览器，或想在远程/开发机上使用？
+
+```bash
+npx sessionview          # 在 http://127.0.0.1:9921 提供完整应用
+npx sessionview --open   # …并自动打开浏览器
+```
+
+Headless 服务与桌面应用共用同一个 Rust 核心、同一套 UI 和同一个索引
+（`~/.sessionview`）——任意一端索引过的会话另一端立即可见。默认只绑定
+localhost；如需对外暴露，请加 `--host 0.0.0.0 --token <secret>`（此后每个
+API 请求都必须携带该 token）。
+
 ## 快速开始
 
 1. 安装并启动 SessionView

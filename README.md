@@ -79,6 +79,21 @@ Grab the latest build from [**Releases**](https://github.com/tyql688/sessionview
 > xattr -cr "/Applications/SessionView.app"
 > ```
 
+### Headless (browser)
+
+Prefer a browser over a desktop app — or running on a remote/dev machine?
+
+```bash
+npx sessionview          # serves the full app on http://127.0.0.1:9921
+npx sessionview --open   # …and opens your browser
+```
+
+The headless server is the same Rust core and the same UI as the desktop app,
+and it shares the desktop app's index (`~/.sessionview`) — sessions indexed by either are
+instantly visible in both. It binds localhost only by default; to expose it
+beyond localhost, pass `--host 0.0.0.0 --token <secret>` (every API request
+must then carry the token).
+
 ## Quick Start
 
 1. Install and open SessionView
@@ -95,6 +110,15 @@ cd sessionview
 npm install
 npm run tauri build              # Production build
 npx tauri build --bundles dmg    # DMG only
+```
+
+Headless server binary (no webview dependencies):
+
+```bash
+npm run build                    # frontend dist/ gets embedded into the binary
+cd src-tauri
+cargo build --release --no-default-features --features headless
+./target/release/sessionview-headless --port 9921
 ```
 
 ## Development

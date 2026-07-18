@@ -1,0 +1,26 @@
+{
+  "name": "sessionview",
+  "version": "0.0.0-dev",
+  "description": "Browse local AI coding sessions (Claude Code, Codex, Cursor, …) from a browser — headless SessionView server",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tyql688/sessionview.git"
+  },
+  "homepage": "https://github.com/tyql688/sessionview#readme",
+  "keywords": ["claude-code", "codex", "cursor", "sessions", "viewer", "headless"],
+  "bin": {
+    "sessionview": "bin/sessionview.js"
+  },
+  "files": ["bin/"],
+  "engines": {
+    "node": ">=18.17.0"
+  },
+  "optionalDependencies": {
+    "sessionview-darwin-arm64": "0.0.0-dev",
+    "sessionview-darwin-x64": "0.0.0-dev",
+    "sessionview-linux-x64": "0.0.0-dev",
+    "sessionview-linux-arm64": "0.0.0-dev",
+    "sessionview-win32-x64": "0.0.0-dev"
+  }
+}

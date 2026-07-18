@@ -197,9 +197,80 @@ jobs:
         shell: bash
         run: find src-tauri/target -maxdepth 5 -type f \( -name "*.dmg" -o -name "*.tar.gz" -o -name "*.sig" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.exe" \) 2>/dev/null || true
 
+  build-headless:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            key: darwin-arm64
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            key: darwin-x64
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            key: linux-x64
+          - platform: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            key: linux-arm64
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            key: win32-x64
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: headless-${{ matrix.key }}
+
+      - name: Build headless server
+        working-directory: src-tauri
+        run: cargo build --release --no-default-features --features headless --bin sessionview-headless --target ${{ matrix.target }}
+
+      - name: Collect headless binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p headless-assets
+          EXT=""
+          [ "${{ matrix.key }}" = "win32-x64" ] && EXT=".exe"
+          SRC="src-tauri/target/${{ matrix.target }}/release/sessionview-headless$EXT"
+          OUT="headless-assets/sessionview-headless-${{ matrix.key }}$EXT"
+          cp "$SRC" "$OUT"
+          HASH="$(openssl dgst -sha256 -r "$OUT" | awk '{print $1}')"
+          printf '%s  %s\n' "$HASH" "$(basename "$OUT")" > "$OUT.sha256"
+          ls -la headless-assets/
+
+      - name: Upload headless artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: headless-${{ matrix.key }}
+          path: headless-assets/*
+          if-no-files-found: error
+
   publish-release:
     runs-on: ubuntu-22.04
-    needs: build
+    needs: [build, build-headless]
     permissions:
       contents: write
     steps:
@@ -207,6 +278,13 @@ jobs:
         uses: actions/download-artifact@v5
         with:
           pattern: release-assets-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Download headless artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: headless-*
           path: release-assets
           merge-multiple: true
 
@@ -278,8 +356,49 @@ jobs:
             - **macOS**: `SessionView-${{ github.ref_name }}-macOS.dmg`
             - **Windows**: `SessionView-${{ github.ref_name }}-Windows.exe`
             - **Linux**: `SessionView-${{ github.ref_name }}-Linux-x86_64.AppImage` / `.deb`
+            - **Headless server**: `npx sessionview` (binaries: `sessionview-headless-*`)
 
             > `.tar.gz` files are for Tauri auto-updater only.
           files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-npm:
+    runs-on: ubuntu-22.04
+    needs: publish-release
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Download headless artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: headless-*
+          path: headless-binaries
+          merge-multiple: true
+
+      - name: Generate npm packages
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          node npm/scripts/generate-platform-packages.mjs "$VERSION" headless-binaries npm-dist
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN not configured — skipping npm publish."
+            exit 0
+          fi
+          # Platform packages first so the main package never references
+          # versions that do not exist yet.
+          for dir in npm-dist/sessionview-*; do
+            (cd "$dir" && npm publish --access public)
+          done
+          (cd npm-dist/sessionview && npm publish --access public)

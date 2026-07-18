@@ -65,3 +65,11 @@ jobs:
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test
+
+      - name: Rust clippy (headless)
+        working-directory: src-tauri
+        run: cargo clippy --all-targets --no-default-features --features headless -- -D warnings
+
+      - name: Rust tests (headless)
+        working-directory: src-tauri
+        run: cargo test --no-default-features --features headless

@@ -17,6 +17,12 @@ when this file and those disagree, those win.
 # App / frontend
 npm run tauri dev        # run the app with hot reload
 npm run tauri build      # production bundle
+
+# Headless server (browser shell; build dist first so it can be embedded)
+npm run build && cd src-tauri && \
+  cargo build --release --no-default-features --features headless
+# gates must pass under BOTH feature sets: default (gui) and
+# --no-default-features --features headless
 npm run check            # typecheck + Biome + ESLint — the frontend gate
 npm test                 # frontend tests (Vitest, run mode)
 npm run knip             # dead-code / dependency audit — a release gate
@@ -68,9 +74,23 @@ across `src-tauri/src/{providers,provider,indexer.rs,db,models.rs}` and
   guard (`commands/sessions.rs`) serializes passes so a scan never races the
   app. Parsed sessions upsert into **SQLite** (`db/`) with FTS5 backing
   full-text search; progress streams to the UI as `maintenance-status` events.
-- **Commands** (`commands/`) are the Tauri IPC surface and the trust boundary —
+- **Commands** (`commands/`) are the backend surface and the trust boundary —
   validate provider strings and path inputs here, and keep the asset scope
-  allowlist-based.
+  allowlist-based. Command bodies are transport-agnostic core functions
+  (`fn(state: AppState, …)`); two thin shells wrap them: `commands/gui.rs`
+  (`#[tauri::command]`, feature `gui`, default) and `server/dispatch.rs`
+  (HTTP invoke, feature `headless`). Events go through the `EventBus` trait
+  (`services/events.rs`) — Tauri emit in the GUI, SSE broadcast headless.
+  **Adding a command means updating all three: the core, the gui wrapper +
+  `generate_handler!` list, and the dispatch match arm.**
+- **Headless shell** (`server/`, feature `headless`): axum server (default
+  port 9921) serving the embedded `dist/` plus `POST /api/invoke/{command}`,
+  `GET /api/events` (SSE), and export-download endpoints. It shares the GUI's
+  data dir and SQLite index (WAL + busy_timeout make the two processes safe
+  to run concurrently), so it never re-indexes what the GUI already did. The
+  frontend picks its transport at runtime via `src/lib/runtime.ts`
+  (`__TAURI_INTERNALS__` detection); `npm/` holds the `npx
+  sessionview-headless` launcher and platform-package generator.
 - **Parent/child trees.** Subagents and sidechains are child sessions, linked to
   their parent by *typed* provider signals — never by scanning message text.
   Some providers store children in separate files; the "Open subagent" UI

@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Headless mode: `npx sessionview-headless` serves the full SessionView UI in
+  a browser on port 9921. Same Rust core, same frontend, and the same SQLite
+  index/data dir as the desktop app — nothing is re-indexed or duplicated.
+  Backend commands travel over `POST /api/invoke/{command}`, backend events
+  over SSE; exports become browser downloads; localhost-only by default with
+  optional `--token` auth for remote access.
+
 ## [0.6.3] - 2026-07-15
 
 ### Fixed

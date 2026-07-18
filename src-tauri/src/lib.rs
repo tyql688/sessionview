@@ -53,11 +53,13 @@ use services::EventBus;
 
 /// Per-user data directory shared by the GUI and headless shells — pointing
 /// both at the same SQLite index is what makes them interchangeable without
-/// re-indexing or duplicated storage.
+/// re-indexing or duplicated storage. Fixed at `~/.sessionview` on every
+/// platform (no migration from older platform-specific dirs — a fresh index
+/// is rebuilt incrementally on first run).
 pub fn default_data_dir() -> anyhow::Result<PathBuf> {
-    dirs::data_local_dir()
-        .map(|d| d.join("sessionview"))
-        .context("failed to resolve local data dir")
+    dirs::home_dir()
+        .map(|d| d.join(".sessionview"))
+        .context("failed to resolve home dir")
 }
 
 /// Build the shared application state (database, indexer, caches). Both
