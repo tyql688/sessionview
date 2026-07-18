@@ -397,8 +397,20 @@ jobs:
             exit 0
           fi
           # Platform packages first so the main package never references
-          # versions that do not exist yet.
+          # versions that do not exist yet. Skip already-published versions
+          # so a partial-failure rerun completes instead of tripping on
+          # publish conflicts.
+          VERSION="${GITHUB_REF_NAME#v}"
+          publish() {
+            local name
+            name=$(node -p "require('./$1/package.json').name")
+            if npm view "$name@$VERSION" version >/dev/null 2>&1; then
+              echo "$name@$VERSION already published — skipping"
+              return 0
+            fi
+            (cd "$1" && npm publish --access public)
+          }
           for dir in npm-dist/sessionview-*; do
-            (cd "$dir" && npm publish --access public)
+            publish "$dir"
           done
-          (cd npm-dist/sessionview && npm publish --access public)
+          publish npm-dist/sessionview
