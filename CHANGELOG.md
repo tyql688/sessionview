@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.3] - Unreleased
+
+### Changed
+
+- Restyled the main layout as floating chrome cards: the explorer, editor
+  area, settings, usage view and status bar now render as rounded cards with
+  a shared gap over the window background.
+- The title bar only renders in the desktop (Tauri) runtime, so the headless
+  browser shell gets a clean edge-to-edge layout.
+
 ## [0.7.2] - 2026-07-20
 
 ### Fixed
