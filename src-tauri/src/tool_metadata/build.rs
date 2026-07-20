@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use super::names::{canonical_tool_name, display_tool_name, parse_mcp_tool_name, tool_category};
 use super::presentation::refresh_tool_presentation;

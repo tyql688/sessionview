@@ -114,12 +114,11 @@ pub(super) fn edit_result_detail(
         return detail(lines).with_diff(old_text, new_text);
     }
 
-    if structured.get("type").and_then(Value::as_str) == Some("create") {
-        if let Some(content) = first_string(structured, &["content"]) {
-            if !content.is_empty() {
-                return detail(lines).with_diff("", content);
-            }
-        }
+    if structured.get("type").and_then(Value::as_str) == Some("create")
+        && let Some(content) = first_string(structured, &["content"])
+        && !content.is_empty()
+    {
+        return detail(lines).with_diff("", content);
     }
 
     detail(lines)

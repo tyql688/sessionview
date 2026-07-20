@@ -9,7 +9,7 @@ use std::collections::VecDeque;
 
 use crate::models::{Message, MessageRole, Provider, TokenUsage};
 use crate::tool_metadata::{
-    build_tool_metadata, enrich_tool_metadata, ToolCallFacts, ToolResultFacts,
+    ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata,
 };
 
 use super::lenient_json::{
@@ -19,12 +19,12 @@ use super::workspace::extract_absolute_paths_from_value;
 use super::{Step, ToolCall};
 
 pub(super) fn clean_user_content(content: &str) -> String {
-    if let Some(start_idx) = content.find("<USER_REQUEST>") {
-        if let Some(end_idx) = content.find("</USER_REQUEST>") {
-            let start = start_idx + "<USER_REQUEST>".len();
-            if end_idx > start {
-                return content[start..end_idx].trim().to_string();
-            }
+    if let Some(start_idx) = content.find("<USER_REQUEST>")
+        && let Some(end_idx) = content.find("</USER_REQUEST>")
+    {
+        let start = start_idx + "<USER_REQUEST>".len();
+        if end_idx > start {
+            return content[start..end_idx].trim().to_string();
         }
     }
     content.trim().to_string()
@@ -147,10 +147,9 @@ pub(super) fn parse_invoke_subagent_content(content: &str) -> InvokeSubagentInfo
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
+            && !info.conversation_ids.iter().any(|existing| existing == id)
         {
-            if !info.conversation_ids.iter().any(|existing| existing == id) {
-                info.conversation_ids.push(id.to_string());
-            }
+            info.conversation_ids.push(id.to_string());
         }
         if info.workspace.is_none() {
             for uri in &parsed.workspace_uris {
@@ -349,12 +348,11 @@ impl AntigravityScanAccum {
                 if let Some(ref args) = tc.args {
                     extract_absolute_paths_from_value(args, &mut self.candidate_paths);
                 }
-                if self.parent_from_send.is_none() {
-                    if let Some(recipient) = recipient_from_send_message(tc) {
-                        if recipient != conversation_id {
-                            self.parent_from_send = Some(recipient);
-                        }
-                    }
+                if self.parent_from_send.is_none()
+                    && let Some(recipient) = recipient_from_send_message(tc)
+                    && recipient != conversation_id
+                {
+                    self.parent_from_send = Some(recipient);
                 }
             }
         }
@@ -536,82 +534,82 @@ impl AntigravityScanAccum {
         conversation_id: &str,
         invoke_info: Option<&InvokeSubagentInfo>,
     ) {
-        if step.source == "MODEL" || step.source == "SYSTEM" {
-            if let Some(idx) = self.pending_tool_indices.pop_front() {
-                let content = step.content.clone().unwrap_or_default();
-                let invoke_children: Vec<String> = invoke_info
-                    .as_ref()
-                    .map(|info| {
-                        info.conversation_ids
-                            .iter()
-                            .filter(|id| id.as_str() != conversation_id)
-                            .cloned()
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let mut manage_info = self
-                    .messages
-                    .get(idx)
-                    .and_then(|message| message.tool_metadata.as_ref())
-                    .filter(|metadata| metadata.raw_name == "manage_subagents")
-                    .map(|_| parse_manage_subagents_content(&content))
-                    .unwrap_or_default();
-
-                if !manage_info.conversation_ids.is_empty() {
-                    let mut new_ids = Vec::new();
-                    let mut new_prompts = Vec::new();
-                    for (id, prompt) in manage_info
-                        .conversation_ids
+        if (step.source == "MODEL" || step.source == "SYSTEM")
+            && let Some(idx) = self.pending_tool_indices.pop_front()
+        {
+            let content = step.content.clone().unwrap_or_default();
+            let invoke_children: Vec<String> = invoke_info
+                .as_ref()
+                .map(|info| {
+                    info.conversation_ids
                         .iter()
-                        .zip(manage_info.prompts.iter())
-                    {
-                        if id == conversation_id || self.child_session_ids.contains(id) {
-                            continue;
-                        }
-                        self.child_session_ids.push(id.clone());
-                        new_ids.push(id.clone());
-                        new_prompts.push(prompt.clone());
+                        .filter(|id| id.as_str() != conversation_id)
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default();
+            let mut manage_info = self
+                .messages
+                .get(idx)
+                .and_then(|message| message.tool_metadata.as_ref())
+                .filter(|metadata| metadata.raw_name == "manage_subagents")
+                .map(|_| parse_manage_subagents_content(&content))
+                .unwrap_or_default();
+
+            if !manage_info.conversation_ids.is_empty() {
+                let mut new_ids = Vec::new();
+                let mut new_prompts = Vec::new();
+                for (id, prompt) in manage_info
+                    .conversation_ids
+                    .iter()
+                    .zip(manage_info.prompts.iter())
+                {
+                    if id == conversation_id || self.child_session_ids.contains(id) {
+                        continue;
                     }
-                    manage_info.conversation_ids = new_ids;
-                    manage_info.prompts = new_prompts;
+                    self.child_session_ids.push(id.clone());
+                    new_ids.push(id.clone());
+                    new_prompts.push(prompt.clone());
                 }
+                manage_info.conversation_ids = new_ids;
+                manage_info.prompts = new_prompts;
+            }
 
-                if let Some(msg) = self.messages.get_mut(idx) {
-                    self.context_chars += content.len();
-                    msg.content = content;
+            if let Some(msg) = self.messages.get_mut(idx) {
+                self.context_chars += content.len();
+                msg.content = content;
 
-                    if let Some(metadata) = msg.tool_metadata.as_mut() {
-                        enrich_tool_metadata(
-                            metadata,
-                            ToolResultFacts {
-                                raw_result: None,
-                                is_error: Some(step.status == "ERROR"),
-                                status: Some(&step.status),
-                                artifact_path: None,
-                            },
-                        );
+                if let Some(metadata) = msg.tool_metadata.as_mut() {
+                    enrich_tool_metadata(
+                        metadata,
+                        ToolResultFacts {
+                            raw_result: None,
+                            is_error: Some(step.status == "ERROR"),
+                            status: Some(&step.status),
+                            artifact_path: None,
+                        },
+                    );
 
-                        if !invoke_children.is_empty() || !manage_info.conversation_ids.is_empty() {
-                            let (child_ids, prompts) = if !invoke_children.is_empty() {
-                                let prompts = metadata
-                                    .structured
-                                    .as_ref()
-                                    .and_then(|v| v.get("childPrompts"))
-                                    .cloned()
-                                    .unwrap_or_else(|| serde_json::json!([]));
-                                (invoke_children, prompts)
-                            } else {
-                                (
-                                    manage_info.conversation_ids.clone(),
-                                    serde_json::json!(manage_info.prompts),
-                                )
-                            };
-                            metadata.structured = Some(serde_json::json!({
-                                "childConversationIds": child_ids,
-                                "childPrompts": prompts,
-                            }));
-                            metadata.result_kind = Some("agent_summary".to_string());
-                        }
+                    if !invoke_children.is_empty() || !manage_info.conversation_ids.is_empty() {
+                        let (child_ids, prompts) = if !invoke_children.is_empty() {
+                            let prompts = metadata
+                                .structured
+                                .as_ref()
+                                .and_then(|v| v.get("childPrompts"))
+                                .cloned()
+                                .unwrap_or_else(|| serde_json::json!([]));
+                            (invoke_children, prompts)
+                        } else {
+                            (
+                                manage_info.conversation_ids.clone(),
+                                serde_json::json!(manage_info.prompts),
+                            )
+                        };
+                        metadata.structured = Some(serde_json::json!({
+                            "childConversationIds": child_ids,
+                            "childPrompts": prompts,
+                        }));
+                        metadata.result_kind = Some("agent_summary".to_string());
                     }
                 }
             }

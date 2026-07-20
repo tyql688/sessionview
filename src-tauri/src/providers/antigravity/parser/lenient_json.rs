@@ -215,10 +215,10 @@ pub(super) fn decode_antigravity_value(value: &Value) -> Value {
             return None;
         }
         let escaped = escape_control_chars_for_json(raw);
-        if escaped != raw {
-            if let Ok(parsed) = serde_json::from_str::<Value>(&escaped) {
-                return Some(parsed);
-            }
+        if escaped != raw
+            && let Ok(parsed) = serde_json::from_str::<Value>(&escaped)
+        {
+            return Some(parsed);
         }
         // Last-resort lenient unwrap: agy occasionally truncates the
         // inner double-encoded payload mid-string (`...<truncated N

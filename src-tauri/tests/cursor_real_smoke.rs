@@ -1,3 +1,6 @@
+// Test code: clippy's allow-*-in-tests only covers `#[cfg(test)]` modules.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Real-data smoke test for the Cursor CLI provider.
 //!
 //! Run manually against a local `~/.cursor/` install:

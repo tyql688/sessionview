@@ -6,21 +6,21 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 use crate::models::{Provider, SessionMeta};
-use crate::provider::{LoadedSession, ParsedSession};
+use crate::provider::{LoadedSession, ParsedSession, UsageEvent, token_totals_from_usage_events};
 
 use super::types::*;
 
 /// Parse a Pi session JSONL file
 pub(crate) fn parse_session_file(path: &Path) -> Option<ParsedSession> {
-    let (header, entries, parse_warning_count) = parse_entries(path)?;
+    let (header, entries, mut parse_warning_count) = parse_entries(path)?;
 
     let active_branch = build_active_branch(&entries);
     let context_branch = build_context_branch(&entries, &active_branch, path);
     let messages = extract_messages(&entries, &context_branch);
     let title = extract_title(&entries, &active_branch, &header);
     let model = extract_model(&entries, &active_branch);
-    let (input_tokens, output_tokens, cache_read_tokens, cache_write_tokens) =
-        extract_token_totals(&entries, &active_branch);
+    let usage_events = extract_usage_events(&entries, path, &mut parse_warning_count);
+    let token_totals = token_totals_from_usage_events(&usage_events);
 
     let created_at = match crate::provider_utils::parse_rfc3339_epoch_seconds(&header.timestamp) {
         Some(ts) => ts,
@@ -54,10 +54,10 @@ pub(crate) fn parse_session_file(path: &Path) -> Option<ParsedSession> {
         cc_version: None,
         git_branch: None,
         parent_id,
-        input_tokens,
-        output_tokens,
-        cache_read_tokens,
-        cache_write_tokens,
+        input_tokens: token_totals.input_tokens,
+        output_tokens: token_totals.output_tokens,
+        cache_read_tokens: token_totals.cache_read_tokens,
+        cache_write_tokens: token_totals.cache_write_tokens,
     };
 
     let content_text = messages
@@ -71,7 +71,7 @@ pub(crate) fn parse_session_file(path: &Path) -> Option<ParsedSession> {
         content_text,
         parse_warning_count,
         child_session_ids: Vec::new(),
-        usage_events: Vec::new(),
+        usage_events,
         source_mtime: std::fs::metadata(path)
             .ok()
             .and_then(|m| m.modified().ok())
@@ -82,12 +82,7 @@ pub(crate) fn parse_session_file(path: &Path) -> Option<ParsedSession> {
 
 /// Load messages from a Pi session file (for detail view)
 pub(crate) fn load_messages(path: &Path) -> Option<LoadedSession> {
-    let (_header, entries, parse_warning_count) = parse_entries(path)?;
-    let active_branch = build_active_branch(&entries);
-    let context_branch = build_context_branch(&entries, &active_branch, path);
-    let messages = extract_messages(&entries, &context_branch);
-
-    Some(LoadedSession::from_messages(messages, parse_warning_count))
+    parse_session_file(path).map(LoadedSession::from_parsed)
 }
 
 fn parse_entries(path: &Path) -> Option<(PiSessionHeader, Vec<PiEntry>, u32)> {
@@ -176,10 +171,10 @@ fn migrate_pi_header_value(header: &mut Value) {
         return;
     };
     obj.insert("version".to_string(), Value::from(3));
-    if !obj.contains_key("parentSession") {
-        if let Some(branched_from) = obj.remove("branchedFrom") {
-            obj.insert("parentSession".to_string(), branched_from);
-        }
+    if !obj.contains_key("parentSession")
+        && let Some(branched_from) = obj.remove("branchedFrom")
+    {
+        obj.insert("parentSession".to_string(), branched_from);
     }
 }
 
@@ -333,27 +328,24 @@ fn extract_title(entries: &[PiEntry], branch: &[String], header: &PiSessionHeade
     if let Some(info) = entries.iter().rev().find_map(|entry| match entry {
         PiEntry::SessionInfo(info) if branch_set.contains(info.base.id.as_str()) => Some(info),
         _ => None,
-    }) {
-        if let Some(name) = info
-            .name
-            .as_deref()
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-        {
-            return name.to_string();
-        }
+    }) && let Some(name) = info
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        return name.to_string();
     }
 
     // Fall back to first user message
     for entry in entries {
-        if let PiEntry::Message(msg_entry) = entry {
-            if branch_set.contains(msg_entry.base.id.as_str()) {
-                if let PiAgentMessage::User(user) = &msg_entry.message {
-                    let text = extract_content_text(&user.content);
-                    if !text.trim().is_empty() {
-                        return crate::provider_utils::session_title(Some(&text));
-                    }
-                }
+        if let PiEntry::Message(msg_entry) = entry
+            && branch_set.contains(msg_entry.base.id.as_str())
+            && let PiAgentMessage::User(user) = &msg_entry.message
+        {
+            let text = extract_content_text(&user.content);
+            if !text.trim().is_empty() {
+                return crate::provider_utils::session_title(Some(&text));
             }
         }
     }
@@ -367,62 +359,66 @@ fn extract_model(entries: &[PiEntry], branch: &[String]) -> Option<String> {
 
     // Look for model_change entry
     for entry in entries.iter().rev() {
-        if let PiEntry::ModelChange(model_change) = entry {
-            if branch_set.contains(model_change.base.id.as_str()) {
-                return Some(format!(
-                    "{}/{}",
-                    model_change.provider, model_change.model_id
-                ));
-            }
+        if let PiEntry::ModelChange(model_change) = entry
+            && branch_set.contains(model_change.base.id.as_str())
+        {
+            return Some(format!(
+                "{}/{}",
+                model_change.provider, model_change.model_id
+            ));
         }
     }
 
     // Fall back to assistant message model
     for entry in entries.iter().rev() {
-        if let PiEntry::Message(msg_entry) = entry {
-            if branch_set.contains(msg_entry.base.id.as_str()) {
-                if let PiAgentMessage::Assistant(assistant) = &msg_entry.message {
-                    if let Some(model) = &assistant.model {
-                        let provider = assistant.provider.as_deref().unwrap_or("unknown");
-                        return Some(format!("{}/{}", provider, model));
-                    }
-                }
-            }
+        if let PiEntry::Message(msg_entry) = entry
+            && branch_set.contains(msg_entry.base.id.as_str())
+            && let PiAgentMessage::Assistant(assistant) = &msg_entry.message
+            && let Some(model) = &assistant.model
+        {
+            let provider = assistant.provider.as_deref().unwrap_or("unknown");
+            return Some(format!("{}/{}", provider, model));
         }
     }
 
     None
 }
 
-/// Extract token totals from entries
-fn extract_token_totals(entries: &[PiEntry], branch: &[String]) -> (u64, u64, u64, u64) {
-    let branch_set: HashSet<&str> = branch.iter().map(String::as_str).collect();
-    let mut input_tokens = 0u64;
-    let mut output_tokens = 0u64;
-    let mut cache_read_tokens = 0u64;
-    let mut cache_write_tokens = 0u64;
-
-    for entry in entries {
-        if let PiEntry::Message(msg_entry) = entry {
-            if branch_set.contains(msg_entry.base.id.as_str()) {
-                if let PiAgentMessage::Assistant(assistant) = &msg_entry.message {
-                    if let Some(usage) = &assistant.usage {
-                        input_tokens += usage.input;
-                        output_tokens += usage.output;
-                        cache_read_tokens += usage.cache_read;
-                        cache_write_tokens += usage.cache_write;
-                    }
-                }
-            }
-        }
-    }
-
-    (
-        input_tokens,
-        output_tokens,
-        cache_read_tokens,
-        cache_write_tokens,
-    )
+fn extract_usage_events(
+    entries: &[PiEntry],
+    path: &Path,
+    parse_warning_count: &mut u32,
+) -> Vec<UsageEvent> {
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let PiEntry::Message(message) = entry else {
+                return None;
+            };
+            let PiAgentMessage::Assistant(assistant) = &message.message else {
+                return None;
+            };
+            let usage = assistant.usage.as_ref()?;
+            let Some(model) = assistant.model.as_deref().filter(|model| !model.is_empty()) else {
+                log::warn!(
+                    "skipping Pi usage without a model in '{}' at entry {}",
+                    path.display(),
+                    message.base.id
+                );
+                *parse_warning_count = parse_warning_count.saturating_add(1);
+                return None;
+            };
+            Some(UsageEvent {
+                timestamp: message.base.timestamp.clone(),
+                model: model.to_string(),
+                input_tokens: usage.input,
+                output_tokens: usage.output,
+                cache_read_input_tokens: usage.cache_read,
+                cache_creation_input_tokens: usage.cache_write,
+                usage_hash: None,
+            })
+        })
+        .collect()
 }
 
 /// Extract the Pi session-list `modified` timestamp as epoch seconds.

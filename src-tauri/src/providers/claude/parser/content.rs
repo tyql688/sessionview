@@ -61,8 +61,9 @@ pub(super) fn dedup_hash_from_entry(entry: &Value) -> Option<String> {
 
 /// Extract token usage from a message's `usage` field.
 pub(super) fn extract_token_usage(message: &Value) -> Option<TokenUsage> {
-    let usage = crate::provider_utils::token_usage_from(
-        message.get("usage")?,
+    let value = message.get("usage")?;
+    let mut usage = crate::provider_utils::token_usage_from(
+        value,
         &crate::provider_utils::UsageKeys {
             input: &["input_tokens"],
             output: &["output_tokens"],
@@ -70,7 +71,26 @@ pub(super) fn extract_token_usage(message: &Value) -> Option<TokenUsage> {
             cache_write: &["cache_creation_input_tokens"],
         },
     )?;
-    if usage.input_tokens == 0 && usage.output_tokens == 0 {
+    // Some lines report cache writes only in the `cache_creation` breakdown.
+    // A larger flat total wins: the breakdown may omit TTL buckets.
+    if let Some(cache_creation) = value.get("cache_creation").and_then(Value::as_object) {
+        let total = cache_creation
+            .get("ephemeral_5m_input_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            .saturating_add(
+                cache_creation
+                    .get("ephemeral_1h_input_tokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+            );
+        let Ok(total) = u32::try_from(total) else {
+            log::warn!("Claude cache creation usage exceeds the supported token range");
+            return None;
+        };
+        usage.cache_creation_input_tokens = usage.cache_creation_input_tokens.max(total);
+    }
+    if usage.total_tokens() == 0 {
         return None;
     }
     Some(usage)

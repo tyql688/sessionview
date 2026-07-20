@@ -13,11 +13,6 @@ use crate::providers::claude::parser;
 
 pub(crate) struct Descriptor;
 impl crate::provider::ProviderDescriptor for Descriptor {
-    fn owns_source_path(&self, source_path: &str) -> bool {
-        let p = source_path.replace('\\', "/");
-        p.contains("/.cc-mirror/") && p.contains("/config/projects/")
-    }
-
     fn resume_command(&self, session_id: &str, variant_name: Option<&str>) -> Option<String> {
         variant_name.map(|name| format!("{name} --resume {session_id}"))
     }

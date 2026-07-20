@@ -60,19 +60,19 @@ pub(super) fn scan_updates(
 
     let stats = for_each_jsonl_record(BufReader::new(file), updates_path, |_, line: Value| {
         collect_anchor(&mut anchors, &line, updates_path);
-        if let Some(builder) = builder.as_mut() {
-            if let (Some(update), Some(kind)) = (
+        if let Some(builder) = builder.as_mut()
+            && let (Some(update), Some(kind)) = (
                 line.pointer("/params/update"),
                 line.pointer("/params/update/sessionUpdate")
                     .and_then(Value::as_str),
-            ) {
-                let timestamp = line
-                    .get("timestamp")
-                    .and_then(Value::as_i64)
-                    .and_then(|secs| chrono::DateTime::from_timestamp(secs, 0))
-                    .map(|dt| dt.to_rfc3339());
-                builder.push_update(kind, update, timestamp.as_deref());
-            }
+            )
+        {
+            let timestamp = line
+                .get("timestamp")
+                .and_then(Value::as_i64)
+                .and_then(|secs| chrono::DateTime::from_timestamp(secs, 0))
+                .map(|dt| dt.to_rfc3339());
+            builder.push_update(kind, update, timestamp.as_deref());
         }
         ControlFlow::Continue(())
     });
@@ -165,21 +165,26 @@ pub(super) fn collect_anchor(anchors: &mut UpdateAnchors, line: &Value, updates_
                 );
             }
             for (model, usage) in model_usage {
+                let input = usage
+                    .get("inputTokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                let cache_read = usage
+                    .get("cachedReadTokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0)
+                    .min(input);
                 anchors.usage_events.push(UsageEvent {
                     timestamp: ts.clone(),
                     model: model.clone(),
-                    input_tokens: usage
-                        .get("inputTokens")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(0),
+                    input_tokens: input.saturating_sub(cache_read),
                     output_tokens: usage
                         .get("outputTokens")
                         .and_then(Value::as_u64)
                         .unwrap_or(0),
-                    cache_read_input_tokens: usage
-                        .get("cachedReadTokens")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(0),
+                    cache_read_input_tokens: cache_read,
+                    cache_creation_input_tokens: 0,
+                    usage_hash: None,
                 });
             }
         }

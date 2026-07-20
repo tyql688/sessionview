@@ -25,6 +25,7 @@ const DESCRIPTORS: &[ToolDescriptor] = &[
             "Shell",
             "shell",
             "bash",
+            "exec",
             "exec_command",
             "shell_command",
             "run_shell_command",

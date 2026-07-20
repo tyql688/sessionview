@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use serde::Serialize;
 
 use crate::db::Database;
@@ -10,12 +10,12 @@ use crate::models::{Message, Provider, SessionDetail, SessionMeta, TokenTotals};
 use crate::services::load_cancel;
 use crate::services::load_session_meta;
 use crate::services::session_view::{
-    build_session_turn_outline, session_window_bounds, subagent_meta_title, with_load_guard,
-    LoadRequest, SessionTurnOutline,
+    LoadRequest, SessionTurnOutline, build_session_turn_outline, session_window_bounds,
+    subagent_meta_title, with_load_guard,
 };
 
-use super::session_tail::try_tail_fast_path;
 use super::AppState;
+use super::session_tail::try_tail_fast_path;
 
 /// Sentinel error returned when a load was cancelled mid-flight. Mapped
 /// to a typed string the frontend can ignore (rather than show as an
@@ -47,6 +47,16 @@ pub struct SessionOpenWindow {
     pub window: SessionMessagesWindow,
 }
 
+/// Clears `maintenance_running` on drop. Lives inside the blocking closure so
+/// a dropped command future (HTTP client disconnect) can't leak the flag set.
+struct MaintenanceGuard(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for MaintenanceGuard {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 pub async fn reindex(state: AppState) -> CommandResult<usize> {
     use std::sync::atomic::Ordering;
 
@@ -55,12 +65,14 @@ pub async fn reindex(state: AppState) -> CommandResult<usize> {
             "maintenance task already running"
         )));
     }
+    let guard = MaintenanceGuard(state.maintenance_running.clone());
 
     let worker_state = state.clone();
-    let result =
-        super::blocking(move || worker_state.indexer.reindex().map_err(anyhow::Error::from)).await;
-    state.maintenance_running.store(false, Ordering::SeqCst);
-    result
+    super::blocking(move || {
+        let _guard = guard;
+        worker_state.indexer.reindex().map_err(anyhow::Error::from)
+    })
+    .await
 }
 
 pub async fn reindex_providers(
@@ -75,9 +87,11 @@ pub async fn reindex_providers(
             "maintenance task already running"
         )));
     }
+    let guard = MaintenanceGuard(state.maintenance_running.clone());
 
     let worker_state = state.clone();
-    let result = super::blocking(move || -> anyhow::Result<usize> {
+    super::blocking(move || -> anyhow::Result<usize> {
+        let _guard = guard;
         let filter: Vec<crate::models::Provider> = providers
             .iter()
             .filter_map(|s| crate::models::Provider::parse(s))
@@ -89,9 +103,7 @@ pub async fn reindex_providers(
             .indexer
             .reindex_providers(Some(&filter), aggressive.unwrap_or(false))?)
     })
-    .await;
-    state.maintenance_running.store(false, Ordering::SeqCst);
-    result
+    .await
 }
 
 pub async fn get_tree(state: AppState) -> CommandResult<Vec<crate::models::TreeNode>> {

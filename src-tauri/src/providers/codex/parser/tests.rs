@@ -1,4 +1,4 @@
-use super::{parse_session_tail, CodexProvider};
+use super::{CodexProvider, parse_session_tail};
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -63,6 +63,7 @@ fn parse_session_skips_usage_event_with_no_resolvable_model() {
         "must NOT fabricate a model name when none resolves; got {:?}",
         parsed.usage_events
     );
+    assert_eq!(parsed.parse_warning_count, 1);
     // Both paths must skip together: assistant message also gets no
     // phantom usage stamp when the model is unresolvable.
     let assistant = parsed
@@ -78,7 +79,7 @@ fn parse_session_skips_usage_event_with_no_resolvable_model() {
 }
 
 #[test]
-fn parse_session_collects_usage_events_keeping_total_input_and_cached_input() {
+fn parse_session_collects_usage_events_with_disjoint_input_and_cache() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("codex.jsonl");
     fs::write(
@@ -98,7 +99,7 @@ fn parse_session_collects_usage_events_keeping_total_input_and_cached_input() {
     let events = &parsed.usage_events;
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].model, "gpt-5.4");
-    assert_eq!(events[0].input_tokens, 1000);
+    assert_eq!(events[0].input_tokens, 400);
     assert_eq!(events[0].cache_read_input_tokens, 600);
     assert_eq!(events[0].output_tokens, 50);
 }
@@ -127,13 +128,13 @@ fn parse_session_prefers_last_token_usage_when_both_last_and_total_are_present()
     // E1, E2, E3 have distinct timestamps, so none are exact duplicates;
     // each contributes its last_token_usage.
     assert_eq!(events.len(), 3);
-    assert_eq!(events[0].input_tokens, 1000);
+    assert_eq!(events[0].input_tokens, 400);
     assert_eq!(events[0].cache_read_input_tokens, 600);
     assert_eq!(events[0].output_tokens, 50);
-    assert_eq!(events[1].input_tokens, 1000);
+    assert_eq!(events[1].input_tokens, 400);
     assert_eq!(events[1].cache_read_input_tokens, 600);
     assert_eq!(events[1].output_tokens, 50);
-    assert_eq!(events[2].input_tokens, 700);
+    assert_eq!(events[2].input_tokens, 300);
     assert_eq!(events[2].cache_read_input_tokens, 400);
     assert_eq!(events[2].output_tokens, 20);
 }
@@ -167,7 +168,7 @@ fn parse_session_file_accumulates_repeated_last_token_usage() {
     assert_eq!(assistant.model.as_deref(), Some("gpt-5.4"));
     // E1 and E2 have distinct timestamps (not exact duplicates), so both
     // fold onto the assistant message.
-    assert_eq!(usage.input_tokens, 2000);
+    assert_eq!(usage.input_tokens, 800);
     assert_eq!(usage.cache_read_input_tokens, 1200);
     assert_eq!(usage.output_tokens, 100);
 }
@@ -196,9 +197,9 @@ fn parse_session_dedups_token_count_events_with_identical_timestamp_and_usage() 
     let parsed = provider.parse_session_file(&file).expect("parsed session");
     let events = &parsed.usage_events;
     assert_eq!(events.len(), 2);
-    assert_eq!(events[0].input_tokens, 1000);
+    assert_eq!(events[0].input_tokens, 400);
     assert_eq!(events[0].cache_read_input_tokens, 600);
-    assert_eq!(events[1].input_tokens, 700);
+    assert_eq!(events[1].input_tokens, 300);
     assert_eq!(events[1].cache_read_input_tokens, 400);
 }
 
@@ -229,6 +230,93 @@ fn parse_session_file_counts_malformed_lines_without_aborting() {
         parsed.messages.len() >= 2,
         "well-formed lines must still produce messages; got {}",
         parsed.messages.len()
+    );
+}
+
+#[test]
+fn parse_session_file_counts_unmatched_tool_results_without_fabricating_messages() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("codex.jsonl");
+    fs::write(
+        &file,
+        concat!(
+            "{\"timestamp\":\"2026-04-10T10:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"keep me\"}}\n",
+            "{\"timestamp\":\"2026-04-10T10:00:01Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"exec_command_end\",\"call_id\":\"exec_missing\"}}\n",
+            "{\"timestamp\":\"2026-04-10T10:00:02Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"patch_apply_end\",\"call_id\":\"patch_missing\"}}\n"
+        ),
+    )
+    .unwrap();
+
+    let provider = CodexProvider {
+        home_dir: PathBuf::from("/tmp"),
+    };
+    let parsed = provider.parse_session_file(&file).expect("parsed session");
+
+    assert_eq!(parsed.parse_warning_count, 2);
+    assert!(
+        !parsed
+            .messages
+            .iter()
+            .any(|message| message.role == crate::models::MessageRole::Tool)
+    );
+}
+
+#[test]
+fn parse_session_file_handles_custom_tool_call_exec_with_part_array_output() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("codex.jsonl");
+    fs::write(
+        &file,
+        concat!(
+            "{\"timestamp\":\"2026-07-20T03:24:05Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call\",\"status\":\"completed\",\"call_id\":\"call_1\",\"name\":\"exec\",\"input\":\"const r = await tools.exec_command({\\\"cmd\\\":\\\"echo hi\\\"});\\ntext(r.output);\\n\"}}\n",
+            "{\"timestamp\":\"2026-07-20T03:24:06Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call_output\",\"call_id\":\"call_1\",\"output\":[{\"type\":\"input_text\",\"text\":\"Script completed\"},{\"type\":\"input_text\",\"text\":\"hi\"}]}}\n"
+        ),
+    )
+    .unwrap();
+
+    let provider = CodexProvider {
+        home_dir: PathBuf::from("/tmp"),
+    };
+    let parsed = provider.parse_session_file(&file).expect("parsed session");
+
+    let tool = parsed
+        .messages
+        .iter()
+        .find(|message| message.role == crate::models::MessageRole::Tool)
+        .expect("exec must produce a tool message");
+    let metadata = tool.tool_metadata.as_ref().expect("metadata");
+    assert_eq!(metadata.canonical_name, "Bash");
+    assert!(tool.content.contains("hi"));
+}
+
+#[test]
+fn parse_session_file_keeps_image_parts_in_custom_tool_call_output() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("codex.jsonl");
+    fs::write(
+        &file,
+        concat!(
+            "{\"timestamp\":\"2026-07-20T03:24:05Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call\",\"status\":\"completed\",\"call_id\":\"call_1\",\"name\":\"exec\",\"input\":\"screenshot\"}}\n",
+            "{\"timestamp\":\"2026-07-20T03:24:06Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call_output\",\"call_id\":\"call_1\",\"output\":[{\"type\":\"input_text\",\"text\":\"captured\"},{\"type\":\"input_image\",\"image_url\":\"/tmp/shot.png\"}]}}\n"
+        ),
+    )
+    .unwrap();
+
+    let provider = CodexProvider {
+        home_dir: PathBuf::from("/tmp"),
+    };
+    let parsed = provider.parse_session_file(&file).expect("parsed session");
+
+    let tool = parsed
+        .messages
+        .iter()
+        .find(|message| message.role == crate::models::MessageRole::Tool)
+        .expect("tool message");
+    assert!(tool.content.contains("captured"));
+    assert!(
+        tool.content.contains("[Image: source: /tmp/shot.png]"),
+        "image parts must survive as markers, got {:?}",
+        tool.content
     );
 }
 

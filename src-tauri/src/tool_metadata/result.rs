@@ -1,4 +1,4 @@
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use super::ToolResultFacts;
 use crate::provider_utils::shorten_home_path;
@@ -9,11 +9,11 @@ pub(super) fn normalize_json_value(value: &Value) -> Value {
         Value::Object(obj) => {
             let mut next = Map::new();
             for (key, value) in obj {
-                if key == "filePath" || key == "file_path" || key == "path" {
-                    if let Some(path) = value.as_str() {
-                        next.insert(key.clone(), json!(shorten_home_path(path)));
-                        continue;
-                    }
+                if (key == "filePath" || key == "file_path" || key == "path")
+                    && let Some(path) = value.as_str()
+                {
+                    next.insert(key.clone(), json!(shorten_home_path(path)));
+                    continue;
                 }
                 next.insert(key.clone(), normalize_json_value(value));
             }

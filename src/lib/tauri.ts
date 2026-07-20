@@ -191,10 +191,14 @@ type BackendCommandMap = {
       rangeDays: number | null;
       dateStart: string | null;
       dateEnd: string | null;
+      timezone: string;
     },
     UsageStats
   >;
-  get_activity_calendar: CommandSpec<{ providers: string[]; dateStart: string; dateEnd: string }, ActivityCalendar>;
+  get_activity_calendar: CommandSpec<
+    { providers: string[]; dateStart: string; dateEnd: string; timezone: string },
+    ActivityCalendar
+  >;
   get_project_tool_usage: CommandSpec<
     {
       projectPath: string;
@@ -202,6 +206,7 @@ type BackendCommandMap = {
       rangeDays: number | null;
       dateStart: string | null;
       dateEnd: string | null;
+      timezone: string;
     },
     ProjectToolUsageStats
   >;
@@ -212,11 +217,12 @@ type BackendCommandMap = {
       rangeDays: number | null;
       dateStart: string | null;
       dateEnd: string | null;
+      timezone: string;
     },
     ProjectDailyUsage[]
   >;
-  get_today_cost: CommandSpec<undefined, number>;
-  get_today_tokens: CommandSpec<undefined, TodayTokens>;
+  get_today_cost: CommandSpec<{ timezone: string }, number>;
+  get_today_tokens: CommandSpec<{ timezone: string }, TodayTokens>;
 };
 
 type CommandArgs<Name extends keyof BackendCommandMap> = BackendCommandMap[Name]["args"];
@@ -408,6 +414,16 @@ export async function exportSessionsBatch(items: string[], format: string, outpu
   return invokeCommand("export_sessions_batch", { items, format, outputPath });
 }
 
+/** IANA timezone used to bucket usage into days — the viewer's clock,
+ *  which for a remote headless client can differ from the server's. */
+function clientTimezone(): string {
+  // A host that can't resolve its zone reports "Etc/Unknown" (or nothing),
+  // which the backend rejects as an invalid IANA name. Fall back to UTC so
+  // usage still renders instead of erroring on every request.
+  const resolved = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return resolved && resolved !== "Etc/Unknown" ? resolved : "UTC";
+}
+
 export async function getUsageStats(
   providers: string[],
   rangeDays: number | null,
@@ -419,6 +435,7 @@ export async function getUsageStats(
     rangeDays,
     dateStart,
     dateEnd,
+    timezone: clientTimezone(),
   });
 }
 
@@ -433,6 +450,7 @@ export async function getActivityCalendar(
     providers,
     dateStart,
     dateEnd,
+    timezone: clientTimezone(),
   });
 }
 
@@ -449,6 +467,7 @@ export async function getProjectToolUsage(
     rangeDays,
     dateStart,
     dateEnd,
+    timezone: clientTimezone(),
   });
 }
 
@@ -465,11 +484,12 @@ export async function getProjectDailyUsage(
     rangeDays,
     dateStart,
     dateEnd,
+    timezone: clientTimezone(),
   });
 }
 
 export async function getTodayCost(): Promise<number> {
-  return invokeCommand("get_today_cost");
+  return invokeCommand("get_today_cost", { timezone: clientTimezone() });
 }
 
 export interface TodayTokens {
@@ -480,5 +500,5 @@ export interface TodayTokens {
 }
 
 export async function getTodayTokens(): Promise<TodayTokens> {
-  return invokeCommand("get_today_tokens");
+  return invokeCommand("get_today_tokens", { timezone: clientTimezone() });
 }

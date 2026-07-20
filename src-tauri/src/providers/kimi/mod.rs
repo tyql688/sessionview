@@ -9,20 +9,15 @@ use walkdir::WalkDir;
 
 use crate::models::Provider;
 use crate::provider::{
-    partition_files_by_freshness, LoadedSession, ParsedSession, ProviderError, ScanOutcome,
-    SessionProvider, SourceState,
+    LoadedSession, ParsedSession, ProviderError, ScanOutcome, SessionProvider, SourceState,
+    partition_files_by_freshness,
 };
 
-pub use parser::session_id_for_path;
 pub(crate) use parser::SessionIndex;
+pub use parser::session_id_for_path;
 
 pub struct Descriptor;
 impl crate::provider::ProviderDescriptor for Descriptor {
-    fn owns_source_path(&self, source_path: &str) -> bool {
-        source_path
-            .replace('\\', "/")
-            .contains("/.kimi-code/sessions/")
-    }
     fn resume_command(&self, session_id: &str, _variant_name: Option<&str>) -> Option<String> {
         // Kimi's resume CLI requires the full directory name including the
         // `session_` or `ses_` prefix — bare UUIDs return "Session not found".

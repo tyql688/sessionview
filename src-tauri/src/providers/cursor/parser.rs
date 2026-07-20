@@ -23,7 +23,7 @@ use serde_json::Value;
 use crate::models::{Message, MessageRole, Provider, SessionMeta};
 use crate::provider::ParsedSession;
 use crate::provider_utils::{project_name_from_path, session_title};
-use crate::tool_metadata::{build_tool_metadata, ToolCallFacts};
+use crate::tool_metadata::{ToolCallFacts, build_tool_metadata};
 
 use super::tools::{
     extract_text_from_content, extract_think_content, normalise_user_text, parse_content_array,
@@ -198,14 +198,14 @@ pub(crate) fn decode_project_key(key: &str) -> String {
 fn project_path_from_transcript_path(path: &Path) -> String {
     let mut current = path.parent();
     while let Some(dir) = current {
-        if dir.file_name().and_then(|n| n.to_str()) == Some("agent-transcripts") {
-            if let Some(project_key_dir) = dir.parent() {
-                let key = project_key_dir
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("");
-                return decode_project_key(key);
-            }
+        if dir.file_name().and_then(|n| n.to_str()) == Some("agent-transcripts")
+            && let Some(project_key_dir) = dir.parent()
+        {
+            let key = project_key_dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+            return decode_project_key(key);
         }
         current = dir.parent();
     }

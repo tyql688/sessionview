@@ -69,12 +69,12 @@ gui_commands! {
     list_recent_sessions(limit: usize) -> Vec<SessionMeta>;
     list_favorites() -> Vec<SessionMeta>;
     is_favorite(session_id: String) -> bool;
-    get_usage_stats(providers: Vec<String>, range_days: Option<u32>, date_start: Option<String>, date_end: Option<String>) -> UsageStats;
-    get_activity_calendar(providers: Vec<String>, date_start: String, date_end: String) -> ActivityCalendar;
-    get_project_tool_usage(project_path: String, providers: Vec<String>, range_days: Option<u32>, date_start: Option<String>, date_end: Option<String>) -> ProjectToolUsageStats;
-    get_project_daily_usage(project_path: String, providers: Vec<String>, range_days: Option<u32>, date_start: Option<String>, date_end: Option<String>) -> Vec<ProjectDailyUsage>;
-    get_today_cost() -> f64;
-    get_today_tokens() -> TodayTokens;
+    get_usage_stats(providers: Vec<String>, range_days: Option<u32>, date_start: Option<String>, date_end: Option<String>, timezone: Option<String>) -> UsageStats;
+    get_activity_calendar(providers: Vec<String>, date_start: String, date_end: String, timezone: Option<String>) -> ActivityCalendar;
+    get_project_tool_usage(project_path: String, providers: Vec<String>, range_days: Option<u32>, date_start: Option<String>, date_end: Option<String>, timezone: Option<String>) -> ProjectToolUsageStats;
+    get_project_daily_usage(project_path: String, providers: Vec<String>, range_days: Option<u32>, date_start: Option<String>, date_end: Option<String>, timezone: Option<String>) -> Vec<ProjectDailyUsage>;
+    get_today_cost(timezone: Option<String>) -> f64;
+    get_today_tokens(timezone: Option<String>) -> TodayTokens;
 }
 
 #[tauri::command]

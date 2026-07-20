@@ -27,13 +27,13 @@ pub(crate) fn load_history_workspaces() -> HashMap<String, String> {
                     continue;
                 }
             };
-            if let Ok(val) = serde_json::from_str::<Value>(&line_str) {
-                if let (Some(cid), Some(ws)) = (
+            if let Ok(val) = serde_json::from_str::<Value>(&line_str)
+                && let (Some(cid), Some(ws)) = (
                     val.get("conversationId").and_then(|v| v.as_str()),
                     val.get("workspace").and_then(|v| v.as_str()),
-                ) {
-                    map.insert(cid.to_string(), ws.to_string());
-                }
+                )
+            {
+                map.insert(cid.to_string(), ws.to_string());
             }
         }
     }
@@ -82,15 +82,14 @@ pub(crate) fn find_workspace_by_display_content(first_user_msg: &str) -> Option<
                     continue;
                 }
             };
-            if let Ok(val) = serde_json::from_str::<Value>(&line_str) {
-                if let (Some(display), Some(ws)) = (
+            if let Ok(val) = serde_json::from_str::<Value>(&line_str)
+                && let (Some(display), Some(ws)) = (
                     val.get("display").and_then(|v| v.as_str()),
                     val.get("workspace").and_then(|v| v.as_str()),
-                ) {
-                    if display.trim() == first_user_msg.trim() {
-                        return Some(ws.to_string());
-                    }
-                }
+                )
+                && display.trim() == first_user_msg.trim()
+            {
+                return Some(ws.to_string());
             }
         }
     }

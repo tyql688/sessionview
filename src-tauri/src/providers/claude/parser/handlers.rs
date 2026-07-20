@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::models::{Message, MessageKind, MessageRole, Provider, TokenUsage};
 use crate::provider_utils::is_system_content;
 use crate::tool_metadata::{
-    build_tool_metadata, canonical_tool_name, enrich_tool_metadata, ToolCallFacts,
+    ToolCallFacts, build_tool_metadata, canonical_tool_name, enrich_tool_metadata,
 };
 
 use super::super::images::{
@@ -18,7 +18,7 @@ use super::content::{
     extract_message_content, extract_token_usage, extract_tool_result_content,
     is_tool_result_message, tool_result_facts, unique_hash_from_entry,
 };
-use super::text_clean::{format_local_command_text, LocalCommandText};
+use super::text_clean::{LocalCommandText, format_local_command_text};
 use super::{ParseState, PendingToolResult, ScanAccum};
 
 pub(super) fn preserves_pending_user_message(line_type: &str) -> bool {
@@ -340,21 +340,21 @@ pub(super) fn handle_assistant_message(
             let item_type = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
             match item_type {
                 "thinking" => {
-                    if let Some(t) = item.get("thinking").and_then(|t| t.as_str()) {
-                        if !t.trim().is_empty() {
-                            // Emit thinking as a separate assistant message with marker
-                            state.messages.push(Message {
-                                timestamp: timestamp.clone(),
-                                ..Message::system(format!("[thinking]\n{t}"))
-                            });
-                        }
+                    if let Some(t) = item.get("thinking").and_then(|t| t.as_str())
+                        && !t.trim().is_empty()
+                    {
+                        // Emit thinking as a separate assistant message with marker
+                        state.messages.push(Message {
+                            timestamp: timestamp.clone(),
+                            ..Message::system(format!("[thinking]\n{t}"))
+                        });
                     }
                 }
                 "text" => {
-                    if let Some(t) = item.get("text").and_then(|t| t.as_str()) {
-                        if !t.trim().is_empty() {
-                            text_parts.push(t.to_string());
-                        }
+                    if let Some(t) = item.get("text").and_then(|t| t.as_str())
+                        && !t.trim().is_empty()
+                    {
+                        text_parts.push(t.to_string());
                     }
                 }
                 "tool_use" => {
@@ -410,12 +410,12 @@ pub(super) fn handle_assistant_message(
                 _ => {}
             }
         }
-        if let Some(uuid) = entry.get("uuid").and_then(|u| u.as_str()) {
-            if !tool_indices.is_empty() {
-                state
-                    .assistant_tool_indices_by_uuid
-                    .insert(uuid.to_string(), tool_indices);
-            }
+        if let Some(uuid) = entry.get("uuid").and_then(|u| u.as_str())
+            && !tool_indices.is_empty()
+        {
+            state
+                .assistant_tool_indices_by_uuid
+                .insert(uuid.to_string(), tool_indices);
         }
         // Flush remaining text
         if !text_parts.is_empty() {
@@ -501,12 +501,11 @@ pub(super) fn handle_summary(
     summary_text: &mut Option<String>,
     state: &mut ParseState,
 ) {
-    if summary_text.is_none() {
-        if let Some(s) = entry.get("summary").and_then(|s| s.as_str()) {
-            if !s.trim().is_empty() {
-                *summary_text = Some(s.to_string());
-            }
-        }
+    if summary_text.is_none()
+        && let Some(s) = entry.get("summary").and_then(|s| s.as_str())
+        && !s.trim().is_empty()
+    {
+        *summary_text = Some(s.to_string());
     }
     flush_pending(state);
 }

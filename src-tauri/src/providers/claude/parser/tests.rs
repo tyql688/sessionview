@@ -79,6 +79,34 @@ fn parse_session_file_deduplicates_same_message_request_pair() {
 }
 
 #[test]
+fn parse_session_file_keeps_split_cache_only_usage() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("session.jsonl");
+    let line = r#"{"type":"assistant","requestId":"req-1","timestamp":"2026-04-10T10:00:00Z","message":{"id":"msg-1","model":"claude-opus-4-8","usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":401,"ephemeral_1h_input_tokens":4000}},"content":[]}}"#;
+    fs::write(&file, format!("{line}\n")).unwrap();
+
+    let parsed = parse_session_file(&file).expect("parsed");
+    let usage = parsed.messages[0].token_usage.as_ref().expect("usage");
+
+    assert_eq!(usage.cache_creation_input_tokens, 4401);
+}
+
+#[test]
+fn parse_session_file_keeps_flat_cache_total_when_split_is_smaller() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("session.jsonl");
+    // The TTL breakdown may omit buckets this parser doesn't know about;
+    // a larger flat total must never be replaced by a partial split sum.
+    let line = r#"{"type":"assistant","requestId":"req-1","timestamp":"2026-04-10T10:00:00Z","message":{"id":"msg-1","model":"claude-opus-4-8","usage":{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":500,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":120}},"content":[]}}"#;
+    fs::write(&file, format!("{line}\n")).unwrap();
+
+    let parsed = parse_session_file(&file).expect("parsed");
+    let usage = parsed.messages[0].token_usage.as_ref().expect("usage");
+
+    assert_eq!(usage.cache_creation_input_tokens, 500);
+}
+
+#[test]
 fn parse_session_file_keeps_distinct_chunks_with_same_message_request_pair() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("session.jsonl");
@@ -123,9 +151,11 @@ fn parse_session_file_matches_tool_result_that_arrives_before_tool_use() {
 
     assert_eq!(tool_messages.len(), 1);
     assert_eq!(tool_messages[0].tool_name.as_deref(), Some("Edit"));
-    assert!(tool_messages[0]
-        .content
-        .contains("File has not been read yet"));
+    assert!(
+        tool_messages[0]
+            .content
+            .contains("File has not been read yet")
+    );
 }
 
 #[test]
@@ -394,7 +424,9 @@ fn parse_session_file_splits_local_command_input_and_output_roles() {
     let real_user = r#"{"type":"user","timestamp":"2026-04-25T02:03:04Z","message":{"content":"Actual user question"}}"#;
     fs::write(
         &file,
-        format!("{caveat}\n{tagged_user}\n{system_output}\n{system_input}\n{user_output}\n{real_user}\n"),
+        format!(
+            "{caveat}\n{tagged_user}\n{system_output}\n{system_input}\n{user_output}\n{real_user}\n"
+        ),
     )
     .unwrap();
 

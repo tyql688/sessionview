@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::models::{token_totals_from_messages, Message, SessionMeta, TokenTotals};
+use crate::models::{Message, SessionMeta, TokenTotals, token_totals_from_messages};
 
-use super::UsageEvent;
+use super::{UsageEvent, token_totals_from_usage_events};
 
 /// File-level snapshot the indexer uses to decide whether a session
 /// needs to be re-parsed on the next scan. Mirrors what the `sessions`
@@ -110,10 +110,8 @@ pub struct ParsedSession {
     /// `parent_id` / `is_sidechain` / inherited project metadata on already-
     /// indexed child rows. Empty for every other provider.
     pub child_session_ids: Vec<String>,
-    /// Out-of-band token-usage events emitted by the provider's transcript
-    /// (e.g. Codex `event_msg.token_count`). Consumed by the provider's
-    /// own `compute_token_stats` override; empty for providers whose token
-    /// counts are attached to messages directly.
+    /// Authoritative usage events when transcript display follows only one
+    /// branch or usage is emitted outside messages.
     pub usage_events: Vec<UsageEvent>,
     /// Provider freshness value for the source at parse time.
     /// 0 means "unknown" — the indexer treats that as "always reparse".
@@ -155,7 +153,16 @@ impl LoadedSession {
     }
 
     pub fn from_parsed(parsed: ParsedSession) -> Self {
-        Self::from_messages(parsed.messages, parsed.parse_warning_count)
+        let token_totals = if parsed.usage_events.is_empty() {
+            token_totals_from_messages(&parsed.messages)
+        } else {
+            token_totals_from_usage_events(&parsed.usage_events)
+        };
+        Self {
+            messages: parsed.messages,
+            parse_warning_count: parsed.parse_warning_count,
+            token_totals,
+        }
     }
 }
 

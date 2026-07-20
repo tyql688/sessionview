@@ -1,3 +1,6 @@
+// Test code: clippy's allow-*-in-tests only covers `#[cfg(test)]` modules.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Manual timing smoke test for the forced usage refresh, against a COPY of
 //! the local live database and the machine's real provider files. Ignored by
 //! default (depends on `~/.<provider>/` data); run explicitly with:

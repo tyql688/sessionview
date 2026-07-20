@@ -89,10 +89,10 @@ impl Drop for CancelFlagGuard<'_> {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
-        if let Some(existing) = map.get(&self.session_id) {
-            if Arc::ptr_eq(&existing.flag, &self.flag) {
-                map.remove(&self.session_id);
-            }
+        if let Some(existing) = map.get(&self.session_id)
+            && Arc::ptr_eq(&existing.flag, &self.flag)
+        {
+            map.remove(&self.session_id);
         }
     }
 }

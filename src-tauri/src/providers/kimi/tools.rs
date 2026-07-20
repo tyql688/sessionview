@@ -77,15 +77,15 @@ pub(crate) fn render_format_b_tool_output(result: Option<&Value>) -> (String, Op
                 .map(|ok| !ok)
         });
 
-    if let Some(output) = result.get("output").and_then(|v| v.as_str()) {
-        if !output.is_empty() {
-            return (output.to_string(), is_error);
-        }
+    if let Some(output) = result.get("output").and_then(|v| v.as_str())
+        && !output.is_empty()
+    {
+        return (output.to_string(), is_error);
     }
-    if let Some(message) = result.get("message").and_then(|v| v.as_str()) {
-        if !message.is_empty() {
-            return (message.to_string(), is_error);
-        }
+    if let Some(message) = result.get("message").and_then(|v| v.as_str())
+        && !message.is_empty()
+    {
+        return (message.to_string(), is_error);
     }
     // Last resort: serialise the result so we don't drop information.
     match serde_json::to_string(result) {

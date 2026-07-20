@@ -4,11 +4,11 @@ use anyhow::Result;
 
 use crate::models::{Message, Provider, SessionMeta, TokenTotals};
 
-use super::sessions::{
-    canceled_error, indexed_or_loaded_token_totals, load_messages_from_provider, session_cache_key,
-    SessionMessagesWindow,
-};
 use super::AppState;
+use super::sessions::{
+    SessionMessagesWindow, canceled_error, indexed_or_loaded_token_totals,
+    load_messages_from_provider, session_cache_key,
+};
 
 /// Try to satisfy a window request by mmap-reading just the trailing
 /// portion of the source file instead of parsing it whole.

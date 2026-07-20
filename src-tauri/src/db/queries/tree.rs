@@ -5,8 +5,8 @@ use rusqlite::{params, params_from_iter};
 use crate::models::SessionMeta;
 
 use super::super::row_mapper::row_to_session_meta;
-use super::search::list_sessions_from_query;
 use super::Database;
+use super::search::list_sessions_from_query;
 
 impl Database {
     pub fn list_recent_sessions(&self, limit: usize) -> Result<Vec<SessionMeta>, rusqlite::Error> {

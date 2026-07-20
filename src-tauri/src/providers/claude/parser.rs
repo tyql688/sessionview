@@ -141,10 +141,10 @@ fn scan_jsonl_lines<R: BufRead>(reader: R, path: &Path, accum: &mut ScanAccum) -
                 return ControlFlow::Break(());
             }
 
-            if let Some(dedup_hash) = dedup_hash_from_entry(&entry) {
-                if !accum.processed_hashes.insert(dedup_hash) {
-                    return ControlFlow::Continue(());
-                }
+            if let Some(dedup_hash) = dedup_hash_from_entry(&entry)
+                && !accum.processed_hashes.insert(dedup_hash)
+            {
+                return ControlFlow::Continue(());
             }
 
             let line_type = match entry.get("type").and_then(|t| t.as_str()) {
@@ -152,12 +152,11 @@ fn scan_jsonl_lines<R: BufRead>(reader: R, path: &Path, accum: &mut ScanAccum) -
                 None => return ControlFlow::Continue(()),
             };
 
-            if accum.cwd.is_none() {
-                if let Some(c) = entry.get("cwd").and_then(|c| c.as_str()) {
-                    if !c.is_empty() {
-                        accum.cwd = Some(c.to_string());
-                    }
-                }
+            if accum.cwd.is_none()
+                && let Some(c) = entry.get("cwd").and_then(|c| c.as_str())
+                && !c.is_empty()
+            {
+                accum.cwd = Some(c.to_string());
             }
 
             if !accum.is_sidechain
@@ -169,20 +168,19 @@ fn scan_jsonl_lines<R: BufRead>(reader: R, path: &Path, accum: &mut ScanAccum) -
                 accum.is_sidechain = true;
             }
 
-            if accum.cc_version.is_none() {
-                if let Some(v) = entry.get("version").and_then(|v| v.as_str()) {
-                    if !v.is_empty() {
-                        accum.cc_version = Some(v.to_string());
-                    }
-                }
+            if accum.cc_version.is_none()
+                && let Some(v) = entry.get("version").and_then(|v| v.as_str())
+                && !v.is_empty()
+            {
+                accum.cc_version = Some(v.to_string());
             }
 
-            if accum.git_branch.is_none() {
-                if let Some(b) = entry.get("gitBranch").and_then(|b| b.as_str()) {
-                    if !b.is_empty() && b != "HEAD" {
-                        accum.git_branch = Some(b.to_string());
-                    }
-                }
+            if accum.git_branch.is_none()
+                && let Some(b) = entry.get("gitBranch").and_then(|b| b.as_str())
+                && !b.is_empty()
+                && b != "HEAD"
+            {
+                accum.git_branch = Some(b.to_string());
             }
 
             if let Some(ts) = entry.get("timestamp").and_then(|t| t.as_str()) {
@@ -202,16 +200,14 @@ fn scan_jsonl_lines<R: BufRead>(reader: R, path: &Path, accum: &mut ScanAccum) -
                     handle_user_message(&entry, &mut accum.state, timestamp);
                 }
                 "assistant" => {
-                    if accum.model.is_none() {
-                        if let Some(m) = entry
+                    if accum.model.is_none()
+                        && let Some(m) = entry
                             .get("message")
                             .and_then(|msg| msg.get("model"))
                             .and_then(|m| m.as_str())
-                        {
-                            if !m.is_empty() {
-                                accum.model = Some(m.to_string());
-                            }
-                        }
+                        && !m.is_empty()
+                    {
+                        accum.model = Some(m.to_string());
                     }
                     handle_assistant_message(&entry, &mut accum.state, timestamp);
                 }
@@ -229,10 +225,9 @@ fn scan_jsonl_lines<R: BufRead>(reader: R, path: &Path, accum: &mut ScanAccum) -
                         .get("customTitle")
                         .or_else(|| entry.get("title"))
                         .and_then(|t| t.as_str())
+                        && !t.trim().is_empty()
                     {
-                        if !t.trim().is_empty() {
-                            accum.custom_title = Some(t.to_string());
-                        }
+                        accum.custom_title = Some(t.to_string());
                     }
                 }
                 "ai-title" => {
@@ -241,10 +236,9 @@ fn scan_jsonl_lines<R: BufRead>(reader: R, path: &Path, accum: &mut ScanAccum) -
                         .get("aiTitle")
                         .or_else(|| entry.get("title"))
                         .and_then(|t| t.as_str())
+                        && !t.trim().is_empty()
                     {
-                        if !t.trim().is_empty() {
-                            accum.ai_title = Some(t.to_string());
-                        }
+                        accum.ai_title = Some(t.to_string());
                     }
                 }
                 "agent-name" => {
@@ -421,10 +415,10 @@ pub fn parse_session_file(path: &PathBuf) -> Option<ParsedSession> {
                     };
                     match serde_json::from_str::<serde_json::Value>(&line) {
                         Ok(entry) => {
-                            if let Some(c) = entry.get("cwd").and_then(|c| c.as_str()) {
-                                if !c.is_empty() {
-                                    return Some(c.to_string());
-                                }
+                            if let Some(c) = entry.get("cwd").and_then(|c| c.as_str())
+                                && !c.is_empty()
+                            {
+                                return Some(c.to_string());
                             }
                         }
                         Err(error) => {

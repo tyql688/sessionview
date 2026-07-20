@@ -39,9 +39,77 @@ fn ok<T: serde::Serialize>(value: T) -> Result<Value, DispatchError> {
     })
 }
 
+/// Argument keys each command accepts. Unknown commands return `None`.
+///
+/// This is the strict half of the dispatch contract: request bodies may only
+/// carry keys listed here, so a typo (`range_days` for `rangeDays`) fails
+/// loudly instead of silently running the unfiltered query. Keep in sync with
+/// the `dispatch` match below and the frontend's `BackendCommandMap`.
+fn allowed_keys(command: &str) -> Option<&'static [&'static str]> {
+    Some(match command {
+        "reindex"
+        | "get_tree"
+        | "get_session_count"
+        | "get_index_stats"
+        | "get_pricing_catalog_status"
+        | "refresh_pricing_catalog"
+        | "start_rebuild_index"
+        | "clear_index"
+        | "start_refresh_usage"
+        | "clear_usage_stats"
+        | "detect_terminal"
+        | "get_provider_snapshots"
+        | "list_favorites" => &[],
+        "reindex_providers" => &["providers", "aggressive"],
+        "get_session_detail" | "get_session_turn_outline" => &["sessionId", "requestSeq"],
+        "get_session_meta" | "toggle_favorite" | "is_favorite" | "get_resume_command" => {
+            &["sessionId"]
+        }
+        "get_session_open_window" | "get_session_messages_window" => {
+            &["sessionId", "offset", "limit", "requestId", "requestSeq"]
+        }
+        "cancel_session_load" => &["sessionId", "requestId"],
+        "resolve_persisted_output"
+        | "read_image_base64"
+        | "read_tool_result_text"
+        | "open_in_folder" => &["path"],
+        "search_sessions" => &["filters"],
+        "rename_session" => &["sessionId", "newTitle"],
+        "export_session" => &["sessionId", "format", "outputPath"],
+        "export_sessions_batch" => &["items", "format", "outputPath"],
+        "get_child_sessions" => &["parentId"],
+        "get_child_session_counts" => &["parentIds"],
+        "resume_session" => &["sessionId", "terminalApp"],
+        "list_recent_sessions" => &["limit"],
+        "get_usage_stats" => &["providers", "rangeDays", "dateStart", "dateEnd", "timezone"],
+        "get_activity_calendar" => &["providers", "dateStart", "dateEnd", "timezone"],
+        "get_project_tool_usage" | "get_project_daily_usage" => &[
+            "projectPath",
+            "providers",
+            "rangeDays",
+            "dateStart",
+            "dateEnd",
+            "timezone",
+        ],
+        "get_today_cost" | "get_today_tokens" => &["timezone"],
+        _ => return None,
+    })
+}
+
 /// Dispatch one invoke request. `raw` is the JSON body (`{}` when the
 /// command takes no arguments).
+// A flat name → command table mirroring `generate_handler!`. The score is the
+// arm count; sub-dispatchers would add indirection, not remove branches.
+#[allow(clippy::cognitive_complexity)]
 pub async fn dispatch(state: AppState, command: &str, raw: Value) -> Result<Value, DispatchError> {
+    let allowed = allowed_keys(command).ok_or(DispatchError::UnknownCommand)?;
+    if let Value::Object(map) = &raw
+        && let Some(unknown) = map.keys().find(|k| !allowed.contains(&k.as_str()))
+    {
+        return Err(DispatchError::BadArgs(format!(
+            "unknown argument '{unknown}' for command '{command}'"
+        )));
+    }
     let a = &raw;
     match command {
         "reindex" => ok(commands::reindex(state).await?),
@@ -147,6 +215,7 @@ pub async fn dispatch(state: AppState, command: &str, raw: Value) -> Result<Valu
             arg(a, "rangeDays")?,
             arg(a, "dateStart")?,
             arg(a, "dateEnd")?,
+            arg(a, "timezone")?,
             state,
         )
         .await?),
@@ -154,6 +223,7 @@ pub async fn dispatch(state: AppState, command: &str, raw: Value) -> Result<Valu
             arg(a, "providers")?,
             arg(a, "dateStart")?,
             arg(a, "dateEnd")?,
+            arg(a, "timezone")?,
             state,
         )
         .await?),
@@ -163,6 +233,7 @@ pub async fn dispatch(state: AppState, command: &str, raw: Value) -> Result<Valu
             arg(a, "rangeDays")?,
             arg(a, "dateStart")?,
             arg(a, "dateEnd")?,
+            arg(a, "timezone")?,
             state,
         )
         .await?),
@@ -172,11 +243,12 @@ pub async fn dispatch(state: AppState, command: &str, raw: Value) -> Result<Valu
             arg(a, "rangeDays")?,
             arg(a, "dateStart")?,
             arg(a, "dateEnd")?,
+            arg(a, "timezone")?,
             state,
         )
         .await?),
-        "get_today_cost" => ok(commands::get_today_cost(state).await?),
-        "get_today_tokens" => ok(commands::get_today_tokens(state).await?),
+        "get_today_cost" => ok(commands::get_today_cost(arg(a, "timezone")?, state).await?),
+        "get_today_tokens" => ok(commands::get_today_tokens(arg(a, "timezone")?, state).await?),
         _ => Err(DispatchError::UnknownCommand),
     }
 }
@@ -197,6 +269,25 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let result = dispatch(test_state(dir.path()), "open_external", Value::Null).await;
         assert!(matches!(result, Err(DispatchError::UnknownCommand)));
+    }
+
+    #[tokio::test]
+    async fn dispatch_rejects_unknown_argument_keys() {
+        let dir = tempfile::TempDir::new().unwrap();
+        // snake_case for a camelCase key must fail loudly, not silently run
+        // the unfiltered query.
+        let result = dispatch(
+            test_state(dir.path()),
+            "get_usage_stats",
+            serde_json::json!({ "providers": [], "range_days": 7 }),
+        )
+        .await;
+        match result {
+            Err(DispatchError::BadArgs(message)) => {
+                assert!(message.contains("range_days"), "got: {message}");
+            }
+            _ => panic!("expected BadArgs"),
+        }
     }
 
     #[tokio::test]

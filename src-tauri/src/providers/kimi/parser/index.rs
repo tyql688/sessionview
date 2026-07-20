@@ -96,10 +96,10 @@ impl SessionIndex {
         let canon = std::fs::canonicalize(session_dir)
             .ok()
             .map(|p| p.to_string_lossy().to_string());
-        if let Some(c) = &canon {
-            if let Some(wd) = self.by_dir.get(c) {
-                return Some(wd.clone());
-            }
+        if let Some(c) = &canon
+            && let Some(wd) = self.by_dir.get(c)
+        {
+            return Some(wd.clone());
         }
         let raw = session_dir.to_string_lossy().to_string();
         let trimmed = raw.trim_end_matches('/');

@@ -29,16 +29,16 @@ use std::path::Path;
 use serde_json::Value;
 
 use crate::models::{Message, Provider, SessionMeta};
-use crate::provider::ParsedSession;
-use crate::provider_utils::{project_name_from_path, session_title, NO_PROJECT};
+use crate::provider::{ParsedSession, token_totals_from_usage_events};
+use crate::provider_utils::{NO_PROJECT, project_name_from_path, session_title};
 use crate::services::tail_reader::open_tail_reader;
 
-use dispatch::{dispatch_line, ScanAccum};
-use index::{split_session_path, StateJson};
+use dispatch::{ScanAccum, dispatch_line};
+use index::{StateJson, split_session_path};
 use subagents::collect_subagent_descriptions;
 
-pub use index::session_id_for_path;
 pub(crate) use index::SessionIndex;
+pub use index::session_id_for_path;
 
 // ---------------------------------------------------------------------------
 // Time helpers
@@ -47,9 +47,8 @@ pub(crate) use index::SessionIndex;
 /// `time` fields in the new wire format are epoch milliseconds.
 /// `metadata.created_at` is also epoch milliseconds. We treat both
 /// uniformly: convert to (epoch_seconds, rfc3339_string).
-fn time_ms_to_parts(ms: i64) -> (i64, String) {
-    let rfc = crate::provider_utils::epoch_ms_to_rfc3339(ms).unwrap_or_default();
-    (ms.div_euclid(1000), rfc)
+fn time_ms_to_parts(ms: i64) -> Option<(i64, String)> {
+    crate::provider_utils::epoch_ms_to_rfc3339(ms).map(|rfc| (ms.div_euclid(1000), rfc))
 }
 
 fn scan_lines<R: BufRead>(reader: R, path: &Path, accum: &mut ScanAccum) {
@@ -108,6 +107,7 @@ pub(crate) fn parse_session(path: &Path, index: &SessionIndex) -> Option<ParsedS
     let state = StateJson::load(&session_dir);
     let mut accum = ScanAccum::new();
     scan_lines(BufReader::new(file), path, &mut accum);
+    let token_totals = token_totals_from_usage_events(&accum.usage_events);
 
     let parent_agent = state.agents.get(&agent_name).cloned().unwrap_or(None);
     let is_subagent = parent_agent.is_some();
@@ -125,9 +125,9 @@ pub(crate) fn parse_session(path: &Path, index: &SessionIndex) -> Option<ParsedS
         session_dir_name.clone()
     };
 
-    if accum.messages.is_empty() {
+    if accum.messages.is_empty() && accum.usage_events.is_empty() {
         log::debug!(
-            "Kimi session '{}' parsed to zero messages — skipping",
+            "Kimi session '{}' parsed to no messages or usage — skipping",
             path.display()
         );
         return None;
@@ -190,13 +190,7 @@ pub(crate) fn parse_session(path: &Path, index: &SessionIndex) -> Option<ParsedS
         );
         return None;
     };
-    let Some(updated_at) = accum.last_time_secs.or(state_updated).or(Some(created_at)) else {
-        log::warn!(
-            "skipping Kimi session '{}': no usable updated timestamp",
-            path.display()
-        );
-        return None;
-    };
+    let updated_at = accum.last_time_secs.or(state_updated).unwrap_or(created_at);
 
     let content_text = accum.content_parts.join("\n");
 
@@ -233,10 +227,10 @@ pub(crate) fn parse_session(path: &Path, index: &SessionIndex) -> Option<ParsedS
         cc_version: None,
         git_branch: None,
         parent_id,
-        input_tokens: 0,
-        output_tokens: 0,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
+        input_tokens: token_totals.input_tokens,
+        output_tokens: token_totals.output_tokens,
+        cache_read_tokens: token_totals.cache_read_tokens,
+        cache_write_tokens: token_totals.cache_write_tokens,
     };
 
     let source_mtime = file_meta
@@ -251,7 +245,7 @@ pub(crate) fn parse_session(path: &Path, index: &SessionIndex) -> Option<ParsedS
         content_text,
         parse_warning_count: accum.parse_warning_count,
         child_session_ids: Vec::new(),
-        usage_events: Vec::new(),
+        usage_events: accum.usage_events,
         source_mtime,
     })
 }
@@ -274,44 +268,56 @@ pub struct KimiTailResult {
 /// the background full-parse replaces the cache.
 pub fn parse_session_tail(path: &Path, target_messages: usize) -> Option<KimiTailResult> {
     let safety_buffer = target_messages / 4 + 50;
-    let scan_lines_count = target_messages.saturating_add(safety_buffer);
-    let (reader, window) = open_tail_reader(path, scan_lines_count, "Kimi wire.jsonl")?;
-
-    let mut accum = ScanAccum::new();
-    // Migrated (Format A) wires only carry a timestamp on the
-    // `metadata` header line — every `context.append_message` after it
-    // has no `time`. The tail seek skips that header, so prime the
-    // accumulator's fallback timestamp by reading the file head first.
-    // Cheap (one short read) and lets every tail-rendered message land
-    // with a usable timestamp.
-    if window.start_offset > 0 {
-        if let Ok(head_file) = File::open(path) {
-            let head_reader = BufReader::new(head_file);
-            for line in head_reader.lines().take(4).map_while(Result::ok) {
-                if line.trim().is_empty() {
-                    continue;
-                }
-                if let Ok(entry) = serde_json::from_str::<Value>(&line) {
-                    if entry.get("type").and_then(|v| v.as_str()) == Some("metadata") {
-                        dispatch_line(&mut accum, &entry);
-                        break;
-                    }
-                }
+    let mut scan_lines_count = target_messages.saturating_add(safety_buffer);
+    let mut head_context = Vec::new();
+    if let Ok(head_file) = File::open(path) {
+        for line in BufReader::new(head_file)
+            .lines()
+            .take(4)
+            .map_while(Result::ok)
+        {
+            if let Ok(entry) = serde_json::from_str::<Value>(&line)
+                && matches!(
+                    entry.get("type").and_then(Value::as_str),
+                    Some("metadata" | "config.update")
+                )
+            {
+                head_context.push(entry);
             }
         }
     }
-    scan_lines(reader, path, &mut accum);
-    if accum.messages.is_empty() {
-        return None;
+    loop {
+        let (reader, window) = open_tail_reader(path, scan_lines_count, "Kimi wire.jsonl")?;
+        let mut accum = ScanAccum::new();
+        accum.is_tail = true;
+        if window.start_offset > 0 {
+            for entry in &head_context {
+                dispatch_line(&mut accum, entry);
+            }
+        }
+        scan_lines(reader, path, &mut accum);
+        if accum.cancel_without_snapshot {
+            // The window opened mid-turn and that turn was cancelled; a wider
+            // window captures the turn.prompt and rolls it back cleanly.
+            if window.covers_whole_file {
+                return None;
+            }
+            scan_lines_count = scan_lines_count.saturating_mul(2);
+            continue;
+        }
+        if accum.messages.len() >= target_messages || window.covers_whole_file {
+            if accum.messages.is_empty() {
+                return None;
+            }
+            let drain = accum.messages.len().saturating_sub(target_messages);
+            accum.messages.drain(..drain);
+            return Some(KimiTailResult {
+                messages: accum.messages,
+                parse_warning_count: accum.parse_warning_count,
+            });
+        }
+        scan_lines_count = scan_lines_count.saturating_mul(2);
     }
-    let len = accum.messages.len();
-    if len > target_messages {
-        accum.messages.drain(0..(len - target_messages));
-    }
-    Some(KimiTailResult {
-        messages: accum.messages,
-        parse_warning_count: accum.parse_warning_count,
-    })
 }
 
 #[cfg(test)]
@@ -357,7 +363,7 @@ mod tests {
                 r#"{"type":"context.append_message","message":{"role":"user","content":[{"type":"text","text":"hi"}],"toolCalls":[]}}"#,
                 r#"{"type":"context.append_loop_event","event":{"type":"content.part","part":{"type":"think","think":"thinking..."}},"time":1779701200000}"#,
                 r#"{"type":"context.append_loop_event","event":{"type":"content.part","part":{"type":"text","text":"Hello!"}},"time":1779701200500}"#,
-                r#"{"type":"usage.record","model":"kimi-code/kimi-for-coding","usage":{"inputOther":10,"output":5,"inputCacheRead":100,"inputCacheCreation":0},"time":1779701200600}"#,
+                r#"{"type":"usage.record","model":"kimi-code/kimi-for-coding","usage":{"inputOther":10,"output":5,"inputCacheRead":100,"inputCacheCreation":0},"usageScope":"turn","time":1779701200600}"#,
             ],
         );
         let parsed = parse_session(&path, &SessionIndex::default()).expect("parses");
@@ -377,8 +383,189 @@ mod tests {
         let usage = parsed.messages[2].token_usage.as_ref().expect("usage");
         assert_eq!(usage.output_tokens, 5);
         assert_eq!(usage.cache_read_input_tokens, 100);
-        // input_tokens = inputOther + cache_read + cache_creation
-        assert_eq!(usage.input_tokens, 110);
+        assert_eq!(usage.input_tokens, 10);
+        assert_eq!(parsed.usage_events.len(), 1);
+        assert_eq!(parsed.meta.input_tokens, 10);
+        assert_eq!(parsed.meta.output_tokens, 5);
+        assert_eq!(parsed.meta.cache_read_tokens, 100);
+    }
+
+    #[test]
+    fn parses_usage_only_agent_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let session_dir = tmp.path().join("wd_demo").join("session_usage");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        write_state(
+            &session_dir,
+            r#"{"title":"Usage only","agents":{"main":{"parentAgentId":null}}}"#,
+        );
+        let path = write_wire(
+            &session_dir,
+            "main",
+            &[
+                r#"{"type":"metadata","protocol_version":"1.0","created_at":1779701196480}"#,
+                r#"{"type":"usage.record","model":"kimi-test","usage":{"inputOther":10,"output":5,"inputCacheRead":20},"usageScope":"turn","time":1779701200600}"#,
+            ],
+        );
+
+        let parsed = parse_session(&path, &SessionIndex::default()).unwrap();
+
+        assert!(parsed.messages.is_empty());
+        assert_eq!(parsed.usage_events.len(), 1);
+        assert_eq!(parsed.meta.input_tokens, 10);
+        assert_eq!(parsed.meta.output_tokens, 5);
+        assert_eq!(parsed.meta.cache_read_tokens, 20);
+    }
+
+    #[test]
+    fn parse_session_tail_expands_for_tool_dense_windows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let session_dir = tmp.path().join("wd_demo").join("session_tools");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let mut lines = vec![
+            r#"{"type":"metadata","protocol_version":"1.4","created_at":1779701196480}"#
+                .to_string(),
+            r#"{"type":"config.update","modelAlias":"kimi-test","time":1779701196490}"#.to_string(),
+            r#"{"type":"turn.prompt","time":1779701196500}"#.to_string(),
+        ];
+        for index in 0..100 {
+            lines.push(
+                serde_json::json!({
+                    "type": "context.append_loop_event",
+                    "event": {
+                        "type": "tool.call",
+                        "toolCallId": format!("tc_{index}"),
+                        "name": "Read",
+                        "args": {"path": "file.rs"}
+                    },
+                    "time": 1779701196600i64 + index * 3
+                })
+                .to_string(),
+            );
+            lines.push(
+                serde_json::json!({
+                    "type": "context.append_loop_event",
+                    "event": {
+                        "type": "tool.result",
+                        "toolCallId": format!("tc_{index}"),
+                        "result": {"output": "ok"}
+                    },
+                    "time": 1779701196601i64 + index * 3
+                })
+                .to_string(),
+            );
+            lines.push(
+                serde_json::json!({
+                    "type": "context.append_loop_event",
+                    "event": {
+                        "type": "step.end",
+                        "usage": {"inputOther": 1, "output": 1}
+                    },
+                    "time": 1779701196602i64 + index * 3
+                })
+                .to_string(),
+            );
+        }
+        let refs = lines.iter().map(String::as_str).collect::<Vec<_>>();
+        let path = write_wire(&session_dir, "main", &refs);
+
+        let tail = parse_session_tail(&path, 80).unwrap();
+        assert_eq!(tail.messages.len(), 80);
+        assert_eq!(tail.parse_warning_count, 0);
+    }
+
+    #[test]
+    fn parse_session_tail_cancel_without_prompt_returns_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let session_dir = tmp.path().join("wd_demo").join("session_cancel");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let mut lines = vec![
+            r#"{"type":"metadata","protocol_version":"1.4","created_at":1779701196480}"#
+                .to_string(),
+            r#"{"type":"turn.prompt","time":1779701196500}"#.to_string(),
+        ];
+        for index in 0..80 {
+            lines.push(
+                serde_json::json!({
+                    "type": "context.append_loop_event",
+                    "event": {
+                        "type": "tool.call",
+                        "toolCallId": format!("tc_{index}"),
+                        "name": "Read",
+                        "args": {"path": "file.rs"}
+                    },
+                    "time": 1779701196600i64 + index
+                })
+                .to_string(),
+            );
+        }
+        lines.push(
+            r#"{"type":"usage.record","model":"kimi-test","usage":{"inputOther":10,"output":5},"usageScope":"turn","time":1779701196800}"#
+                .to_string(),
+        );
+        lines.push(r#"{"type":"turn.cancel","time":1779701196900}"#.to_string());
+        let refs = lines.iter().map(String::as_str).collect::<Vec<_>>();
+        let path = write_wire(&session_dir, "main", &refs);
+
+        assert!(parse_session_tail(&path, 1).is_none());
+        let parsed = parse_session(&path, &SessionIndex::default()).expect("usage is retained");
+        assert!(parsed.messages.is_empty());
+        assert_eq!(parsed.meta.input_tokens, 10);
+    }
+
+    #[test]
+    fn parse_session_tail_widens_past_cancelled_turn() {
+        let tmp = tempfile::tempdir().unwrap();
+        let session_dir = tmp.path().join("wd_demo").join("session_widen");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let mut lines = vec![
+            r#"{"type":"metadata","protocol_version":"1.4","created_at":1779701196480}"#
+                .to_string(),
+            r#"{"type":"turn.prompt","time":1779701196500}"#.to_string(),
+        ];
+        // A cancelled turn dense enough that the initial tail window starts
+        // inside it (after its turn.prompt, before its turn.cancel).
+        for index in 0..100 {
+            lines.push(
+                serde_json::json!({
+                    "type": "context.append_loop_event",
+                    "event": {
+                        "type": "tool.call",
+                        "toolCallId": format!("tc_{index}"),
+                        "name": "Read",
+                        "args": {"path": "file.rs"}
+                    },
+                    "time": 1779701196600i64 + index
+                })
+                .to_string(),
+            );
+        }
+        lines.push(r#"{"type":"turn.cancel","time":1779701196800}"#.to_string());
+        lines.push(r#"{"type":"turn.prompt","time":1779701196900}"#.to_string());
+        for index in 0..10 {
+            lines.push(
+                serde_json::json!({
+                    "type": "context.append_loop_event",
+                    "event": {
+                        "type": "content.part",
+                        "part": {"type": "text", "text": format!("answer {index}")}
+                    },
+                    "time": 1779701197000i64 + index
+                })
+                .to_string(),
+            );
+        }
+        let refs = lines.iter().map(String::as_str).collect::<Vec<_>>();
+        let path = write_wire(&session_dir, "main", &refs);
+
+        let tail = parse_session_tail(&path, 5).expect("widened window rolls the cancel back");
+        assert_eq!(tail.messages.len(), 5);
+        assert_eq!(tail.parse_warning_count, 0);
+        assert!(
+            tail.messages
+                .iter()
+                .all(|message| message.role == MessageRole::Assistant)
+        );
     }
 
     #[test]

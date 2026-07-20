@@ -92,7 +92,7 @@ fn replace_token_stats_clears_existing_rows_when_empty() {
     db.replace_token_stats(
         &meta.id,
         &[TokenStatRow {
-            date: "2026-04-09".into(),
+            bucket: crate::provider::timestamp_to_bucket("2026-04-09").unwrap(),
             model: "claude-opus-4-6".into(),
             turn_count: 1,
             input_tokens: 100,
@@ -118,6 +118,81 @@ fn replace_token_stats_clears_existing_rows_when_empty() {
 }
 
 #[test]
+fn provider_snapshot_rolls_back_when_token_stats_fail() {
+    let dir = TempDir::new().unwrap();
+    let db = Database::open(dir.path()).unwrap();
+    db.with_transaction(|conn| {
+        conn.execute_batch(
+            "CREATE TRIGGER reject_token_stats
+             BEFORE INSERT ON session_token_stats
+             BEGIN
+                 SELECT RAISE(ABORT, 'rejected token stats');
+             END;",
+        )
+    })
+    .unwrap();
+
+    let meta = sample_meta("session-atomic");
+    let parsed = ParsedSession {
+        meta: meta.clone(),
+        messages: Vec::new(),
+        content_text: String::new(),
+        parse_warning_count: 0,
+        child_session_ids: Vec::new(),
+        usage_events: Vec::new(),
+        source_mtime: 42,
+    };
+    let stats = [TokenStatRow {
+        bucket: crate::provider::timestamp_to_bucket("2026-07-19").unwrap(),
+        model: "claude-opus-4-6".into(),
+        turn_count: 1,
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        cost_usd: 0.01,
+    }];
+    let batch = [(meta.id.as_str(), &stats[..])];
+
+    assert!(db
+        .sync_provider_snapshot_with_token_stats(&Provider::Claude, &[parsed], true, &[], &batch,)
+        .is_err());
+    assert!(db.get_session(&meta.id).unwrap().is_none());
+}
+
+#[test]
+fn transaction_commit_failure_rolls_back_connection() {
+    let dir = TempDir::new().unwrap();
+    let db = Database::open(dir.path()).unwrap();
+    {
+        let conn = db.lock_write().unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             CREATE TABLE deferred_parent (id INTEGER PRIMARY KEY);
+             CREATE TABLE deferred_child (
+                parent_id INTEGER REFERENCES deferred_parent(id)
+                    DEFERRABLE INITIALLY DEFERRED
+             );",
+        )
+        .unwrap();
+    }
+
+    assert!(
+        db.with_transaction(|conn| {
+            conn.execute("INSERT INTO deferred_child VALUES (1)", [])?;
+            Ok(())
+        })
+        .is_err()
+    );
+
+    db.with_transaction(|conn| {
+        conn.execute("INSERT INTO deferred_parent VALUES (1)", [])?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
 fn clear_usage_stats_preserves_sessions() {
     let dir = TempDir::new().unwrap();
     let db = Database::open(dir.path()).unwrap();
@@ -140,7 +215,7 @@ fn clear_usage_stats_preserves_sessions() {
     db.replace_token_stats(
         &meta.id,
         &[TokenStatRow {
-            date: "2026-04-10".into(),
+            bucket: crate::provider::timestamp_to_bucket("2026-04-10").unwrap(),
             model: "claude-opus-4-6".into(),
             turn_count: 1,
             input_tokens: 10,
@@ -776,7 +851,7 @@ fn token_totals_update_leaves_fts_index_intact() {
     db.replace_token_stats(
         "session-fts",
         &[TokenStatRow {
-            date: "2026-04-09".into(),
+            bucket: crate::provider::timestamp_to_bucket("2026-04-09").unwrap(),
             model: "claude-opus-4-6".into(),
             turn_count: 1,
             input_tokens: 100,

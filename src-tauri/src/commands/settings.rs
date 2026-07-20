@@ -5,13 +5,13 @@ use crate::error::CommandResult;
 use crate::exporter;
 use crate::models::{IndexStats, PricingCatalogStatus, ProviderSnapshot};
 use crate::pricing::{
-    count_models_dev_models, parse_catalog, parse_models_dev, PRICING_CATALOG_JSON_KEY,
-    PRICING_CATALOG_MODEL_COUNT_KEY, PRICING_CATALOG_UPDATED_AT_KEY, PRICING_CATALOG_URL,
+    PRICING_CATALOG_JSON_KEY, PRICING_CATALOG_MODEL_COUNT_KEY, PRICING_CATALOG_UPDATED_AT_KEY,
+    PRICING_CATALOG_URL, count_models_dev_models, parse_catalog, parse_models_dev,
 };
 use crate::services::{EventBus, ProviderSnapshotService};
 
-use super::sessions::load_detail;
 use super::AppState;
+use super::sessions::load_detail;
 
 #[derive(Clone, Serialize)]
 struct MaintenanceEventPayload {

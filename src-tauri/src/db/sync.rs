@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::models::{Message, MessageRole, Provider, SessionMeta};
 use crate::provider::ParsedSession;
@@ -65,13 +65,10 @@ fn indexable_content_text(messages: &[Message], fallback: &str) -> String {
                 if let Some(name) = message.tool_name.as_deref() {
                     append_indexable_part(&mut content, name);
                 }
-                if let Some(input) = message.tool_input.as_deref() {
-                    if !input.trim().is_empty() {
-                        append_indexable_part(
-                            &mut content,
-                            truncate_chars(input, TOOL_INDEX_CHARS),
-                        );
-                    }
+                if let Some(input) = message.tool_input.as_deref()
+                    && !input.trim().is_empty()
+                {
+                    append_indexable_part(&mut content, truncate_chars(input, TOOL_INDEX_CHARS));
                 }
                 let tool_output = message.content.trim();
                 if !tool_output.is_empty() {
@@ -229,6 +226,23 @@ impl Database {
         aggressive: bool,
         preserve_source_paths: &[String],
     ) -> Result<(), rusqlite::Error> {
+        self.sync_provider_snapshot_with_token_stats(
+            provider,
+            sessions,
+            aggressive,
+            preserve_source_paths,
+            &[],
+        )
+    }
+
+    pub(crate) fn sync_provider_snapshot_with_token_stats(
+        &self,
+        provider: &Provider,
+        sessions: &[ParsedSession],
+        aggressive: bool,
+        preserve_source_paths: &[String],
+        token_stats: &[(&str, &[TokenStatRow])],
+    ) -> Result<(), rusqlite::Error> {
         let provider_key = provider.key().to_string();
         let mut snapshot_sources = ProviderSnapshotSources::from_sessions(sessions);
 
@@ -250,11 +264,16 @@ impl Database {
 
         if !should_delete {
             log::warn!(
-                "provider {provider:?} scan returned {scan_count} sessions ({} unchanged) but DB has {current_count}, skipping destructive sync", preserve_source_paths.len());
+                "provider {provider:?} scan returned {scan_count} sessions ({} unchanged) but DB has {current_count}, skipping destructive sync",
+                preserve_source_paths.len()
+            );
         }
 
         self.with_transaction(|conn| {
             upsert_parsed_sessions_on(conn, sessions)?;
+            for &(session_id, stats) in token_stats {
+                replace_token_stats_on(conn, session_id, stats)?;
+            }
 
             if should_delete {
                 for (source_path, ids) in &snapshot_sources.ids_by_source {
@@ -302,30 +321,23 @@ impl Database {
     }
 
     pub(crate) fn clear_usage_stats(&self) -> Result<(), rusqlite::Error> {
-        let conn = self.lock_write()?;
-        conn.execute("DELETE FROM session_token_stats", [])?;
-        conn.execute("DELETE FROM session_tool_stats", [])?;
-        conn.execute("DELETE FROM session_tool_index", [])?;
-        // Keep the denormalized totals consistent with the now-empty stats,
-        // and invalidate the incremental-scan freshness snapshot so the
-        // following reindex re-parses every file and rewrites token stats.
-        // Without resetting `source_mtime`, `scan_incremental` would see
-        // every file's `(size, mtime)` matching the DB and skip it — leaving
-        // the zeroed totals permanently in place.
-        conn.execute(
-            "UPDATE sessions SET
-                input_tokens = 0,
-                output_tokens = 0,
-                cache_read_tokens = 0,
-                cache_write_tokens = 0,
-                source_mtime = 0",
-            [],
-        )?;
-        Ok(())
+        self.with_transaction(|conn| {
+            conn.execute_batch(
+                "DELETE FROM session_token_stats;
+                 DELETE FROM session_tool_stats;
+                 DELETE FROM session_tool_index;
+                 UPDATE sessions SET
+                    input_tokens = 0,
+                    output_tokens = 0,
+                    cache_read_tokens = 0,
+                    cache_write_tokens = 0,
+                    source_mtime = 0;",
+            )
+        })
     }
 
     /// Replace all token stats for a session. Called during indexing.
-    /// Deletes existing rows first, then inserts new per-(date, model) aggregates.
+    /// Deletes existing rows first, then inserts new per-(bucket, model) aggregates.
     /// Also refreshes the denormalized totals on `sessions` so list/search
     /// queries can avoid correlated `SELECT SUM(...)` subqueries.
     pub fn replace_token_stats(
@@ -333,33 +345,7 @@ impl Database {
         session_id: &str,
         stats: &[TokenStatRow],
     ) -> Result<(), rusqlite::Error> {
-        let conn = self.lock_write()?;
-        conn.execute(
-            "DELETE FROM session_token_stats WHERE session_id = ?1",
-            params![session_id],
-        )?;
-        let mut stmt = conn.prepare_cached(
-            "INSERT INTO session_token_stats
-                (session_id, date, model, turn_count, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        )?;
-        let mut totals = SessionTotals::default();
-        for row in stats {
-            stmt.execute(params![
-                session_id,
-                row.date,
-                row.model,
-                row.turn_count as i64,
-                row.input_tokens as i64,
-                row.output_tokens as i64,
-                row.cache_read_tokens as i64,
-                row.cache_write_tokens as i64,
-                row.cost_usd,
-            ])?;
-            totals.add_row(row);
-        }
-        update_session_totals(&conn, session_id, &totals)?;
-        Ok(())
+        self.with_transaction(|conn| replace_token_stats_on(conn, session_id, stats))
     }
 
     pub(crate) fn replace_tool_stats(
@@ -367,52 +353,40 @@ impl Database {
         session_id: &str,
         stats: &[ToolStatRow],
     ) -> Result<(), rusqlite::Error> {
-        let conn = self.lock_write()?;
-        replace_tool_stats_on(&conn, session_id, stats)
+        self.with_transaction(|conn| replace_tool_stats_on(conn, session_id, stats))
     }
+}
 
-    /// Replace token stats for multiple sessions atomically within a single
-    /// transaction.  The frontend reads via a separate connection, so without
-    /// a transaction the reader can observe a partially-updated state (e.g.
-    /// after a DELETE but before the matching INSERTs), causing usage numbers
-    /// to "jump" on every poll cycle. The denormalized per-session totals on
-    /// `sessions` are updated in the same transaction so search/list queries
-    /// never see a stale aggregate.
-    pub(crate) fn replace_token_stats_batch(
-        &self,
-        batch: &[(&str, &[TokenStatRow])],
-    ) -> Result<(), rusqlite::Error> {
-        self.with_transaction(|conn| {
-            let mut insert = conn.prepare_cached(
-                "INSERT INTO session_token_stats
-                    (session_id, date, model, turn_count, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            )?;
-            for &(session_id, stats) in batch {
-                conn.execute(
-                    "DELETE FROM session_token_stats WHERE session_id = ?1",
-                    params![session_id],
-                )?;
-                let mut totals = SessionTotals::default();
-                for row in stats {
-                    insert.execute(params![
-                        session_id,
-                        row.date,
-                        row.model,
-                        row.turn_count as i64,
-                        row.input_tokens as i64,
-                        row.output_tokens as i64,
-                        row.cache_read_tokens as i64,
-                        row.cache_write_tokens as i64,
-                        row.cost_usd,
-                    ])?;
-                    totals.add_row(row);
-                }
-                update_session_totals(conn, session_id, &totals)?;
-            }
-            Ok(())
-        })
+fn replace_token_stats_on(
+    conn: &Connection,
+    session_id: &str,
+    stats: &[TokenStatRow],
+) -> Result<(), rusqlite::Error> {
+    conn.execute(
+        "DELETE FROM session_token_stats WHERE session_id = ?1",
+        params![session_id],
+    )?;
+    let mut insert = conn.prepare_cached(
+        "INSERT INTO session_token_stats
+            (session_id, bucket, model, turn_count, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+    )?;
+    let mut totals = SessionTotals::default();
+    for row in stats {
+        insert.execute(params![
+            session_id,
+            row.bucket,
+            row.model,
+            row.turn_count as i64,
+            row.input_tokens as i64,
+            row.output_tokens as i64,
+            row.cache_read_tokens as i64,
+            row.cache_write_tokens as i64,
+            row.cost_usd,
+        ])?;
+        totals.add_row(row);
     }
+    update_session_totals(conn, session_id, &totals)
 }
 
 fn replace_tool_stats_on(

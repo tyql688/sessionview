@@ -1,12 +1,13 @@
 //! Accumulator and per-line dispatch — shared between full-file parse
 //! and tail parse.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::models::{Message, MessageRole, Provider, TokenUsage, ToolMetadata};
+use crate::provider::UsageEvent;
 use crate::provider_utils::ToolCallPairer;
 use crate::tool_metadata::{
-    attach_call_metadata, build_tool_metadata, enrich_tool_metadata, ToolCallFacts, ToolResultFacts,
+    ToolCallFacts, ToolResultFacts, attach_call_metadata, build_tool_metadata, enrich_tool_metadata,
 };
 
 use super::super::tools::{render_format_a_tool_output, render_format_b_tool_output};
@@ -41,18 +42,20 @@ pub(super) struct ScanAccum {
     /// Tracks the most recently observed model alias so usage records and
     /// assistant messages can be tagged correctly.
     pub(super) current_model: Option<String>,
-    /// Message index of the first assistant text/think emitted in the
-    /// current turn. `attach_usage` writes the turn's token totals here
-    /// (rather than the trailing tool message) so the UI shows the
-    /// model + cost on the actual assistant output. Reset to `None`
-    /// after each `usage.record` / `step.end` is consumed.
-    current_turn_assistant_idx: Option<usize>,
+    pub(super) usage_events: Vec<UsageEvent>,
+    /// Message index that owns usage for the current turn.
+    current_turn_usage_idx: Option<usize>,
+    current_turn_usage_event_idx: Option<usize>,
     pub(super) parse_warning_count: u32,
     /// Snapshot of state at the last turn.prompt, used to roll back on
     /// turn.cancel. protocol_version 1.4+ emits turn.cancel when the
-    /// user interrupts mid-turn; everything accumulated since the turn
-    /// started (tool calls, partial content, etc.) should be discarded.
+    /// user interrupts mid-turn; partial transcript content is discarded.
     turn_snapshot: Option<TurnSnapshot>,
+    pub(super) cancel_without_snapshot: bool,
+    /// Tail windows legitimately start mid-turn, so usage records that
+    /// cannot resolve a model or anchor there are expected — don't count
+    /// them toward the parse-warning badge.
+    pub(super) is_tail: bool,
 }
 
 impl ScanAccum {
@@ -67,9 +70,13 @@ impl ScanAccum {
             fallback_time_secs: None,
             fallback_time_rfc: None,
             current_model: None,
-            current_turn_assistant_idx: None,
+            usage_events: Vec::new(),
+            current_turn_usage_idx: None,
+            current_turn_usage_event_idx: None,
             parse_warning_count: 0,
             turn_snapshot: None,
+            cancel_without_snapshot: false,
+            is_tail: false,
         }
     }
 
@@ -80,12 +87,15 @@ impl ScanAccum {
             content_parts_len: self.content_parts.len(),
             first_user_message: self.first_user_message.clone(),
         });
+        self.current_turn_usage_idx = None;
+        self.current_turn_usage_event_idx = None;
     }
 
     /// Roll back to the last turn snapshot, discarding everything
     /// accumulated since the turn started. Called on turn.cancel.
     fn rollback_turn(&mut self) {
         let Some(snap) = self.turn_snapshot.take() else {
+            self.cancel_without_snapshot = true;
             return;
         };
         self.messages.truncate(snap.messages_len);
@@ -93,14 +103,19 @@ impl ScanAccum {
         // Rebuild call_id_map by keeping only entries whose message still exists.
         self.call_id_map.retain_below(snap.messages_len);
         self.first_user_message = snap.first_user_message;
-        self.current_turn_assistant_idx = None;
+        self.current_turn_usage_idx = None;
+        self.current_turn_usage_event_idx = None;
     }
 
     fn note_time(&mut self, ms: Option<i64>) -> Option<String> {
         let (secs, rfc) = match ms {
             Some(ms) => {
-                let (s, r) = time_ms_to_parts(ms);
-                (s, r)
+                let Some(parts) = time_ms_to_parts(ms) else {
+                    log::warn!("skipping out-of-range Kimi timestamp {ms}");
+                    self.note_warning();
+                    return None;
+                };
+                parts
             }
             None => match (self.fallback_time_secs, self.fallback_time_rfc.as_ref()) {
                 (Some(s), Some(r)) => (s, r.clone()),
@@ -123,7 +138,8 @@ impl ScanAccum {
         // can fire mid-turn and clearing the index would let the next
         // usage.record land on the wrong message.
         if is_real_user {
-            self.current_turn_assistant_idx = None;
+            self.current_turn_usage_idx = None;
+            self.current_turn_usage_event_idx = None;
         }
         if self.first_user_message.is_none() {
             // Match the title heuristic used elsewhere: pick the first
@@ -147,12 +163,22 @@ impl ScanAccum {
             return;
         }
         self.content_parts.push(text.to_string());
-        if self.current_turn_assistant_idx.is_none() {
-            self.current_turn_assistant_idx = Some(self.messages.len());
+        // The turn's usage belongs on its assistant text. If a step fallback
+        // already landed it on a tool message, move it here so exactly one
+        // message per turn carries the usage.
+        let tool_owner = self
+            .current_turn_usage_idx
+            .and_then(|index| self.messages.get_mut(index))
+            .filter(|message| message.role == MessageRole::Tool);
+        let owner_is_tool = tool_owner.is_some();
+        let moved_usage = tool_owner.and_then(|owner| owner.token_usage.take());
+        if self.current_turn_usage_idx.is_none() || owner_is_tool {
+            self.current_turn_usage_idx = Some(self.messages.len());
         }
         self.messages.push(Message {
             timestamp: ts,
             model: self.current_model.clone(),
+            token_usage: moved_usage,
             ..Message::assistant(text.to_string())
         });
     }
@@ -193,6 +219,9 @@ impl ScanAccum {
         }
         let display_name = metadata.canonical_name.clone();
         let tool_input = args.map(|v| v.to_string());
+        if self.current_turn_usage_idx.is_none() {
+            self.current_turn_usage_idx = Some(self.messages.len());
+        }
         self.call_id_map.register(call_id, self.messages.len());
         self.messages.push(Message {
             timestamp: ts,
@@ -234,48 +263,109 @@ impl ScanAccum {
             message.content = rendered_output;
             return;
         }
+        if self.current_turn_usage_idx.is_none() {
+            self.current_turn_usage_idx = Some(self.messages.len());
+        }
         self.messages.push(Message {
             timestamp: ts,
             ..Message::new(MessageRole::Tool, rendered_output)
         });
     }
 
-    /// Attach the turn's token totals to its FIRST assistant text/think
-    /// message (set by push_assistant_text / push_thinking). Falls back
-    /// to the trailing assistant/tool message if we never saw an
-    /// assistant-side message in the turn (e.g. tool-only step). After
-    /// attachment, the per-turn index is cleared so the next step's
-    /// usage lands on the next turn's first assistant message.
-    fn attach_usage(&mut self, usage: TokenUsage, model: Option<&str>) {
-        let target_idx = self.current_turn_assistant_idx.take().or_else(|| {
-            // No assistant text/think this turn — fall back to the
-            // trailing assistant/tool message so usage doesn't get lost.
-            self.messages.iter().enumerate().rev().find_map(|(i, m)| {
-                matches!(m.role, MessageRole::Assistant | MessageRole::Tool).then_some(i)
-            })
-        });
+    /// Attach token totals to the turn's first assistant text, or its
+    /// trailing tool for tool-only turns. A step fallback keeps the target
+    /// so the authoritative turn record overwrites it instead of duplicating it.
+    fn attach_usage(&mut self, usage: TokenUsage, model: Option<&str>, finish_turn: bool) {
+        let target_idx = if finish_turn {
+            self.current_turn_usage_idx.take()
+        } else {
+            self.current_turn_usage_idx
+        };
         let Some(idx) = target_idx else {
-            // Wire stream gave us a usage record with no anchor message
-            // — e.g. tail parse that started after the assistant text
-            // and before any tool. Log so token totals that quietly fail
-            // to land are visible in the parse-warning surface.
-            log::warn!(
-                "Kimi usage.record (output={}, input_other+cache={}) had no assistant/tool message to attach to",
-                usage.output_tokens,
-                usage.input_tokens
-            );
-            self.note_warning();
+            // Usage record with no anchor message. Session totals still
+            // come from usage_events; only the per-message badge is lost.
+            if !self.is_tail {
+                log::warn!(
+                    "Kimi usage.record (output={}, input_other={}) had no assistant/tool message to attach to",
+                    usage.output_tokens,
+                    usage.input_tokens
+                );
+                self.note_warning();
+            }
             return;
         };
         let Some(msg) = self.messages.get_mut(idx) else {
             return;
         };
+        if !finish_turn {
+            self.current_turn_usage_idx = Some(idx);
+        }
         msg.token_usage = Some(usage);
         if let Some(m) = model {
             msg.model = Some(m.to_string());
         } else if msg.model.is_none() {
             msg.model = self.current_model.clone();
         }
+    }
+
+    /// Fold a usage record into the current turn's event. Per-step usages
+    /// (`finish_turn == false`) accumulate, so a turn that never sees its
+    /// closing record (crash, live session) still totals every step; the
+    /// closing `usage.record` replaces the accumulated value with the
+    /// authoritative turn total. Returns the usage to attach to the turn's
+    /// owner message.
+    fn record_usage_event(
+        &mut self,
+        usage: &TokenUsage,
+        timestamp: Option<String>,
+        model: Option<&str>,
+        finish_turn: bool,
+    ) -> Option<TokenUsage> {
+        let (Some(timestamp), Some(model)) = (timestamp, model) else {
+            if !self.is_tail {
+                log::warn!("skipping Kimi usage record without timestamp or model");
+                self.note_warning();
+            }
+            return None;
+        };
+        let mut event = UsageEvent {
+            timestamp,
+            model: model.to_string(),
+            input_tokens: u64::from(usage.input_tokens),
+            output_tokens: u64::from(usage.output_tokens),
+            cache_read_input_tokens: u64::from(usage.cache_read_input_tokens),
+            cache_creation_input_tokens: u64::from(usage.cache_creation_input_tokens),
+            usage_hash: None,
+        };
+        if let Some(index) = self.current_turn_usage_event_idx.take() {
+            if !finish_turn {
+                let prev = &self.usage_events[index];
+                event.input_tokens += prev.input_tokens;
+                event.output_tokens += prev.output_tokens;
+                event.cache_read_input_tokens += prev.cache_read_input_tokens;
+                event.cache_creation_input_tokens += prev.cache_creation_input_tokens;
+                self.current_turn_usage_event_idx = Some(index);
+            }
+            self.usage_events[index] = event;
+        } else {
+            self.usage_events.push(event);
+            if !finish_turn {
+                self.current_turn_usage_event_idx = Some(self.usage_events.len() - 1);
+            }
+        }
+        let attached = self
+            .current_turn_usage_event_idx
+            .map_or(usage.clone(), |index| {
+                let event = &self.usage_events[index];
+                let clamp = |value: u64| u32::try_from(value).unwrap_or(u32::MAX);
+                TokenUsage {
+                    input_tokens: clamp(event.input_tokens),
+                    output_tokens: clamp(event.output_tokens),
+                    cache_read_input_tokens: clamp(event.cache_read_input_tokens),
+                    cache_creation_input_tokens: clamp(event.cache_creation_input_tokens),
+                }
+            });
+        Some(attached)
     }
 
     pub(super) fn note_warning(&mut self) {
@@ -337,7 +427,7 @@ mod turn_cancel_tests {
     use serde_json::json;
 
     #[test]
-    fn turn_cancel_discards_accumulated_content() {
+    fn turn_cancel_discards_content_but_preserves_usage() {
         let mut accum = ScanAccum::new();
         // Simulate a turn that gets cancelled
         dispatch_line(&mut accum, &json!({"type": "turn.prompt", "time": 1000}));
@@ -357,11 +447,24 @@ mod turn_cancel_tests {
                 "time": 1002
             }),
         );
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "usage.record",
+                "model": "kimi-test",
+                "usage": {"inputOther": 10, "output": 5},
+                "usageScope": "turn",
+                "time": 1002
+            }),
+        );
         // User cancels
         dispatch_line(&mut accum, &json!({"type": "turn.cancel", "time": 1003}));
 
         assert_eq!(accum.messages.len(), 0);
         assert_eq!(accum.content_parts.len(), 0);
+        assert_eq!(accum.usage_events.len(), 1);
+        assert_eq!(accum.usage_events[0].input_tokens, 10);
+        assert_eq!(accum.usage_events[0].output_tokens, 5);
         assert_eq!(accum.call_id_map.index_of(Some("tc_1")), None);
     }
 
@@ -392,6 +495,7 @@ mod turn_cancel_tests {
                 "type": "usage.record",
                 "model": "kimi-test",
                 "usage": {"inputOther": 10, "output": 5, "inputCacheRead": 0, "inputCacheCreation": 0},
+                "usageScope": "turn",
                 "time": 1003
             }),
         );
@@ -468,7 +572,7 @@ mod turn_cancel_tests {
                 "type": "context.append_loop_event",
                 "event": {
                     "type": "step.end",
-                    "usage": {"inputOther": 100, "output": 50, "inputCacheRead": 200, "inputCacheCreation": 0}
+                    "usage": {"model": "kimi-test", "inputOther": 100, "output": 50, "inputCacheRead": 200, "inputCacheCreation": 0}
                 },
                 "time": 1003
             }),
@@ -478,8 +582,209 @@ mod turn_cancel_tests {
             .token_usage
             .as_ref()
             .expect("usage attached");
-        assert_eq!(usage.input_tokens, 300); // 100 + 200
+        assert_eq!(usage.input_tokens, 100);
         assert_eq!(usage.output_tokens, 50);
+        assert_eq!(accum.usage_events.len(), 1);
+        assert_eq!(accum.usage_events[0].input_tokens, 100);
+    }
+
+    #[test]
+    fn turn_usage_overwrites_step_fallback_once() {
+        let mut accum = ScanAccum::new();
+        accum.push_assistant_text("answer", Some("2026-07-19T00:00:00Z".into()));
+        accum.push_tool_call("Read", Some("call-1"), None, None, None);
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_loop_event",
+                "event": {
+                    "type": "step.end",
+                    "usage": {"inputOther": 10, "output": 5, "inputCacheRead": 20}
+                }
+            }),
+        );
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "usage.record",
+                "usageScope": "turn",
+                "model": "kimi-test",
+                "usage": {"inputOther": 12, "output": 6, "inputCacheRead": 24},
+                "time": 1001
+            }),
+        );
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "usage.record",
+                "usageScope": "session",
+                "model": "kimi-test",
+                "usage": {"inputOther": 120, "output": 60, "inputCacheRead": 240}
+            }),
+        );
+
+        assert_eq!(
+            accum
+                .messages
+                .iter()
+                .filter(|message| message.token_usage.is_some())
+                .count(),
+            1
+        );
+        let usage = accum.messages[0].token_usage.as_ref().unwrap();
+        assert_eq!(usage.input_tokens, 12);
+        assert_eq!(usage.cache_read_input_tokens, 24);
+        assert_eq!(accum.usage_events.len(), 1);
+        assert_eq!(accum.usage_events[0].input_tokens, 12);
+    }
+
+    #[test]
+    fn step_usage_accumulates_when_turn_record_never_arrives() {
+        let mut accum = ScanAccum::new();
+        accum.current_model = Some("kimi-test".into());
+        accum.push_assistant_text("answer", Some("2026-07-19T00:00:00Z".into()));
+        for step in 0..2 {
+            dispatch_line(
+                &mut accum,
+                &json!({
+                    "type": "context.append_loop_event",
+                    "event": {
+                        "type": "step.end",
+                        "usage": {"inputOther": 100, "output": 50, "inputCacheRead": 30}
+                    },
+                    "time": 1001 + step
+                }),
+            );
+        }
+
+        assert_eq!(accum.usage_events.len(), 1);
+        assert_eq!(accum.usage_events[0].input_tokens, 200);
+        assert_eq!(accum.usage_events[0].output_tokens, 100);
+        assert_eq!(accum.usage_events[0].cache_read_input_tokens, 60);
+        let usage = accum.messages[0].token_usage.as_ref().unwrap();
+        assert_eq!(usage.input_tokens, 200);
+        assert_eq!(usage.output_tokens, 100);
+    }
+
+    #[test]
+    fn assistant_text_takes_over_usage_from_tool_owner() {
+        let mut accum = ScanAccum::new();
+        accum.current_model = Some("kimi-test".into());
+        accum.push_tool_call(
+            "Read",
+            Some("call-1"),
+            None,
+            Some("2026-07-19T00:00:00Z".into()),
+            None,
+        );
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_loop_event",
+                "event": {
+                    "type": "step.end",
+                    "usage": {"inputOther": 10, "output": 5}
+                },
+                "time": 1001
+            }),
+        );
+        accum.push_assistant_text("answer", Some("2026-07-19T00:00:02Z".into()));
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "usage.record",
+                "usageScope": "turn",
+                "model": "kimi-test",
+                "usage": {"inputOther": 12, "output": 6},
+                "time": 1002
+            }),
+        );
+
+        let carriers: Vec<usize> = accum
+            .messages
+            .iter()
+            .enumerate()
+            .filter_map(|(index, message)| message.token_usage.is_some().then_some(index))
+            .collect();
+        assert_eq!(carriers, vec![1], "only the assistant text carries usage");
+        let usage = accum.messages[1].token_usage.as_ref().unwrap();
+        assert_eq!(usage.input_tokens, 12);
+        assert_eq!(usage.output_tokens, 6);
+        assert_eq!(accum.usage_events.len(), 1);
+        assert_eq!(accum.usage_events[0].input_tokens, 12);
+    }
+
+    #[test]
+    fn real_user_boundary_finalizes_step_usage_fallback() {
+        let mut accum = ScanAccum::new();
+        for (text, time) in [("first", 1000), ("second", 2000)] {
+            dispatch_line(
+                &mut accum,
+                &json!({
+                    "type": "context.append_message",
+                    "message": {
+                        "role": "user",
+                        "content": [{"type": "text", "text": text}]
+                    },
+                    "time": time
+                }),
+            );
+            accum.push_assistant_text("answer", Some("2026-07-19T00:00:00Z".into()));
+            dispatch_line(
+                &mut accum,
+                &json!({
+                    "type": "context.append_loop_event",
+                    "event": {
+                        "type": "step.end",
+                        "usage": {"model": "kimi-test", "inputOther": 10, "output": 5}
+                    },
+                    "time": time + 1
+                }),
+            );
+        }
+
+        assert_eq!(accum.usage_events.len(), 2);
+    }
+
+    #[test]
+    fn usage_without_current_output_does_not_overwrite_previous_turn() {
+        let mut accum = ScanAccum::new();
+        accum.current_model = Some("kimi-test".into());
+        accum.push_assistant_text("first", Some("2026-07-19T00:00:00Z".into()));
+        dispatch_line(
+            &mut accum,
+            &json!({"type":"usage.record","usageScope":"turn","model":"kimi-test","usage":{"output":1},"time":1000}),
+        );
+        accum.push_user_text("next", Some("2026-07-19T00:00:01Z".into()), true);
+        dispatch_line(
+            &mut accum,
+            &json!({"type":"usage.record","usageScope":"turn","model":"kimi-test","usage":{"output":2},"time":2000}),
+        );
+
+        assert_eq!(
+            accum.messages[0]
+                .token_usage
+                .as_ref()
+                .unwrap()
+                .output_tokens,
+            1
+        );
+        assert!(accum.messages[1].token_usage.is_none());
+        assert_eq!(accum.usage_events.len(), 2);
+        assert_eq!(accum.parse_warning_count, 1);
+    }
+
+    #[test]
+    fn invalid_metadata_timestamp_is_reported() {
+        let mut accum = ScanAccum::new();
+
+        dispatch_line(
+            &mut accum,
+            &json!({"type": "metadata", "created_at": i64::MAX}),
+        );
+
+        assert_eq!(accum.parse_warning_count, 1);
+        assert_eq!(accum.first_time_secs, None);
     }
 }
 
@@ -549,13 +854,17 @@ pub(super) fn dispatch_line(accum: &mut ScanAccum, entry: &Value) {
             // sessions (each subsequent line lacks `time`). Cache it so
             // `note_time(None)` can hand it back.
             if let Some(ms) = entry.get("created_at").and_then(|v| v.as_i64()) {
-                let (secs, rfc) = time_ms_to_parts(ms);
-                accum.fallback_time_secs = Some(secs);
-                accum.fallback_time_rfc = Some(rfc);
-                if accum.first_time_secs.is_none() {
-                    accum.first_time_secs = Some(secs);
+                if let Some((secs, rfc)) = time_ms_to_parts(ms) {
+                    accum.fallback_time_secs = Some(secs);
+                    accum.fallback_time_rfc = Some(rfc);
+                    if accum.first_time_secs.is_none() {
+                        accum.first_time_secs = Some(secs);
+                    }
+                    accum.last_time_secs = Some(secs);
+                } else {
+                    log::warn!("skipping out-of-range Kimi metadata timestamp {ms}");
+                    accum.note_warning();
                 }
-                accum.last_time_secs = Some(secs);
             }
         }
 
@@ -578,12 +887,22 @@ pub(super) fn dispatch_line(accum: &mut ScanAccum, entry: &Value) {
         "context.append_loop_event" => handle_native_event(accum, entry, line_time_ms),
 
         "usage.record" => {
-            let _ = accum.note_time(line_time_ms);
-            let model = entry.get("model").and_then(|v| v.as_str());
-            if let Some(u) = entry.get("usage") {
-                if let Some(usage) = parse_usage(u) {
-                    accum.attach_usage(usage, model);
-                }
+            let timestamp = accum.note_time(line_time_ms);
+            if entry.get("usageScope").and_then(Value::as_str) != Some("turn") {
+                return;
+            }
+            let model = entry
+                .get("model")
+                .and_then(|v| v.as_str())
+                .filter(|model| !model.is_empty())
+                .map(str::to_string)
+                .or_else(|| accum.current_model.clone());
+            if let Some(u) = entry.get("usage")
+                && let Some(usage) = parse_usage(u)
+                && let Some(total) =
+                    accum.record_usage_event(&usage, timestamp, model.as_deref(), true)
+            {
+                accum.attach_usage(total, model.as_deref(), true);
             }
         }
 
@@ -596,8 +915,6 @@ pub(super) fn dispatch_line(accum: &mut ScanAccum, entry: &Value) {
         }
 
         "turn.cancel" => {
-            // User cancelled the current turn (e.g. Ctrl+C, interrupt).
-            // Discard everything accumulated since the turn started.
             let _ = accum.note_time(line_time_ms);
             accum.rollback_turn();
         }
@@ -767,10 +1084,11 @@ fn handle_native_event(accum: &mut ScanAccum, entry: &Value, line_time_ms: Optio
                 .map(|s| s.to_string())
                 .or_else(|| accum.current_model.clone());
             let model_ref = model.as_deref();
-            if let Some(u) = event.get("usage") {
-                if let Some(usage) = parse_usage(u) {
-                    accum.attach_usage(usage, model_ref);
-                }
+            if let Some(u) = event.get("usage")
+                && let Some(usage) = parse_usage(u)
+                && let Some(total) = accum.record_usage_event(&usage, ts.clone(), model_ref, false)
+            {
+                accum.attach_usage(total, model_ref, false);
             }
         }
         _ => {}
@@ -821,12 +1139,5 @@ fn parse_usage(value: &Value) -> Option<TokenUsage> {
     {
         return None;
     }
-    // Kimi reports cache reads/writes separately from `inputOther`; the
-    // canonical input_tokens field carries the combined prompt size.
-    Some(TokenUsage {
-        input_tokens: usage.input_tokens
-            + usage.cache_read_input_tokens
-            + usage.cache_creation_input_tokens,
-        ..usage
-    })
+    Some(usage)
 }

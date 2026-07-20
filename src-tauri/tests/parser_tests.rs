@@ -1,3 +1,6 @@
+// Test code: clippy's allow-*-in-tests only covers `#[cfg(test)]` modules.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::fs;
 use std::path::PathBuf;
 
@@ -574,7 +577,7 @@ fn codex_token_usage_attached_to_assistant_message() {
         .token_usage
         .as_ref()
         .expect("last assistant message must have token_usage");
-    assert_eq!(usage.input_tokens, 120);
+    assert_eq!(usage.input_tokens, 110);
     assert_eq!(usage.output_tokens, 25);
     assert_eq!(usage.cache_read_input_tokens, 10);
 }
@@ -636,11 +639,13 @@ fn codex_subagent_v2_skips_sanitized_fork_context() {
         vec!["Investigate module A and return a summary."],
         "parent's forked user message must be skipped; only subagent's own turn survives"
     );
-    assert!(session
-        .messages
-        .iter()
-        .any(|m| m.role == MessageRole::Assistant
-            && m.content.contains("Module A handles authentication")));
+    assert!(
+        session
+            .messages
+            .iter()
+            .any(|m| m.role == MessageRole::Assistant
+                && m.content.contains("Module A handles authentication"))
+    );
 }
 
 #[test]
@@ -797,7 +802,7 @@ This is a demo project."
 fn kimi_native_session_attaches_usage_to_assistant_text() {
     let s = parse_fixture_session(NATIVE_BASIC_ID);
     // The final assistant text comes after step.end; usage.record carries
-    // the canonical model alias and matches inputOther+output+cache_read.
+    // the canonical model alias and disjoint token components.
     let last_assistant = s
         .messages
         .iter()
@@ -810,7 +815,7 @@ fn kimi_native_session_attaches_usage_to_assistant_text() {
         .expect("usage must attach to last assistant message");
     assert_eq!(usage.output_tokens, 40);
     assert_eq!(usage.cache_read_input_tokens, 2048);
-    assert_eq!(usage.input_tokens, 120 + 2048);
+    assert_eq!(usage.input_tokens, 120);
     assert_eq!(
         last_assistant.model.as_deref(),
         Some("kimi-code/kimi-for-coding")
@@ -1319,7 +1324,7 @@ fn antigravity_real_local_sessions_smoke() {
 /// Create a temporary SQLite database matching the OpenCode schema.
 /// Returns the `TempDir` (must be kept alive for the test) and the DB path.
 fn create_opencode_test_db() -> (tempfile::TempDir, PathBuf) {
-    use rusqlite::{params, Connection};
+    use rusqlite::{Connection, params};
 
     let dir = tempfile::tempdir().expect("temp dir");
     let db_path = dir.path().join("opencode.db");
@@ -1574,7 +1579,7 @@ fn opencode_incremental_scan_reparses_changed_database() {
     )]);
 
     {
-        use rusqlite::{params, Connection};
+        use rusqlite::{Connection, params};
         let conn = Connection::open(&db_path).expect("open test db");
         conn.execute(
             "INSERT INTO session
@@ -1609,7 +1614,7 @@ fn opencode_incremental_scan_reparses_changed_database() {
 /// against a rollback-journal DB and never exercise this path.
 #[test]
 fn opencode_incremental_scan_detects_wal_only_append() {
-    use rusqlite::{params, Connection};
+    use rusqlite::{Connection, params};
 
     let (_dir, db_path) = create_opencode_test_db();
     let provider = OpenCodeProvider::with_db_path(db_path.clone());
@@ -1789,7 +1794,7 @@ fn opencode_token_usage() {
     // Build a minimal DB where the assistant message has ONLY a tool part
     // (no text). In that case the provider attaches token_usage to the last
     // tool message, which is the only way to observe it in this code path.
-    use rusqlite::{params, Connection};
+    use rusqlite::{Connection, params};
 
     let dir = tempfile::tempdir().expect("temp dir");
     let db_path = dir.path().join("opencode.db");
@@ -1847,7 +1852,7 @@ fn opencode_token_usage() {
         "INSERT INTO message (id, session_id, data, time_created) VALUES (?1,?2,?3,?4)",
         params![
             "m2", "s1",
-            r#"{"role":"assistant","time":{"created":1705321260000},"tokens":{"input":50,"output":100,"cache":{"read":10,"write":5}}}"#,
+            r#"{"role":"assistant","time":{"created":1705321260000},"tokens":{"input":50,"output":100,"reasoning":25,"cache":{"read":10,"write":5}}}"#,
             1705321260000_i64
         ],
     )
@@ -1879,6 +1884,15 @@ fn opencode_token_usage() {
     drop(conn);
 
     let provider = OpenCodeProvider::with_db_path(db_path.clone());
+    let indexed = provider.scan_all().expect("scan_all must succeed");
+    assert_eq!(
+        indexed[0].messages[0]
+            .token_usage
+            .as_ref()
+            .expect("indexed usage")
+            .output_tokens,
+        125
+    );
     let messages = provider
         .load_messages("s1", &db_path.to_string_lossy())
         .expect("load_messages must succeed");
@@ -1894,7 +1908,7 @@ fn opencode_token_usage() {
         .as_ref()
         .expect("tool message must carry token_usage when assistant has no text parts");
     assert_eq!(usage.input_tokens, 50);
-    assert_eq!(usage.output_tokens, 100);
+    assert_eq!(usage.output_tokens, 125);
     assert_eq!(usage.cache_read_input_tokens, 10);
     assert_eq!(usage.cache_creation_input_tokens, 5);
 }
@@ -2153,11 +2167,10 @@ fn grok_usage_events_from_turn_completed_model_usage() {
     assert_eq!(session.usage_events.len(), 1);
     let event = &session.usage_events[0];
     assert_eq!(event.model, "grok-4.5");
-    assert_eq!(event.input_tokens, 13312);
+    assert_eq!(event.input_tokens, 13312 - 11264);
     assert_eq!(event.output_tokens, 106);
     assert_eq!(event.cache_read_input_tokens, 11264);
 
-    // compute_token_stats keeps input/cache_read disjoint (input includes cache).
     let provider = grok_fixture_provider();
     let rows = provider.compute_token_stats(&session, None, None);
     assert_eq!(rows.len(), 1);
@@ -2315,7 +2328,7 @@ fn grok_task_output_result_suppresses_duplicate_raw_output() {
     // the raw copy that the result detail already shows. Covered here via
     // metadata on a synthetic enrich to avoid inflating the fixture.
     use sessionview_lib::tool_metadata::{
-        build_tool_metadata, enrich_tool_metadata, ToolCallFacts, ToolResultFacts,
+        ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata,
     };
     let mut metadata = build_tool_metadata(ToolCallFacts {
         provider: Provider::Grok,
@@ -2366,11 +2379,13 @@ fn grok_non_terminal_results_stay_out_of_structured_output() {
         .expect("Bash tool message present");
     let bash_meta = bash.tool_metadata.as_ref().expect("bash metadata");
     assert_eq!(bash_meta.result_kind.as_deref(), Some("terminal_output"));
-    assert!(bash_meta
-        .structured
-        .as_ref()
-        .and_then(|s| s.get("output"))
-        .is_some());
+    assert!(
+        bash_meta
+            .structured
+            .as_ref()
+            .and_then(|s| s.get("output"))
+            .is_some()
+    );
 }
 
 #[test]
@@ -2383,10 +2398,12 @@ fn grok_compaction_summary_surfaces_and_reinjected_context_is_skipped() {
         .expect("compaction summary must surface as a system message");
     assert!(compaction.content.contains("scaffolded the demo project"));
     // The compaction_meta re-injection of <user_info> stays hidden.
-    assert!(!session
-        .messages
-        .iter()
-        .any(|m| m.content.contains("<user_info>")));
+    assert!(
+        !session
+            .messages
+            .iter()
+            .any(|m| m.content.contains("<user_info>"))
+    );
 }
 
 const GROK_COMPACTED_ID: &str = "01900000-0000-7000-8000-000000000003";

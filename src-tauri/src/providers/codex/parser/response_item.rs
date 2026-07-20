@@ -1,19 +1,14 @@
-//! `response_item` line handler for the Codex per-line dispatch.
-//!
-//! Holds the single `CodexScanAccum::handle_response_item` method,
-//! relocated verbatim from `scan_lines`'s `"response_item"` arm. The
-//! method stays one cohesive unit (the natural per-event-kind `match`);
-//! it lives in its own file purely to keep `parser/mod.rs` under the
-//! module size limit. `scan_lines` (in `mod.rs`) calls it unchanged.
+//! `response_item` line handler for the Codex per-line dispatch. Split out of
+//! `parser/mod.rs` for size; the per-event-kind `match` stays one unit.
 
 use std::path::Path;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::models::{Message, MessageRole, Provider};
 use crate::provider_utils::is_system_content;
 use crate::tool_metadata::{
-    build_tool_metadata, enrich_tool_metadata, ToolCallFacts, ToolResultFacts,
+    ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata,
 };
 
 use super::super::tools::*;
@@ -21,14 +16,11 @@ use super::value_helpers::{
     codex_call_id, codex_content_items_text, codex_image_generation_input, codex_tool_input_value,
     codex_tool_result_value, enrich_existing_tool_message, push_system_event,
 };
-use super::{flush_pending_user_message, CodexLine, CodexScanAccum, PendingCodexUserMessage};
+use super::{CodexLine, CodexScanAccum, PendingCodexUserMessage, flush_pending_user_message};
 
 impl CodexScanAccum {
-    /// Handle a `response_item` line. Lifted verbatim from the
-    /// `scan_lines` dispatch arm: every `continue` (skip-this-line) in
-    /// the original arm becomes a `return`, since this method is the
-    /// last action `scan_lines` takes for the line — returning lets the
-    /// loop advance to the next line exactly as `continue` did.
+    /// Handle a `response_item` line. `return` means skip the line: this is
+    /// the last action `scan_lines` takes for it.
     pub(super) fn handle_response_item(&mut self, entry: &CodexLine, payload: &Value, path: &Path) {
         // Skip developer role and reasoning type
         let role_str = payload.get("role").and_then(|v| v.as_str()).unwrap_or("");
@@ -399,11 +391,13 @@ impl CodexScanAccum {
                 });
             }
             "custom_tool_call_output" => {
-                let raw_output = payload
-                    .get("output")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                // `output` is a plain string in older rollouts and an array
+                // of content parts in newer ones.
+                let raw_output = match payload.get("output") {
+                    Some(Value::String(text)) => text.clone(),
+                    Some(Value::Array(parts)) => extract_codex_array_content(parts),
+                    _ => String::new(),
+                };
                 let output = extract_tool_output(&raw_output);
 
                 let call_id = payload.get("call_id").and_then(|v| v.as_str());

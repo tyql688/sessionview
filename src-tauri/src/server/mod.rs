@@ -13,18 +13,18 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context;
+use axum::Router;
 use axum::extract::{Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::Router;
 use clap::Parser;
 use serde::Deserialize;
-use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
-use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 use crate::commands::AppState;
 use dispatch::DispatchError;
@@ -103,7 +103,15 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
 
     let bus = Arc::new(BroadcastEventBus::new(256));
     let state = crate::build_app_state(&data_dir, bus.clone())?;
-    let session_count = state.db.session_count().unwrap_or(0);
+    // Informational only — a transient read failure (e.g. the GUI holding
+    // the shared DB busy) must not abort startup, but don't report a fake 0.
+    let session_count = match state.db.session_count() {
+        Ok(count) => count.to_string(),
+        Err(error) => {
+            log::warn!("failed to read indexed session count: {error}");
+            "unknown".to_string()
+        }
+    };
 
     let ctx = ServerCtx {
         state,
@@ -161,9 +169,7 @@ async fn serve(cli: Cli) -> anyhow::Result<()> {
 async fn shutdown_signal() {
     if let Err(e) = tokio::signal::ctrl_c().await {
         log::warn!("failed to listen for shutdown signal: {e}");
-        // Fall through: without a signal handler the future must still resolve
-        // eventually; pending() would leak the task, so just return and let
-        // the server run until the process is killed externally.
+        std::future::pending::<()>().await;
     }
     log::info!("shutting down");
 }
@@ -224,7 +230,8 @@ async fn invoke_handler(
         match serde_json::from_slice(&body) {
             Ok(v) => v,
             Err(e) => {
-                return (StatusCode::BAD_REQUEST, format!("invalid JSON body: {e}")).into_response()
+                return (StatusCode::BAD_REQUEST, format!("invalid JSON body: {e}"))
+                    .into_response();
             }
         }
     };

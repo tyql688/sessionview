@@ -127,10 +127,10 @@ pub(super) fn nested_status_text(value: Option<&Value>) -> Option<String> {
 
 pub(super) fn mcp_result_summary(structured: &serde_json::Map<String, Value>) -> Option<String> {
     let result = structured.get("result").and_then(Value::as_object)?;
-    if let Some(err) = result.get("Err").and_then(Value::as_str) {
-        if !err.is_empty() {
-            return Some(err.to_string());
-        }
+    if let Some(err) = result.get("Err").and_then(Value::as_str)
+        && !err.is_empty()
+    {
+        return Some(err.to_string());
     }
 
     let ok = result
@@ -144,11 +144,7 @@ pub(super) fn mcp_result_summary(structured: &serde_json::Map<String, Value>) ->
         .filter_map(|part| first_string(part, &["text"]))
         .collect::<Vec<_>>()
         .join("\n");
-    if text.is_empty() {
-        None
-    } else {
-        Some(text)
-    }
+    if text.is_empty() { None } else { Some(text) }
 }
 
 pub(super) fn patch_files(structured: &serde_json::Map<String, Value>) -> Vec<String> {

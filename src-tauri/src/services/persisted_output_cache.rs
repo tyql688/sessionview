@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 /// Cached `<persisted-output>` referenced file content.
@@ -55,12 +55,12 @@ impl PersistedOutputCache {
                 Ok(g) => g,
                 Err(p) => p.into_inner(),
             };
-            if let Some(entry) = inner.map.get_mut(canonical_path) {
-                if entry.mtime == mtime {
-                    let access = self.counter.fetch_add(1, Ordering::Relaxed) + 1;
-                    entry.last_access = access;
-                    return Ok(entry.content.clone());
-                }
+            if let Some(entry) = inner.map.get_mut(canonical_path)
+                && entry.mtime == mtime
+            {
+                let access = self.counter.fetch_add(1, Ordering::Relaxed) + 1;
+                entry.last_access = access;
+                return Ok(entry.content.clone());
             }
             // Stale entry — drop it; we'll reinsert below. Absent is a no-op.
             if let Some(removed) = inner.map.remove(canonical_path) {

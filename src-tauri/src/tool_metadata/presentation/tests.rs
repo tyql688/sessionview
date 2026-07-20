@@ -3,7 +3,7 @@ use serde_json::json;
 use super::*;
 use crate::models::{Provider, RawOutputPolicy, ToolLine};
 use crate::tool_metadata::{
-    build_tool_metadata, enrich_tool_metadata, ToolCallFacts, ToolResultFacts,
+    ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata,
 };
 
 #[test]
@@ -42,13 +42,15 @@ fn builds_input_and_result_presentation_for_bash() {
             .value,
         "cargo test"
     );
-    assert!(presentation
-        .result_detail
-        .as_ref()
-        .unwrap()
-        .lines
-        .iter()
-        .any(|line| line.label == "stdout" && line.value == "ok"));
+    assert!(
+        presentation
+            .result_detail
+            .as_ref()
+            .unwrap()
+            .lines
+            .iter()
+            .any(|line| line.label == "stdout" && line.value == "ok")
+    );
 }
 
 #[test]
@@ -121,14 +123,16 @@ fn wraps_scalar_results_as_output_detail() {
         },
     );
 
-    assert!(metadata
-        .presentation
-        .as_ref()
-        .and_then(|presentation| presentation.result_detail.as_ref())
-        .unwrap()
-        .lines
-        .iter()
-        .any(|line| line.label == "output" && line.value == "sent"));
+    assert!(
+        metadata
+            .presentation
+            .as_ref()
+            .and_then(|presentation| presentation.result_detail.as_ref())
+            .unwrap()
+            .lines
+            .iter()
+            .any(|line| line.label == "output" && line.value == "sent")
+    );
 }
 
 #[test]
@@ -155,14 +159,18 @@ fn unknown_results_still_render_generic_lines() {
         .as_ref()
         .and_then(|presentation| presentation.result_detail.as_ref())
         .unwrap();
-    assert!(detail
-        .lines
-        .iter()
-        .any(|line| line.label == "message" && line.value == "done"));
-    assert!(detail
-        .lines
-        .iter()
-        .any(|line| line.label == "count" && line.value == "3"));
+    assert!(
+        detail
+            .lines
+            .iter()
+            .any(|line| line.label == "message" && line.value == "done")
+    );
+    assert!(
+        detail
+            .lines
+            .iter()
+            .any(|line| line.label == "count" && line.value == "3")
+    );
 }
 
 #[test]
@@ -196,41 +204,50 @@ fn builds_presentation_for_recent_tool_families() {
         "spawn_agent",
         json!({ "agentId": "agent-1", "nickname": "worker" }),
     );
-    assert!(agent
-        .iter()
-        .any(|line| line.label == "agent" && line.value == "agent-1"));
+    assert!(
+        agent
+            .iter()
+            .any(|line| line.label == "agent" && line.value == "agent-1")
+    );
 
     let task = detail_lines(
         "TaskOutput",
         json!({ "task": { "task_id": "task-1", "output": "done" } }),
     );
-    assert!(task
-        .iter()
-        .any(|line| line.label == "output" && line.value == "done"));
+    assert!(
+        task.iter()
+            .any(|line| line.label == "output" && line.value == "done")
+    );
 
     let web_search = detail_lines(
         "WebSearch",
         json!({ "query": "tools", "searchCount": 1, "results": [{ "title": "hit" }] }),
     );
-    assert!(web_search
-        .iter()
-        .any(|line| line.label == "results" && line.value == "1"));
+    assert!(
+        web_search
+            .iter()
+            .any(|line| line.label == "results" && line.value == "1")
+    );
 
     let web_fetch = detail_lines(
         "WebFetch",
         json!({ "url": "https://example.com", "code": 200 }),
     );
-    assert!(web_fetch
-        .iter()
-        .any(|line| line.label == "code" && line.value == "200"));
+    assert!(
+        web_fetch
+            .iter()
+            .any(|line| line.label == "code" && line.value == "200")
+    );
 
     let question = detail_lines(
         "AskUserQuestion",
         json!({ "questions": [{ "question": "Ship?" }], "answers": { "ship": "yes" } }),
     );
-    assert!(question
-        .iter()
-        .any(|line| line.label == "answers" && line.value == "ship: yes"));
+    assert!(
+        question
+            .iter()
+            .any(|line| line.label == "answers" && line.value == "ship: yes")
+    );
 
     let schedule = detail_lines(
         "ScheduleWakeup",
@@ -242,26 +259,32 @@ fn builds_presentation_for_recent_tool_families() {
         "Skill",
         json!({ "commandName": "imagegen", "success": true }),
     );
-    assert!(skill
-        .iter()
-        .any(|line| line.label == "command" && line.value == "imagegen"));
+    assert!(
+        skill
+            .iter()
+            .any(|line| line.label == "command" && line.value == "imagegen")
+    );
 
     let workflow = detail_lines(
         "Workflow",
         json!({ "workflowName": "audit", "summary": "ok" }),
     );
-    assert!(workflow
-        .iter()
-        .any(|line| line.label == "summary" && line.value == "ok"));
+    assert!(
+        workflow
+            .iter()
+            .any(|line| line.label == "summary" && line.value == "ok")
+    );
 
     let mcp = detail_lines(
         "mcp__server__do_thing",
         json!({ "result": { "Ok": { "content": [{ "text": "mcp ok" }] } } }),
     );
-    assert!(mcp
-        .iter()
-        .any(|line| line.label == "server" && line.value == "server"));
-    assert!(mcp
-        .iter()
-        .any(|line| line.label == "output" && line.value == "mcp ok"));
+    assert!(
+        mcp.iter()
+            .any(|line| line.label == "server" && line.value == "server")
+    );
+    assert!(
+        mcp.iter()
+            .any(|line| line.label == "output" && line.value == "mcp ok")
+    );
 }

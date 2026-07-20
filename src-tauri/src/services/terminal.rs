@@ -143,10 +143,10 @@ fn build_ghostty_args(command: &str, cwd: Option<&str>) -> Vec<String> {
         "--quit-after-last-window-closed=true".to_string(),
     ];
 
-    if let Some(dir) = cwd {
-        if !dir.trim().is_empty() {
-            args.push(format!("--working-directory={dir}"));
-        }
+    if let Some(dir) = cwd
+        && !dir.trim().is_empty()
+    {
+        args.push(format!("--working-directory={dir}"));
     }
 
     args.push(format!("--input={input}"));
@@ -203,10 +203,10 @@ fn launch_kitty(command: &str, cwd: Option<&str>) -> anyhow::Result<()> {
     let mut cmd = Command::new("open");
     cmd.arg("-na").arg("kitty").arg("--args");
 
-    if let Some(dir) = cwd {
-        if !dir.trim().is_empty() {
-            cmd.arg("--directory").arg(dir);
-        }
+    if let Some(dir) = cwd
+        && !dir.trim().is_empty()
+    {
+        cmd.arg("--directory").arg(dir);
     }
 
     cmd.arg("-e").arg(&shell).arg("-c").arg(command);

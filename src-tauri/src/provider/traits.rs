@@ -5,16 +5,13 @@ use crate::models::Provider;
 use crate::pricing::PricingCatalog;
 
 use super::{
-    default_compute_token_stats_from_messages, LoadedSession, ParsedSession, ProviderError,
-    ScanOutcome, SourceState, TokenStatRow,
+    LoadedSession, ParsedSession, ProviderError, ScanOutcome, SourceState, TokenStatRow,
+    compute_token_stats_from_usage_events, default_compute_token_stats_from_messages,
 };
 
 /// Static metadata for a provider. Implemented by zero-sized descriptor structs
 /// in each provider module. Accessed via `Provider::descriptor()`.
 pub trait ProviderDescriptor: Send + Sync {
-    /// Check if a source file path belongs to this provider.
-    fn owns_source_path(&self, source_path: &str) -> bool;
-
     /// Build the CLI resume command for a session.
     fn resume_command(&self, session_id: &str, variant_name: Option<&str>) -> Option<String>;
 
@@ -70,19 +67,20 @@ pub trait SessionProvider: Send + Sync {
         source_path: &str,
     ) -> Result<LoadedSession, ProviderError>;
 
-    /// Aggregate per-(date, model) token-usage rows for the indexer.
+    /// Aggregate per-(bucket, model) token-usage rows for the indexer.
     ///
-    /// Default implementation walks `parsed.messages[].token_usage` and
-    /// dedups via `seen_hashes` against `Message.usage_hash`. Providers
-    /// whose token counts arrive out-of-band (e.g. Codex's
-    /// `event_msg.token_count` lines) should override and aggregate from
-    /// `parsed.usage_events` instead.
+    /// Out-of-band usage events are authoritative when present; otherwise
+    /// aggregate usage attached to messages.
     fn compute_token_stats(
         &self,
         parsed: &ParsedSession,
         pricing_catalog: Option<&PricingCatalog>,
         seen_hashes: Option<&mut HashSet<String>>,
     ) -> Vec<TokenStatRow> {
-        default_compute_token_stats_from_messages(parsed, pricing_catalog, seen_hashes)
+        if parsed.usage_events.is_empty() {
+            default_compute_token_stats_from_messages(parsed, pricing_catalog, seen_hashes)
+        } else {
+            compute_token_stats_from_usage_events(parsed, pricing_catalog, seen_hashes)
+        }
     }
 }

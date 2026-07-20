@@ -1,3 +1,6 @@
+// Test code: clippy's allow-*-in-tests only covers `#[cfg(test)]` modules.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Export rendering regression tests.
 
 use sessionview_lib::models::{

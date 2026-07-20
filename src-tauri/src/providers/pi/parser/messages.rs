@@ -8,7 +8,7 @@ use serde_json::{Map, Value};
 use crate::models::{Message, MessageRole, Provider, TokenUsage};
 use crate::provider_utils::ToolCallPairer;
 use crate::tool_metadata::{
-    build_tool_metadata, enrich_tool_metadata, ToolCallFacts, ToolResultFacts,
+    ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata,
 };
 
 use super::super::types::*;
@@ -196,12 +196,12 @@ fn push_assistant_message(
         &mut usage_target_idx,
     );
 
-    if let (Some(idx), Some(usage)) = (usage_target_idx, token_usage) {
-        if let Some(message) = messages.get_mut(idx) {
-            message.token_usage = Some(usage);
-            if message.model.is_none() {
-                message.model = assistant.model.clone();
-            }
+    if let (Some(idx), Some(usage)) = (usage_target_idx, token_usage)
+        && let Some(message) = messages.get_mut(idx)
+    {
+        message.token_usage = Some(usage);
+        if message.model.is_none() {
+            message.model = assistant.model.clone();
         }
     }
 }

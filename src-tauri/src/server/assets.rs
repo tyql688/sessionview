@@ -2,7 +2,7 @@
 //! (single-file distribution); debug builds read from disk so `vite build`
 //! output is picked up without recompiling.
 
-use axum::http::{header, StatusCode, Uri};
+use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 
 #[derive(rust_embed::RustEmbed)]

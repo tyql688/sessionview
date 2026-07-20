@@ -32,13 +32,6 @@ use crate::provider_utils::project_name_from_path;
 
 pub(crate) struct Descriptor;
 impl crate::provider::ProviderDescriptor for Descriptor {
-    fn owns_source_path(&self, source_path: &str) -> bool {
-        let p = source_path.replace('\\', "/");
-        // Standalone CLI transcripts under projects/.../agent-transcripts/
-        // AND ACP-mode sessions under acp-sessions/.../store.db.
-        (p.contains("/.cursor/projects/") && p.contains("/agent-transcripts/"))
-            || p.contains("/.cursor/acp-sessions/")
-    }
     fn resume_command(&self, session_id: &str, _variant_name: Option<&str>) -> Option<String> {
         // Subagent ids are file stems too — `agent --resume=<id>`
         // accepts any session id the CLI knows about. The bare UUID
@@ -105,10 +98,11 @@ impl CursorProvider {
             for session in sessions.flatten() {
                 let session_dir = session.path();
                 let store = session_dir.join("store.db");
-                if session_dir.is_dir() && store.is_file() {
-                    if let Some(id) = session_dir.file_name().and_then(|n| n.to_str()) {
-                        out.insert(id.to_string(), store);
-                    }
+                if session_dir.is_dir()
+                    && store.is_file()
+                    && let Some(id) = session_dir.file_name().and_then(|n| n.to_str())
+                {
+                    out.insert(id.to_string(), store);
                 }
             }
         }
@@ -283,12 +277,11 @@ impl CursorProvider {
         // parser's first-user-message fallback. Main sessions only — a
         // subagent's `lookup_id` is its parent, and the parent title must
         // not clobber the subagent's task-derived one.
-        if session.meta.parent_id.is_none() {
-            if let Some(session_dir) = store.parent() {
-                if let Some(title) = acp::load_meta_json(session_dir).title {
-                    session.meta.title = title;
-                }
-            }
+        if session.meta.parent_id.is_none()
+            && let Some(session_dir) = store.parent()
+            && let Some(title) = acp::load_meta_json(session_dir).title
+        {
+            session.meta.title = title;
         }
     }
 }
@@ -459,7 +452,7 @@ impl SessionProvider for CursorProvider {
 mod tests {
     use super::*;
     use rusqlite::Connection;
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     fn write_main_transcript(home: &Path, project_key: &str, sid: &str, body: &str) -> PathBuf {
         let dir = home

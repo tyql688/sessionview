@@ -1,12 +1,12 @@
 mod parser;
 
 use crate::provider_utils::epoch_ms_to_rfc3339;
-use parser::{build_assistant_messages, build_user_messages};
+use parser::{build_assistant_messages, build_user_messages, extract_tokens};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::models::{Message, Provider, SessionMeta};
 use crate::provider::{
@@ -16,11 +16,6 @@ use crate::provider_utils::session_title;
 
 pub(crate) struct Descriptor;
 impl crate::provider::ProviderDescriptor for Descriptor {
-    fn owns_source_path(&self, source_path: &str) -> bool {
-        source_path
-            .replace('\\', "/")
-            .contains("/opencode/opencode.db")
-    }
     fn resume_command(&self, session_id: &str, _variant_name: Option<&str>) -> Option<String> {
         Some(format!("opencode -s {session_id}"))
     }
@@ -75,10 +70,8 @@ impl OpenCodeProvider {
         }
         let conn = Connection::open_with_flags(
             &self.db_path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
-        // Prevent accidental writes to external database
-        let _ = conn.pragma_update(None, "query_only", "ON");
         Ok(conn)
     }
 
@@ -244,15 +237,16 @@ impl SessionProvider for OpenCodeProvider {
         }
         let mut usage_map: std::collections::HashMap<String, Vec<UsageEntry>> =
             std::collections::HashMap::new();
+        // Usage rows dropped for malformed JSON or unusable counts, per
+        // session — surfaced as the session's parse-warning badge so a
+        // silently short total is visible, as for the other providers.
+        let mut usage_warnings: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
         {
             let mut stmt = conn.prepare(
                 "SELECT session_id,
                         id,
-                        json_extract(data, '$.modelID'),
-                        json_extract(data, '$.tokens.input'),
-                        json_extract(data, '$.tokens.output'),
-                        json_extract(data, '$.tokens.cache.read'),
-                        json_extract(data, '$.tokens.cache.write'),
+                        data,
                         time_created
                  FROM message
                  WHERE json_extract(data, '$.role') = 'assistant'
@@ -262,23 +256,29 @@ impl SessionProvider for OpenCodeProvider {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(2)?,
                     row.get::<_, Option<i64>>(3)?,
-                    row.get::<_, Option<i64>>(4)?,
-                    row.get::<_, Option<i64>>(5)?,
-                    row.get::<_, Option<i64>>(6)?,
-                    row.get::<_, Option<i64>>(7)?,
                 ))
             })?;
             for r in rows {
-                let r = r?;
-                let (sid, msg_id, model, input, output, cache_read, cache_write, time_created) = r;
-                let usage = crate::models::TokenUsage {
-                    input_tokens: input.unwrap_or(0) as u32,
-                    output_tokens: output.unwrap_or(0) as u32,
-                    cache_read_input_tokens: cache_read.unwrap_or(0) as u32,
-                    cache_creation_input_tokens: cache_write.unwrap_or(0) as u32,
+                let (sid, msg_id, data, time_created) = r?;
+                let msg_json = match serde_json::from_str::<serde_json::Value>(&data) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        log::warn!("skipping malformed OpenCode usage message {msg_id}: {error}");
+                        *usage_warnings.entry(sid).or_default() += 1;
+                        continue;
+                    }
                 };
+                let Some(usage) = extract_tokens(&msg_json) else {
+                    *usage_warnings.entry(sid).or_default() += 1;
+                    continue;
+                };
+                let model = msg_json
+                    .get("modelID")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|model| !model.is_empty())
+                    .map(str::to_string);
                 let timestamp = time_created.and_then(epoch_ms_to_rfc3339);
                 usage_map.entry(sid).or_default().push(UsageEntry {
                     model,
@@ -370,6 +370,7 @@ impl SessionProvider for OpenCodeProvider {
                 )| {
                     let msg_count = msg_count_map.get(&id).copied().unwrap_or(0);
                     let content_text = content_map.get(&id).cloned().unwrap_or_default();
+                    let parse_warning_count = usage_warnings.remove(&id).unwrap_or(0);
                     let usage_entries = usage_map.remove(&id).unwrap_or_default();
 
                     // Prefer session.directory (actual working dir);
@@ -423,9 +424,7 @@ impl SessionProvider for OpenCodeProvider {
                         messages: usage_entries
                             .into_iter()
                             .map(|entry| Message {
-                                timestamp: entry
-                                    .timestamp
-                                    .or_else(|| epoch_ms_to_rfc3339(time_updated)),
+                                timestamp: entry.timestamp,
                                 token_usage: Some(entry.usage),
                                 model: entry.model,
                                 usage_hash: entry.usage_hash,
@@ -433,7 +432,7 @@ impl SessionProvider for OpenCodeProvider {
                             })
                             .collect(),
                         content_text,
-                        parse_warning_count: 0,
+                        parse_warning_count,
                         child_session_ids: Vec::new(),
                         usage_events: Vec::new(),
                         source_mtime: db_state.mtime,
@@ -455,13 +454,13 @@ impl SessionProvider for OpenCodeProvider {
 
         let source_path = self.db_path.to_string_lossy().to_string();
         let current = self.db_state()?;
-        if let Some(previous) = known.get(&source_path) {
-            if *previous == current {
-                return Ok(ScanOutcome {
-                    parsed: Vec::new(),
-                    unchanged_source_paths: vec![source_path],
-                });
-            }
+        if let Some(previous) = known.get(&source_path)
+            && *previous == current
+        {
+            return Ok(ScanOutcome {
+                parsed: Vec::new(),
+                unchanged_source_paths: vec![source_path],
+            });
         }
 
         Ok(ScanOutcome {
@@ -512,7 +511,8 @@ impl SessionProvider for OpenCodeProvider {
                 }
                 Err(error) => {
                     log::warn!(
-                        "skipping malformed OpenCode part JSON for session {session_id} message {mid}: {error}");
+                        "skipping malformed OpenCode part JSON for session {session_id} message {mid}: {error}"
+                    );
                 }
             }
         }
@@ -524,7 +524,8 @@ impl SessionProvider for OpenCodeProvider {
                 Ok(value) => value,
                 Err(error) => {
                     log::warn!(
-                        "skipping malformed OpenCode message JSON for session {session_id} message {msg_id}: {error}");
+                        "skipping malformed OpenCode message JSON for session {session_id} message {msg_id}: {error}"
+                    );
                     continue;
                 }
             };
@@ -552,5 +553,29 @@ impl SessionProvider for OpenCodeProvider {
         }
 
         Ok(LoadedSession::new(messages))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OpenCodeProvider;
+
+    #[test]
+    fn open_db_refuses_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("opencode.db");
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute("CREATE TABLE records (id INTEGER)", [])
+            .unwrap();
+
+        let provider = OpenCodeProvider::with_db_path(path);
+        assert!(
+            provider
+                .open_db()
+                .unwrap()
+                .execute("INSERT INTO records VALUES (1)", [])
+                .is_err()
+        );
     }
 }

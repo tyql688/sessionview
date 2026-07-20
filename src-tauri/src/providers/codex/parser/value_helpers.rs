@@ -5,10 +5,10 @@
 //! no cross-line state — every input is a borrowed `Value` (or accumulator
 //! slice) and every output is a freshly constructed `Value`/`Message`.
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::models::Message;
-use crate::tool_metadata::{enrich_tool_metadata, ToolResultFacts};
+use crate::tool_metadata::{ToolResultFacts, enrich_tool_metadata};
 
 pub(super) fn parse_json_str(value: Option<&str>) -> Option<Value> {
     serde_json::from_str(value?).ok()
@@ -28,18 +28,18 @@ pub(super) fn codex_tool_input_value(
 
 pub(super) fn codex_tool_result_value(raw_output: &str, output: &str) -> Option<Value> {
     if let Ok(value) = serde_json::from_str::<Value>(raw_output.trim()) {
-        if let Some(obj) = value.as_object() {
-            if let Some(metadata) = obj.get("metadata").and_then(|v| v.as_object()) {
-                let mut result = serde_json::Map::new();
-                result.insert("stdout".to_string(), json!(output));
-                if let Some(exit_code) = metadata.get("exit_code") {
-                    result.insert("exitCode".to_string(), exit_code.clone());
-                }
-                if let Some(duration) = metadata.get("duration_seconds") {
-                    result.insert("durationSeconds".to_string(), duration.clone());
-                }
-                return Some(Value::Object(result));
+        if let Some(obj) = value.as_object()
+            && let Some(metadata) = obj.get("metadata").and_then(|v| v.as_object())
+        {
+            let mut result = serde_json::Map::new();
+            result.insert("stdout".to_string(), json!(output));
+            if let Some(exit_code) = metadata.get("exit_code") {
+                result.insert("exitCode".to_string(), exit_code.clone());
             }
+            if let Some(duration) = metadata.get("duration_seconds") {
+                result.insert("durationSeconds".to_string(), duration.clone());
+            }
+            return Some(Value::Object(result));
         }
         return Some(value);
     }
@@ -98,20 +98,20 @@ pub(super) fn codex_exec_command_event_result(payload: &Value, fallback_output: 
     if !stdout.is_empty() {
         result.insert("stdout".to_string(), json!(stdout));
     }
-    if let Some(stderr) = payload.get("stderr").and_then(|v| v.as_str()) {
-        if !stderr.is_empty() {
-            result.insert("stderr".to_string(), json!(stderr));
-        }
+    if let Some(stderr) = payload.get("stderr").and_then(|v| v.as_str())
+        && !stderr.is_empty()
+    {
+        result.insert("stderr".to_string(), json!(stderr));
     }
-    if let Some(aggregated_output) = payload.get("aggregated_output").and_then(|v| v.as_str()) {
-        if !aggregated_output.is_empty() {
-            result.insert("aggregatedOutput".to_string(), json!(aggregated_output));
-        }
+    if let Some(aggregated_output) = payload.get("aggregated_output").and_then(|v| v.as_str())
+        && !aggregated_output.is_empty()
+    {
+        result.insert("aggregatedOutput".to_string(), json!(aggregated_output));
     }
-    if let Some(formatted_output) = payload.get("formatted_output").and_then(|v| v.as_str()) {
-        if !formatted_output.is_empty() {
-            result.insert("formattedOutput".to_string(), json!(formatted_output));
-        }
+    if let Some(formatted_output) = payload.get("formatted_output").and_then(|v| v.as_str())
+        && !formatted_output.is_empty()
+    {
+        result.insert("formattedOutput".to_string(), json!(formatted_output));
     }
 
     Value::Object(result)

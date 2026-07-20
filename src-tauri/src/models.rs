@@ -335,7 +335,7 @@ fn message_counts_for_usage(message: &Message) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{token_totals_from_messages, Message, MessageRole, TokenTotals, TokenUsage};
+    use super::{Message, MessageRole, TokenTotals, TokenUsage, token_totals_from_messages};
 
     fn message(timestamp: Option<&str>, model: Option<&str>, usage: TokenUsage) -> Message {
         message_with_hash(timestamp, model, usage, None)

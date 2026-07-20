@@ -7,8 +7,9 @@ mod search;
 mod sessions;
 mod tree;
 mod usage;
+mod usage_project;
 
-pub(crate) use usage::UsageDateBounds;
+pub(crate) use usage::UsageBucketBounds;
 
 #[derive(Debug, Clone)]
 pub(crate) struct UsageByModelRow {

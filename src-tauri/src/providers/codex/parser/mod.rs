@@ -11,11 +11,11 @@ use serde_json::Value;
 use crate::models::{Message, Provider, SessionMeta};
 use crate::provider::{ParsedSession, UsageEvent};
 use crate::provider_utils::{
-    is_system_content, parse_rfc3339_timestamp, project_name_from_path, session_title, NO_PROJECT,
+    NO_PROJECT, is_system_content, parse_rfc3339_timestamp, project_name_from_path, session_title,
 };
 
-use super::tools::*;
 use super::CodexProvider;
+use super::tools::*;
 
 mod event_msg;
 mod response_item;
@@ -78,6 +78,8 @@ pub(super) struct CodexScanAccum {
     /// own view of the conversation.
     skipping_fork_context: bool,
     subagent_start_seconds: Option<i64>,
+    unmatched_tool_event_count: u32,
+    pub(super) unresolved_usage_event_count: u32,
     parse_warning_count: u32,
 }
 
@@ -107,9 +109,27 @@ impl CodexScanAccum {
             pending_user_message: None,
             skipping_fork_context: false,
             subagent_start_seconds: None,
+            unmatched_tool_event_count: 0,
+            unresolved_usage_event_count: 0,
             parse_warning_count: 0,
         }
     }
+
+    pub(super) fn record_unmatched_tool_event(
+        &mut self,
+        kind: &'static str,
+        call_id: &str,
+        path: &Path,
+    ) {
+        if self.unmatched_tool_event_count == 0 {
+            log::debug!(
+                "first unmatched Codex {kind} event has call_id {call_id} in '{}'",
+                path.display()
+            );
+        }
+        self.unmatched_tool_event_count = self.unmatched_tool_event_count.saturating_add(1);
+    }
+
     /// Run the per-line dispatch over `reader`, mutating `self` with
     /// the messages / tool-call pairings / first-occurrence trackers it
     /// observes. Called by both `parse_session_file` (full-file) and
@@ -120,15 +140,29 @@ impl CodexScanAccum {
                 self.scan_line(&entry, path);
                 ControlFlow::Continue(())
             });
+        let unmatched_tool_events = std::mem::take(&mut self.unmatched_tool_event_count);
+        if unmatched_tool_events > 0 {
+            log::warn!(
+                "skipped {unmatched_tool_events} unmatched Codex tool result event(s) in '{}'",
+                path.display()
+            );
+        }
+        let unresolved_usage_events = std::mem::take(&mut self.unresolved_usage_event_count);
+        if unresolved_usage_events > 0 {
+            log::warn!(
+                "skipped {unresolved_usage_events} Codex token_count event(s) without resolvable models in '{}'",
+                path.display()
+            );
+        }
         self.parse_warning_count = self
             .parse_warning_count
-            .saturating_add(stats.parse_error_count);
+            .saturating_add(stats.parse_error_count)
+            .saturating_add(unmatched_tool_events)
+            .saturating_add(unresolved_usage_events);
     }
 
-    /// Per-record body of `scan_lines`, lifted so the shared JSONL iteration
-    /// helper (`provider_utils::for_each_jsonl_record`) owns the read/parse/
-    /// skip loop. Every original `continue` became a `return` — it was the
-    /// last action taken for the line, so returning advances identically.
+    /// Per-record body of `scan_lines`; the shared JSONL helper owns the
+    /// read/parse/skip loop. `return` means skip the line.
     fn scan_line(&mut self, entry: &CodexLine, path: &Path) {
         if let Some(ref ts) = entry.timestamp {
             if self.first_timestamp.is_none() {
@@ -155,11 +189,10 @@ impl CodexScanAccum {
                 if let (Some(started_at), Some(sub_sec)) = (
                     payload.get("started_at").and_then(|v| v.as_i64()),
                     self.subagent_start_seconds,
-                ) {
-                    if started_at >= sub_sec {
-                        self.skipping_fork_context = false;
-                        return;
-                    }
+                ) && started_at >= sub_sec
+                {
+                    self.skipping_fork_context = false;
+                    return;
                 }
             } else if entry.line_type == "response_item"
                 && payload.get("type").and_then(|v| v.as_str()) == Some("function_call_output")
@@ -204,24 +237,24 @@ impl CodexScanAccum {
         if let Some(c) = payload.get("cwd").and_then(|v| v.as_str()) {
             self.cwd = Some(c.to_string());
         }
-        if let Some(v) = payload.get("cli_version").and_then(|v| v.as_str()) {
-            if !v.is_empty() {
-                self.cc_version = Some(v.to_string());
-            }
+        if let Some(v) = payload.get("cli_version").and_then(|v| v.as_str())
+            && !v.is_empty()
+        {
+            self.cc_version = Some(v.to_string());
         }
-        if let Some(m) = payload.get("model_provider").and_then(|v| v.as_str()) {
-            if !m.is_empty() {
-                self.model_provider = Some(m.to_string());
-            }
+        if let Some(m) = payload.get("model_provider").and_then(|v| v.as_str())
+            && !m.is_empty()
+        {
+            self.model_provider = Some(m.to_string());
         }
         if let Some(b) = payload
             .get("git")
             .and_then(|g| g.get("branch"))
             .and_then(|v| v.as_str())
+            && !b.is_empty()
+            && b != "HEAD"
         {
-            if !b.is_empty() && b != "HEAD" {
-                self.git_branch = Some(b.to_string());
-            }
+            self.git_branch = Some(b.to_string());
         }
         // Detect subagent sessions: source.subagent.thread_spawn
         if let Some(spawn) = payload
@@ -290,12 +323,12 @@ impl CodexScanAccum {
             &mut self.first_user_message,
         );
         // Extract actual self.model name (e.g. "gpt-5.4") from turn_context
-        if let Some(m) = payload.get("model").and_then(|v| v.as_str()) {
-            if !m.is_empty() {
-                self.current_model = Some(m.to_string());
-                if self.model.is_none() {
-                    self.model = Some(m.to_string());
-                }
+        if let Some(m) = payload.get("model").and_then(|v| v.as_str())
+            && !m.is_empty()
+        {
+            self.current_model = Some(m.to_string());
+            if self.model.is_none() {
+                self.model = Some(m.to_string());
             }
         }
     }
@@ -376,6 +409,8 @@ impl CodexProvider {
             mut pending_user_message,
             skipping_fork_context,
             subagent_start_seconds: _,
+            unmatched_tool_event_count: _,
+            unresolved_usage_event_count: _,
             parse_warning_count,
         } = accum;
 

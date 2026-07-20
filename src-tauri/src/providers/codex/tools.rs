@@ -67,35 +67,34 @@ pub(crate) fn is_codex_image_wrapper(text: &str) -> bool {
 pub(crate) fn extract_tool_output(raw: &str) -> String {
     let trimmed = raw.trim();
     // Try JSON object with "output" field (custom_tool_call_output)
-    if trimmed.starts_with('{') {
-        if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
-            if let Some(out) = v.get("output").and_then(|o| o.as_str()) {
-                return omit_base64_image_sources(out);
-            }
-        }
+    if trimmed.starts_with('{')
+        && let Ok(v) = serde_json::from_str::<Value>(trimmed)
+        && let Some(out) = v.get("output").and_then(|o| o.as_str())
+    {
+        return omit_base64_image_sources(out);
     }
     // Try JSON array of text parts (MCP tool output)
-    if trimmed.starts_with('[') {
-        if let Ok(arr) = serde_json::from_str::<Vec<Value>>(trimmed) {
-            let parts: Vec<String> = arr
-                .iter()
-                .filter_map(|item| {
-                    if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
-                        return Some(omit_base64_image_sources(text));
-                    }
-                    if item
-                        .get("image_url")
-                        .and_then(|v| v.as_str())
-                        .is_some_and(is_base64_image_url)
-                    {
-                        return Some("[Image]".to_string());
-                    }
-                    None
-                })
-                .collect();
-            if !parts.is_empty() {
-                return parts.join("\n");
-            }
+    if trimmed.starts_with('[')
+        && let Ok(arr) = serde_json::from_str::<Vec<Value>>(trimmed)
+    {
+        let parts: Vec<String> = arr
+            .iter()
+            .filter_map(|item| {
+                if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
+                    return Some(omit_base64_image_sources(text));
+                }
+                if item
+                    .get("image_url")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(is_base64_image_url)
+                {
+                    return Some("[Image]".to_string());
+                }
+                None
+            })
+            .collect();
+        if !parts.is_empty() {
+            return parts.join("\n");
         }
     }
     omit_base64_image_sources(raw)

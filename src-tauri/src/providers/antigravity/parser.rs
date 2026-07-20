@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use crate::models::{token_totals_from_messages, Message, Provider, SessionMeta};
+use crate::models::{Message, Provider, SessionMeta, token_totals_from_messages};
 use crate::provider::ParsedSession;
 use crate::provider_utils::{parse_rfc3339_timestamp, project_name_from_path, session_title};
 use crate::services::tail_reader::open_tail_reader;

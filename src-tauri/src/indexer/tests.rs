@@ -2,8 +2,8 @@ use crate::db::Database;
 use crate::models::{Message, MessageRole, Provider, SessionMeta, TokenUsage};
 use crate::pricing::PricingCatalog;
 use crate::provider::{
-    default_compute_token_stats_from_messages, LoadedSession, ParsedSession, ProviderError,
-    SessionProvider, TokenStatRow,
+    LoadedSession, ParsedSession, ProviderError, SessionProvider, TokenStatRow, UsageEvent,
+    default_compute_token_stats_from_messages,
 };
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -165,10 +165,12 @@ fn build_tree_preserves_session_child_and_orphan_order() {
         .collect();
 
     assert_eq!(child_ids, vec!["child-early", "child-late"]);
-    assert!(parent_new_node
-        .children
-        .iter()
-        .all(|child| child.is_sidechain));
+    assert!(
+        parent_new_node
+            .children
+            .iter()
+            .all(|child| child.is_sidechain)
+    );
     assert!(project_node.children[2].is_sidechain);
     assert_eq!(project_node.count, 3);
 }
@@ -281,13 +283,9 @@ fn compute_token_stats_skips_tool_usage_without_explicit_message_model() {
 }
 
 #[test]
-fn compute_token_stats_groups_dates_in_local_timezone() {
-    let ts = "2026-04-08T16:30:00Z";
-    let expected_date = chrono::DateTime::parse_from_rfc3339(ts)
-        .unwrap()
-        .with_timezone(&chrono::Local)
-        .format("%Y-%m-%d")
-        .to_string();
+fn compute_token_stats_groups_into_utc_buckets() {
+    let ts = "2026-04-08T16:37:00Z";
+    let expected_bucket = crate::provider::timestamp_to_bucket(ts).unwrap();
 
     let parsed = make_session(
         Some("claude-opus-4-6"),
@@ -307,7 +305,7 @@ fn compute_token_stats_groups_dates_in_local_timezone() {
 
     let rows = compute_token_stats(&parsed);
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].date, expected_date);
+    assert_eq!(rows[0].bucket, expected_bucket);
 }
 
 #[test]
@@ -334,6 +332,40 @@ fn compute_token_stats_dedups_same_usage_hash_across_sessions() {
 
     assert_eq!(first_rows.len(), 1);
     assert!(second_rows.is_empty());
+}
+
+#[test]
+fn usage_events_dedup_same_hash_across_sessions() {
+    let make_session_with_event = || {
+        let mut parsed = make_session(None, Vec::new());
+        parsed.usage_events.push(UsageEvent {
+            timestamp: "2026-04-09T12:00:00Z".into(),
+            model: "gpt-5.4".into(),
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_read_input_tokens: 25,
+            cache_creation_input_tokens: 0,
+            usage_hash: Some("shared-call".into()),
+        });
+        parsed
+    };
+    let mut seen_hashes = HashSet::new();
+
+    let first = DefaultStatsProvider.compute_token_stats(
+        &make_session_with_event(),
+        None,
+        Some(&mut seen_hashes),
+    );
+    let second = DefaultStatsProvider.compute_token_stats(
+        &make_session_with_event(),
+        None,
+        Some(&mut seen_hashes),
+    );
+
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].input_tokens, 100);
+    assert_eq!(first[0].cache_read_tokens, 25);
+    assert!(second.is_empty());
 }
 
 #[test]
@@ -371,8 +403,7 @@ fn compute_token_stats_keeps_max_cumulative_usage_per_hash() {
 fn compute_token_stats_skips_synthetic_model() {
     // Claude emits usage entries with model="<synthetic>" as internal
     // placeholders (continuation stubs, retry shells, etc.). They
-    // don't represent real API calls and must be excluded from the
-    // per-date aggregates.
+    // don't represent real API calls and must be excluded from aggregates.
     let parsed = make_session(
         Some("<synthetic>"),
         vec![Message {

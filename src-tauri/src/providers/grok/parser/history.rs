@@ -15,11 +15,11 @@
 
 use std::collections::HashMap;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::models::{Message, MessageRole, Provider, TokenUsage};
 use crate::tool_metadata::{
-    build_tool_metadata, enrich_tool_metadata, ToolCallFacts, ToolResultFacts,
+    ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata,
 };
 
 /// Fed one update at a time by the shared updates scan; collection stops
@@ -169,10 +169,10 @@ impl HistoryBuilder {
             {
                 result["output"] = Value::String(message.content.clone());
             }
-            if metadata.canonical_name == "Agent" {
-                if let Some(child_id) = super::extract_subagent_id(&message.content) {
-                    result["agent_id"] = Value::String(child_id);
-                }
+            if metadata.canonical_name == "Agent"
+                && let Some(child_id) = super::extract_subagent_id(&message.content)
+            {
+                result["agent_id"] = Value::String(child_id);
             }
             enrich_tool_metadata(
                 metadata,

@@ -49,13 +49,8 @@ fn build_grok_runtime() -> Option<Box<dyn SessionProvider>> {
     crate::providers::grok::GrokProvider::new().map(|p| Box::new(p) as Box<dyn SessionProvider>)
 }
 
-fn provider_catalog() -> &'static [ProviderCatalogEntry] {
-    &PROVIDER_CATALOG
-}
-
 fn provider_entry(provider: &Provider) -> &'static ProviderCatalogEntry {
-    // Exhaustive match — adding a new Provider variant forces this to be updated
-    // at compile time, replacing the previous runtime .expect() panic risk.
+    // Exhaustive match: a new Provider variant fails to compile until added.
     // Indices must stay in lock-step with PROVIDER_CATALOG; enforced by
     // `provider_entry_indices_match_catalog` below.
     match provider {
@@ -69,10 +64,6 @@ fn provider_entry(provider: &Provider) -> &'static ProviderCatalogEntry {
         Provider::Pi => &PROVIDER_CATALOG[7],
         Provider::Grok => &PROVIDER_CATALOG[8],
     }
-}
-
-fn provider_entry_for_key(key: &str) -> Option<&'static ProviderCatalogEntry> {
-    provider_catalog().iter().find(|entry| entry.key == key)
 }
 
 static PROVIDER_KINDS: [Provider; 9] = [
@@ -163,7 +154,10 @@ impl Provider {
     }
 
     pub fn parse(s: &str) -> Option<Provider> {
-        provider_entry_for_key(s).map(|entry| entry.kind.clone())
+        PROVIDER_CATALOG
+            .iter()
+            .find(|entry| entry.key == s)
+            .map(|entry| entry.kind.clone())
     }
 
     pub fn parse_strict(s: &str) -> anyhow::Result<Provider> {
@@ -188,14 +182,6 @@ impl Provider {
             .ok_or_else(|| anyhow::anyhow!("provider unavailable: {}", self.key()))
     }
 
-    /// Identify which provider owns a source path.
-    pub fn from_source_path(source_path: &str) -> Option<Provider> {
-        Provider::all()
-            .iter()
-            .find(|p| p.descriptor().owns_source_path(source_path))
-            .cloned()
-    }
-
     /// Parse a display key (as produced by `descriptor().display_key()`) back to a provider and label.
     /// Handles cc-mirror variants like "cc-mirror:cczai" → (CcMirror, "cczai").
     pub fn parse_display_key(display_key: &str) -> Option<(Provider, String)> {
@@ -214,18 +200,20 @@ impl Provider {
     }
 }
 
-/// Create a provider instance by enum variant. Returns None if HOME is unavailable.
-pub fn make_provider(provider: &Provider) -> Option<Box<dyn SessionProvider>> {
-    provider.build_runtime()
-}
-
-/// Create all provider instances, silently skipping any that cannot resolve HOME.
-pub fn all_providers() -> Vec<Box<dyn SessionProvider>> {
-    Provider::all().iter().filter_map(make_provider).collect()
-}
-
 pub fn all_runtimes() -> Vec<Box<dyn SessionProvider>> {
-    all_providers()
+    Provider::all()
+        .iter()
+        .filter_map(|provider| {
+            let runtime = provider.build_runtime();
+            if runtime.is_none() {
+                log::warn!(
+                    "provider {} unavailable: HOME could not be resolved",
+                    provider.key()
+                );
+            }
+            runtime
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -242,53 +230,6 @@ mod tests {
                 &entry.kind, kind,
                 "provider_entry({kind:?}) returned entry with kind {:?}",
                 entry.kind
-            );
-        }
-    }
-
-    #[test]
-    fn test_from_source_path() {
-        let cases = [
-            (
-                "/home/user/.claude/projects/foo/abc.jsonl",
-                Some(Provider::Claude),
-            ),
-            (
-                "/home/user/.codex/sessions/xyz.jsonl",
-                Some(Provider::Codex),
-            ),
-            (
-                "/home/user/.gemini/antigravity-cli/brain/abc/.system_generated/logs/transcript.jsonl",
-                Some(Provider::Antigravity),
-            ),
-            (
-                "/home/user/.local/share/opencode/opencode.db",
-                Some(Provider::OpenCode),
-            ),
-            (
-                "/home/user/.kimi-code/sessions/wd_proj_abc/session_uuid/agents/main/wire.jsonl",
-                Some(Provider::Kimi),
-            ),
-            (
-                "/home/user/.grok/sessions/%2Ftmp%2Fproj/01900000-aaaa-bbbb-cccc-000000000000/chat_history.jsonl",
-                Some(Provider::Grok),
-            ),
-            (
-                "/home/user/.cc-mirror/variant/config/projects/foo/abc.jsonl",
-                Some(Provider::CcMirror),
-            ),
-            ("/home/user/random/file.txt", None),
-            // cc-mirror path should NOT match claude
-            (
-                "/home/user/.cc-mirror/cczai/config/projects/foo/abc.jsonl",
-                Some(Provider::CcMirror),
-            ),
-        ];
-        for (path, expected) in &cases {
-            assert_eq!(
-                Provider::from_source_path(path).as_ref(),
-                expected.as_ref(),
-                "from_source_path({path})"
             );
         }
     }

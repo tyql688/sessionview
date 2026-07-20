@@ -5,8 +5,8 @@ use rusqlite::params;
 use crate::models::{SearchFilters, SearchResult, SessionMeta, TokenTotals};
 
 use super::super::row_mapper::row_to_session_meta;
-use super::search::{build_fts_query, list_sessions_from_query, search_with_fts, search_with_like};
 use super::Database;
+use super::search::{build_fts_query, list_sessions_from_query, search_with_fts, search_with_like};
 
 impl Database {
     pub(crate) fn get_session(&self, id: &str) -> Result<Option<SessionMeta>, rusqlite::Error> {
@@ -250,7 +250,7 @@ mod tests {
             &meta.id,
             &[
                 TokenStatRow {
-                    date: "2026-04-09".into(),
+                    bucket: crate::provider::timestamp_to_bucket("2026-04-09").unwrap(),
                     model: "claude-opus-4-6".into(),
                     turn_count: 1,
                     input_tokens: 100,
@@ -260,7 +260,7 @@ mod tests {
                     cost_usd: 0.01,
                 },
                 TokenStatRow {
-                    date: "2026-04-10".into(),
+                    bucket: crate::provider::timestamp_to_bucket("2026-04-10").unwrap(),
                     model: "claude-opus-4-6".into(),
                     turn_count: 1,
                     input_tokens: 7,

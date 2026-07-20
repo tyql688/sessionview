@@ -1,5 +1,5 @@
 use super::{
-    attach_call_metadata, build_tool_metadata, enrich_tool_metadata, ToolCallFacts, ToolResultFacts,
+    ToolCallFacts, ToolResultFacts, attach_call_metadata, build_tool_metadata, enrich_tool_metadata,
 };
 use crate::models::Provider;
 use serde_json::json;

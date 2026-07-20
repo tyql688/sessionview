@@ -1,22 +1,18 @@
 pub mod parser;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
 
-use crate::models::{Provider, TokenTotals};
-use crate::pricing::{self, PricingCatalog};
+use crate::models::Provider;
 use crate::provider::{
-    partition_files_by_freshness, timestamp_to_local_date, LoadedSession, ParsedSession,
-    ProviderError, ScanOutcome, SessionProvider, SourceState, TokenStatRow,
+    LoadedSession, ParsedSession, ProviderError, ScanOutcome, SessionProvider, SourceState,
+    partition_files_by_freshness,
 };
 
 pub(crate) struct Descriptor;
 impl crate::provider::ProviderDescriptor for Descriptor {
-    fn owns_source_path(&self, source_path: &str) -> bool {
-        source_path.replace('\\', "/").contains("/.grok/sessions/")
-    }
     fn resume_command(&self, session_id: &str, _variant_name: Option<&str>) -> Option<String> {
         Some(format!("grok --resume {session_id}"))
     }
@@ -163,66 +159,7 @@ impl SessionProvider for GrokProvider {
                 "failed to parse Grok session {session_id} from {source_path}"
             ))
         })?;
-        // Totals from usage_events; input excludes the cached portion.
-        let token_totals =
-            parsed
-                .usage_events
-                .iter()
-                .fold(TokenTotals::default(), |mut totals, event| {
-                    totals.input_tokens += event
-                        .input_tokens
-                        .saturating_sub(event.cache_read_input_tokens);
-                    totals.output_tokens += event.output_tokens;
-                    totals.cache_read_tokens += event.cache_read_input_tokens;
-                    totals
-                });
-        let mut loaded = LoadedSession::from_parsed(parsed);
-        loaded.token_totals = token_totals;
-        Ok(loaded)
-    }
-
-    /// Aggregate from per-turn `usage_events` (Codex pattern); store only the
-    /// non-cached input so input/cache_read stay disjoint.
-    fn compute_token_stats(
-        &self,
-        parsed: &ParsedSession,
-        pricing_catalog: Option<&PricingCatalog>,
-        _seen_hashes: Option<&mut HashSet<String>>,
-    ) -> Vec<TokenStatRow> {
-        let mut stats_map: HashMap<(String, String), TokenStatRow> = HashMap::with_capacity(16);
-        for event in &parsed.usage_events {
-            let Some(date) = timestamp_to_local_date(&event.timestamp) else {
-                continue;
-            };
-            let entry = stats_map
-                .entry((date.clone(), event.model.clone()))
-                .or_insert_with(|| TokenStatRow {
-                    date,
-                    model: event.model.clone(),
-                    turn_count: 0,
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    cache_read_tokens: 0,
-                    cache_write_tokens: 0,
-                    cost_usd: 0.0,
-                });
-            entry.turn_count += 1;
-            let non_cached_input = event
-                .input_tokens
-                .saturating_sub(event.cache_read_input_tokens);
-            entry.input_tokens += non_cached_input;
-            entry.output_tokens += event.output_tokens;
-            entry.cache_read_tokens += event.cache_read_input_tokens;
-            entry.cost_usd += pricing::estimate_cost_with_catalog(
-                pricing_catalog,
-                &entry.model,
-                non_cached_input,
-                event.output_tokens,
-                event.cache_read_input_tokens,
-                0,
-            );
-        }
-        stats_map.into_values().collect()
+        Ok(LoadedSession::from_parsed(parsed))
     }
 }
 
@@ -230,15 +167,6 @@ impl SessionProvider for GrokProvider {
 mod tests {
     use super::*;
     use crate::provider::ProviderDescriptor;
-
-    #[test]
-    fn descriptor_owns_source_path() {
-        let descriptor = Descriptor;
-        assert!(descriptor.owns_source_path(
-            "/Users/test/.grok/sessions/%2Ftmp%2Fproj/01900000-aaaa-bbbb-cccc-000000000000/chat_history.jsonl"
-        ));
-        assert!(!descriptor.owns_source_path("/Users/test/.claude/projects/proj/session.jsonl"));
-    }
 
     #[test]
     fn descriptor_resume_command() {

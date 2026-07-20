@@ -81,13 +81,19 @@ across `src-tauri/src/{providers,provider,indexer.rs,db,models.rs}` and
   (`#[tauri::command]`, feature `gui`, default) and `server/dispatch.rs`
   (HTTP invoke, feature `headless`). Events go through the `EventBus` trait
   (`services/events.rs`) — Tauri emit in the GUI, SSE broadcast headless.
-  **Adding a command means updating all three: the core, the gui wrapper +
-  `generate_handler!` list, and the dispatch match arm.**
+  **Adding a command — or changing its signature — means updating all four:
+  the core, the gui wrapper + `generate_handler!` list, the dispatch match
+  arm, and the `BackendCommandMap` entry in `src/lib/tauri.ts`.** Every usage
+  query also takes an optional IANA `timezone`; the frontend sends the
+  viewer's zone, so a remote headless client gets its own day boundaries.
 - **Headless shell** (`server/`, feature `headless`): axum server (default
   port 9921) serving the embedded `dist/` plus `POST /api/invoke/{command}`,
   `GET /api/events` (SSE), and export-download endpoints. It shares the GUI's
   data dir and SQLite index (WAL + busy_timeout make the two processes safe
-  to run concurrently), so it never re-indexes what the GUI already did. The
+  to run concurrently), so it never re-indexes what the GUI already did — a
+  schema change is the exception: the first process on the new schema drops
+  the derived stats and resets `source_mtime`, forcing one full re-index, and
+  running mixed binary versions against one data dir is not supported. The
   frontend picks its transport at runtime via `src/lib/runtime.ts`
   (`__TAURI_INTERNALS__` detection); `npm/` holds the `npx
   sessionview-headless` launcher and platform-package generator.
@@ -95,10 +101,18 @@ across `src-tauri/src/{providers,provider,indexer.rs,db,models.rs}` and
   their parent by *typed* provider signals — never by scanning message text.
   Some providers store children in separate files; the "Open subagent" UI
   navigates to them.
-- **Usage & cost** (`models.rs`, `pricing.rs`) aggregate per-message token usage
-  against a pricing table. Claude Code streams *cumulative* usage across several
-  JSONL lines that share one message id — aggregation keeps the max-total entry
-  per id, not the first.
+- **Usage & cost** (`models.rs`, `pricing.rs`, `provider/tokens.rs`) aggregate
+  token usage against a pricing table. **`ParsedSession::usage_events` is
+  authoritative when non-empty** — both the default `compute_token_stats` and
+  `LoadedSession::from_parsed` prefer it over `messages[].token_usage` (Codex,
+  Grok, Kimi and Pi populate it; the rest attach usage to messages). Every
+  provider normalizes to **disjoint** input / cache-read counts, so summing the
+  four components never double-counts. Rows land in `session_token_stats` keyed
+  by a **UTC 15-minute bucket** (`provider::STATS_BUCKET_SECONDS`), never a
+  pre-baked local date; read paths fold buckets into civil days for the
+  caller's timezone (`services/timeday.rs`), so one index serves every zone.
+  Claude Code streams *cumulative* usage across several JSONL lines that share
+  one message id — aggregation keeps the max-total entry per id, not the first.
 
 ### Frontend (`src/`)
 
@@ -139,3 +153,8 @@ changing a parser rather than rediscovering them by trial.
   `src-tauri/tests/`; frontend tests are `*.test.ts(x)` next to their source.
   Use golden fixtures for parser regressions and synthetic placeholder data —
   never real session ids, usernames, or paths.
+- `tauri.conf.json` sets `dangerousDisableAssetCspModification: ["style-src"]`
+  because the app injects `<style>` elements at runtime (search highlighting,
+  mermaid theming, shiki/katex); Tauri's nonce rewriting would make browsers
+  ignore the `'unsafe-inline'` that those need. `script-src` keeps Tauri's
+  nonce hardening — don't add it to that list.

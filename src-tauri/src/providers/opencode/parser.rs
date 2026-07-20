@@ -1,6 +1,6 @@
 use crate::models::{Message, MessageRole, Provider, TokenUsage};
 use crate::tool_metadata::{
-    build_tool_metadata, enrich_tool_metadata, ToolCallFacts, ToolResultFacts,
+    ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata,
 };
 
 fn opencode_tool_input_value(state: Option<&serde_json::Value>) -> Option<serde_json::Value> {
@@ -20,10 +20,11 @@ fn opencode_tool_result_value(
 ) -> Option<serde_json::Value> {
     let state = state?;
     let mut result = state.clone();
-    if let Some(obj) = result.as_object_mut() {
-        if !output.is_empty() && !obj.contains_key("output") {
-            obj.insert("output".to_string(), serde_json::json!(output));
-        }
+    if let Some(obj) = result.as_object_mut()
+        && !output.is_empty()
+        && !obj.contains_key("output")
+    {
+        obj.insert("output".to_string(), serde_json::json!(output));
     }
     Some(result)
 }
@@ -168,26 +169,26 @@ pub(super) fn build_assistant_messages(
         let part_type = part.get("type").and_then(|t| t.as_str()).unwrap_or("");
         match part_type {
             "text" => {
-                if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
-                    if !text.is_empty() {
-                        text_parts.push(text.to_string());
-                    }
+                if let Some(text) = part.get("text").and_then(|t| t.as_str())
+                    && !text.is_empty()
+                {
+                    text_parts.push(text.to_string());
                 }
             }
             "reasoning" => {
-                if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
-                    if !text.trim().is_empty() {
-                        let reasoning_ts = part
-                            .get("time")
-                            .and_then(|t| t.get("start"))
-                            .and_then(|s| s.as_i64())
-                            .and_then(crate::provider_utils::epoch_ms_to_rfc3339)
-                            .or_else(|| timestamp.map(str::to_string));
-                        messages.push(Message {
-                            timestamp: reasoning_ts,
-                            ..Message::system(format!("[thinking]\n{text}"))
-                        });
-                    }
+                if let Some(text) = part.get("text").and_then(|t| t.as_str())
+                    && !text.trim().is_empty()
+                {
+                    let reasoning_ts = part
+                        .get("time")
+                        .and_then(|t| t.get("start"))
+                        .and_then(|s| s.as_i64())
+                        .and_then(crate::provider_utils::epoch_ms_to_rfc3339)
+                        .or_else(|| timestamp.map(str::to_string));
+                    messages.push(Message {
+                        timestamp: reasoning_ts,
+                        ..Message::system(format!("[thinking]\n{text}"))
+                    });
                 }
             }
             "tool" => {
@@ -261,10 +262,9 @@ pub(super) fn build_assistant_messages(
     if !tool_messages.is_empty() {
         let last_idx = tool_messages.len() - 1;
         for (i, mut tool_msg) in tool_messages.into_iter().enumerate() {
-            // Attach token usage to last tool message if no text parts,
-            // otherwise it was already attached to the text message above.
-            if i == last_idx && text_parts.is_empty() {
+            if i == last_idx {
                 tool_msg.token_usage = token_usage.clone();
+                tool_msg.model = msg_model.clone();
                 tool_msg.usage_hash = Some(msg_id.to_string());
             }
             messages.push(tool_msg);
@@ -293,19 +293,52 @@ pub(super) fn build_assistant_messages(
 /// Extract token usage from an assistant message's `data.tokens` JSON.
 pub(crate) fn extract_tokens(msg_json: &serde_json::Value) -> Option<TokenUsage> {
     let tokens = msg_json.get("tokens")?;
-    // `input`/`output` are required — a tokens object missing either is
-    // malformed and yields no usage rather than fabricated zeros.
-    tokens.get("input").and_then(|v| v.as_u64())?;
-    tokens.get("output").and_then(|v| v.as_u64())?;
-    crate::provider_utils::token_usage_from(
-        tokens,
-        &crate::provider_utils::UsageKeys {
-            input: &["input"],
-            output: &["output"],
-            cache_read: &["cache.read"],
-            cache_write: &["cache.write"],
-        },
-    )
+    let count = |field: &str, value: Option<&serde_json::Value>, required: bool| {
+        let raw = match value {
+            Some(value) => value.as_u64(),
+            None if !required => Some(0),
+            None => None,
+        };
+        let Some(raw) = raw else {
+            log::warn!("skipping OpenCode usage with invalid {field}");
+            return None;
+        };
+        match u32::try_from(raw) {
+            Ok(value) => Some(value),
+            Err(_) => {
+                log::warn!(
+                    "skipping OpenCode usage with {field}={raw} outside the supported range"
+                );
+                None
+            }
+        }
+    };
+    let input_tokens = count("tokens.input", tokens.get("input"), true)?;
+    let output_tokens = count("tokens.output", tokens.get("output"), true)?;
+    let reasoning_tokens = count("tokens.reasoning", tokens.get("reasoning"), false)?;
+    let output_tokens = output_tokens.checked_add(reasoning_tokens).or_else(|| {
+        log::warn!("skipping OpenCode usage whose output and reasoning total exceeds u32");
+        None
+    })?;
+    let cache = tokens.get("cache");
+    if cache.is_some_and(|value| !value.is_object()) {
+        log::warn!("skipping OpenCode usage with invalid tokens.cache");
+        return None;
+    }
+    Some(TokenUsage {
+        input_tokens,
+        output_tokens,
+        cache_read_input_tokens: count(
+            "tokens.cache.read",
+            cache.and_then(|value| value.get("read")),
+            false,
+        )?,
+        cache_creation_input_tokens: count(
+            "tokens.cache.write",
+            cache.and_then(|value| value.get("write")),
+            false,
+        )?,
+    })
 }
 
 #[cfg(test)]
@@ -454,6 +487,51 @@ mod tests {
         assert_eq!(last.role, MessageRole::Tool);
         assert_eq!(last.usage_hash.as_deref(), Some("msg-3"));
         assert_eq!(last.token_usage.as_ref().expect("usage").output_tokens, 7);
+    }
+
+    #[test]
+    fn build_assistant_messages_attaches_usage_to_last_tool_after_text() {
+        let parts = vec![
+            json!({ "type": "text", "text": "checking" }),
+            json!({
+                "type": "tool",
+                "tool": "read",
+                "callID": "c1",
+                "state": { "status": "completed", "input": {}, "output": "ok" },
+            }),
+        ];
+        let msg_json = json!({
+            "role": "assistant",
+            "modelID": "gpt-test",
+            "tokens": { "input": 3, "output": 7, "reasoning": 2 },
+        });
+
+        let messages = build_assistant_messages(&parts, &msg_json, "msg-10", Some(TS));
+
+        assert_eq!(messages.len(), 2);
+        assert!(messages[0].token_usage.is_none());
+        assert_eq!(messages[1].usage_hash.as_deref(), Some("msg-10"));
+        assert_eq!(messages[1].model.as_deref(), Some("gpt-test"));
+        assert_eq!(
+            messages[1]
+                .token_usage
+                .as_ref()
+                .expect("usage")
+                .output_tokens,
+            9
+        );
+    }
+
+    #[test]
+    fn extract_tokens_rejects_counts_outside_u32() {
+        let message = json!({
+            "tokens": {
+                "input": u64::from(u32::MAX) + 1,
+                "output": 1,
+            }
+        });
+
+        assert!(extract_tokens(&message).is_none());
     }
 
     #[test]

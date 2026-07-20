@@ -49,10 +49,11 @@ pub fn parse_catalog(json: &str) -> Result<PricingCatalog, serde_json::Error> {
     for (name, pricing) in raw {
         let key = normalize_model_key(&name);
         // Short-name alias: "vendor/model" → "model" (first writer wins)
-        if let Some((_, suffix)) = key.split_once('/') {
-            if !suffix.is_empty() && !catalog.contains_key(suffix) {
-                catalog.insert(suffix.to_string(), pricing.clone());
-            }
+        if let Some((_, suffix)) = key.split_once('/')
+            && !suffix.is_empty()
+            && !catalog.contains_key(suffix)
+        {
+            catalog.insert(suffix.to_string(), pricing.clone());
         }
         catalog.insert(key, pricing);
     }
@@ -76,7 +77,9 @@ struct ModelsDevModel {
 
 #[derive(Deserialize)]
 struct ModelsDevProvider {
-    models: Option<HashMap<String, ModelsDevModel>>,
+    // BTreeMap keeps model iteration deterministic so alias collisions
+    // always resolve the same way across runs.
+    models: Option<std::collections::BTreeMap<String, ModelsDevModel>>,
 }
 
 /// Skip non-text models when generating aliases.
@@ -119,15 +122,17 @@ const PREFERRED_ALIAS_PROVIDERS: &[&str] = &[
 /// (just `model_id`) is also inserted so that e.g. `claude-opus-4-6`
 /// resolves directly without a prefix.
 pub fn parse_models_dev(json: &str) -> Result<PricingCatalog, serde_json::Error> {
-    let providers: HashMap<String, ModelsDevProvider> = serde_json::from_str(json)?;
+    let providers: std::collections::BTreeMap<String, ModelsDevProvider> =
+        serde_json::from_str(json)?;
     let mut catalog = PricingCatalog::new();
 
-    // Process preferred providers first so their short aliases win.
+    // Process preferred providers first so their short aliases win; the
+    // BTreeMap's id ordering breaks the remaining ties deterministically.
     let mut ordered: Vec<_> = providers.iter().collect();
     ordered.sort_by_key(|(id, _)| {
         PREFERRED_ALIAS_PROVIDERS
             .iter()
-            .position(|&c| c == id.as_str())
+            .position(|&candidate| candidate == id.as_str())
             .unwrap_or(usize::MAX)
     });
 
@@ -202,16 +207,18 @@ fn push_unique(targets: &mut Vec<String>, candidate: String) {
 /// - claude-sonnet-4-5-20250514 -> claude-sonnet-4-5
 /// - glm-5.1 -> glm-5
 fn strip_trailing_version_segment(model: &str) -> Option<String> {
-    if let Some((prefix, suffix)) = model.rsplit_once('-') {
-        if suffix.len() >= 4 && suffix.chars().all(|ch| ch.is_ascii_digit()) {
-            return Some(prefix.to_string());
-        }
+    if let Some((prefix, suffix)) = model.rsplit_once('-')
+        && suffix.len() >= 4
+        && suffix.chars().all(|ch| ch.is_ascii_digit())
+    {
+        return Some(prefix.to_string());
     }
 
-    if let Some((prefix, suffix)) = model.rsplit_once('.') {
-        if !prefix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()) {
-            return Some(prefix.to_string());
-        }
+    if let Some((prefix, suffix)) = model.rsplit_once('.')
+        && !prefix.is_empty()
+        && suffix.chars().all(|ch| ch.is_ascii_digit())
+    {
+        return Some(prefix.to_string());
     }
 
     None
@@ -226,10 +233,10 @@ const VARIANT_SUFFIXES: &[&str] = &[
 fn strip_variant_suffix(model: &str) -> Option<String> {
     let lower = model.to_lowercase();
     for suffix in VARIANT_SUFFIXES {
-        if let Some(prefix) = lower.strip_suffix(suffix) {
-            if !prefix.is_empty() {
-                return Some(prefix.to_string());
-            }
+        if let Some(prefix) = lower.strip_suffix(suffix)
+            && !prefix.is_empty()
+        {
+            return Some(prefix.to_string());
         }
     }
     None
@@ -435,6 +442,25 @@ mod tests {
 
         let cost = estimate_cost_with_catalog(Some(&catalog), "deepseek-chat", 1_000_000, 0, 0, 0);
         assert_close(cost, 0.28);
+    }
+
+    #[test]
+    fn parse_models_dev_resolves_nonpreferred_aliases_deterministically() {
+        let json = r#"{
+            "zeta-provider": {
+                "models": {
+                    "shared-model": {"cost": {"input": 9.0, "output": 9.0}}
+                }
+            },
+            "alpha-provider": {
+                "models": {
+                    "shared-model": {"cost": {"input": 1.0, "output": 1.0}}
+                }
+            }
+        }"#;
+        let catalog = parse_models_dev(json).expect("catalog");
+        let cost = estimate_cost_with_catalog(Some(&catalog), "shared-model", 1_000_000, 0, 0, 0);
+        assert_close(cost, 1.0);
     }
 
     #[test]

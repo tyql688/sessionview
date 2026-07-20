@@ -10,16 +10,12 @@ use std::collections::HashMap;
 
 use crate::models::Provider;
 use crate::provider::{
-    partition_files_by_freshness, LoadedSession, ParsedSession, ProviderError, ScanOutcome,
-    SessionProvider, SourceState,
+    LoadedSession, ParsedSession, ProviderError, ScanOutcome, SessionProvider, SourceState,
+    partition_files_by_freshness,
 };
 
 pub(crate) struct Descriptor;
 impl crate::provider::ProviderDescriptor for Descriptor {
-    fn owns_source_path(&self, source_path: &str) -> bool {
-        let p = source_path.replace('\\', "/");
-        p.contains("/.claude/projects/") && !p.contains("/.cc-mirror/")
-    }
     fn resume_command(&self, session_id: &str, _variant_name: Option<&str>) -> Option<String> {
         Some(format!("claude --resume {session_id}"))
     }

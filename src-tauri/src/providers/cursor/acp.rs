@@ -26,12 +26,12 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 use serde_json::Value;
 
-use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 
 use crate::models::{Message, MessageRole, Provider};
 use crate::provider_utils::ToolCallPairer;
-use crate::tool_metadata::{build_tool_metadata, ToolCallFacts};
+use crate::tool_metadata::{ToolCallFacts, build_tool_metadata};
 
 use super::store_db::{
     default_cursor_image_cache_dir, read_blob, read_meta_value, scan_pb_hash_refs,
@@ -74,13 +74,13 @@ pub(crate) fn load_meta_json(session_dir: &Path) -> AcpSessionMeta {
     };
     match serde_json::from_str::<Value>(&content) {
         Ok(value) => {
-            if let Some(schema) = value.get("schemaVersion").and_then(|v| v.as_i64()) {
-                if schema != SUPPORTED_SCHEMA_VERSION {
-                    log::warn!(
-                        "Cursor ACP meta.json '{}' has schemaVersion {schema}, expected {SUPPORTED_SCHEMA_VERSION} — parsing may miss new fields",
-                        path.display()
-                    );
-                }
+            if let Some(schema) = value.get("schemaVersion").and_then(|v| v.as_i64())
+                && schema != SUPPORTED_SCHEMA_VERSION
+            {
+                log::warn!(
+                    "Cursor ACP meta.json '{}' has schemaVersion {schema}, expected {SUPPORTED_SCHEMA_VERSION} — parsing may miss new fields",
+                    path.display()
+                );
             }
             meta.cwd = value
                 .get("cwd")
@@ -523,11 +523,7 @@ pub(crate) fn collect_acp_sessions(home_dir: &Path) -> Vec<PathBuf> {
                 return None;
             }
             let store = path.join("store.db");
-            if store.is_file() {
-                Some(store)
-            } else {
-                None
-            }
+            if store.is_file() { Some(store) } else { None }
         })
         .collect()
 }
@@ -721,10 +717,12 @@ mod tests {
             "exactly one image file should be in the cache; got {cached_files:?}"
         );
         let cached = &cached_files[0];
-        assert!(cached
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.starts_with("cursor-test-session-") && n.ends_with(".png")));
+        assert!(
+            cached
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("cursor-test-session-") && n.ends_with(".png"))
+        );
         let bytes = std::fs::read(cached).expect("read cached file");
         assert!(
             bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]),

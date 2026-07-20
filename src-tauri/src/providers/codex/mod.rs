@@ -8,18 +8,14 @@ use walkdir::WalkDir;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::models::{Provider, TokenTotals};
-use crate::pricing::{self, PricingCatalog};
+use crate::models::Provider;
 use crate::provider::{
-    partition_files_by_freshness, timestamp_to_local_date, LoadedSession, ParsedSession,
-    ProviderError, ScanOutcome, SessionProvider, SourceState, TokenStatRow,
+    LoadedSession, ParsedSession, ProviderError, ScanOutcome, SessionProvider, SourceState,
+    partition_files_by_freshness,
 };
 
 pub(crate) struct Descriptor;
 impl crate::provider::ProviderDescriptor for Descriptor {
-    fn owns_source_path(&self, source_path: &str) -> bool {
-        source_path.replace('\\', "/").contains("/.codex/sessions/")
-    }
     fn resume_command(&self, session_id: &str, _variant_name: Option<&str>) -> Option<String> {
         Some(format!("codex resume {session_id}"))
     }
@@ -113,17 +109,30 @@ impl CodexProvider {
 
     fn collect_jsonl_files(&self) -> Vec<PathBuf> {
         let mut files = Vec::new();
+        let mut seen_relative_paths = HashSet::new();
         for dir in [self.sessions_dir(), self.archived_sessions_dir()] {
             if !dir.exists() {
                 continue;
             }
-            for entry in WalkDir::new(&dir)
+            let mut dir_files: Vec<_> = WalkDir::new(&dir)
                 .into_iter()
                 .filter_map(std::result::Result::ok)
-            {
-                let path = entry.path();
-                if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-                    files.push(path.to_path_buf());
+                .map(|entry| entry.into_path())
+                .filter(|path| {
+                    path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("jsonl")
+                })
+                .collect();
+            dir_files.sort();
+            for path in dir_files {
+                let Ok(relative) = path.strip_prefix(&dir) else {
+                    log::warn!(
+                        "skipping Codex session outside scan root: '{}'",
+                        path.display()
+                    );
+                    continue;
+                };
+                if seen_relative_paths.insert(relative.to_path_buf()) {
+                    files.push(path);
                 }
             }
         }
@@ -215,79 +224,7 @@ impl SessionProvider for CodexProvider {
             ))
         })?;
 
-        let token_totals =
-            parsed
-                .usage_events
-                .iter()
-                .fold(TokenTotals::default(), |mut totals, event| {
-                    // event.input_tokens includes cached tokens; store only the
-                    // non-cached part so input/cache_read stay disjoint (no
-                    // double-count), consistent with compute_token_stats.
-                    totals.input_tokens += event
-                        .input_tokens
-                        .saturating_sub(event.cache_read_input_tokens);
-                    totals.output_tokens += event.output_tokens;
-                    totals.cache_read_tokens += event.cache_read_input_tokens;
-                    totals
-                });
-        let mut loaded = LoadedSession::from_parsed(parsed);
-        loaded.token_totals = token_totals;
-        Ok(loaded)
-    }
-
-    /// Codex emits per-turn token counts as `event_msg.token_count` lines
-    /// that aren't tied to any single message. Aggregate from
-    /// `parsed.usage_events` (captured during the parse pass) instead of
-    /// walking `messages[].token_usage` like the default impl. Dedup is a
-    /// no-op here because Codex usage events don't carry a hash and don't
-    /// duplicate across files.
-    fn compute_token_stats(
-        &self,
-        parsed: &ParsedSession,
-        pricing_catalog: Option<&PricingCatalog>,
-        _seen_hashes: Option<&mut HashSet<String>>,
-    ) -> Vec<TokenStatRow> {
-        let mut stats_map: HashMap<(String, String), TokenStatRow> = HashMap::with_capacity(16);
-        for event in &parsed.usage_events {
-            let Some(date) = timestamp_to_local_date(&event.timestamp) else {
-                continue;
-            };
-            let entry = stats_map
-                .entry((date.clone(), event.model.clone()))
-                .or_insert_with(|| TokenStatRow {
-                    date,
-                    model: event.model.clone(),
-                    turn_count: 0,
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    cache_read_tokens: 0,
-                    cache_write_tokens: 0,
-                    cost_usd: 0.0,
-                });
-            entry.turn_count += 1;
-            // Codex's event.input_tokens INCLUDES the cached tokens, so store
-            // only the non-cached part — keeping input_tokens and
-            // cache_read_tokens disjoint, like Claude. Otherwise every token
-            // aggregate that sums input+cache_read double-counts the cached
-            // portion (≈2x inflation for cache-heavy Codex sessions). Cost is
-            // unaffected: it was already computed from non_cached_input.
-            let non_cached_input = event
-                .input_tokens
-                .saturating_sub(event.cache_read_input_tokens);
-            entry.input_tokens += non_cached_input;
-            entry.output_tokens += event.output_tokens;
-            entry.cache_read_tokens += event.cache_read_input_tokens;
-            entry.cost_usd += pricing::estimate_cost_with_catalog(
-                pricing_catalog,
-                &entry.model,
-                non_cached_input,
-                event.output_tokens,
-                event.cache_read_input_tokens,
-                0,
-            );
-        }
-
-        stats_map.into_values().collect()
+        Ok(LoadedSession::from_parsed(parsed))
     }
 }
 
@@ -312,6 +249,24 @@ mod tests {
         )
         .unwrap();
         file
+    }
+
+    #[test]
+    fn collect_jsonl_files_prefers_active_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let relative = Path::new("2026/07/rollout.jsonl");
+        for root in ["sessions", "archived_sessions"] {
+            let path = dir.path().join(".codex").join(root).join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "{}").unwrap();
+        }
+        let provider = CodexProvider {
+            home_dir: dir.path().to_path_buf(),
+        };
+
+        let files = provider.collect_jsonl_files();
+        assert_eq!(files.len(), 1);
+        assert!(files[0].starts_with(provider.sessions_dir()));
     }
 
     #[test]
@@ -454,9 +409,7 @@ mod tests {
 
         assert_eq!(rows.len(), 1);
         let r = &rows[0];
-        // event.input_tokens=1000 INCLUDES the 600 cached tokens; the stored
-        // input must be the non-cached 400 so input + cache_read = 1000 (the true
-        // context), not 1600 — otherwise every token aggregate double-counts.
+        // The source input count includes cache; normalized rows keep it disjoint.
         assert_eq!(r.input_tokens, 400, "input must exclude cached tokens");
         assert_eq!(r.cache_read_tokens, 600);
         assert_eq!(

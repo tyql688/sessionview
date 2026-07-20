@@ -116,7 +116,7 @@ pub(super) fn codex_token_usage_from_counts(
     }
 
     Some(TokenUsage {
-        input_tokens: token_count_to_u32("input_tokens", input)?,
+        input_tokens: token_count_to_u32("input_tokens", input.saturating_sub(cached.min(input)))?,
         output_tokens: token_count_to_u32("output_tokens", output)?,
         cache_read_input_tokens: token_count_to_u32("cache_read_input_tokens", cached.min(input))?,
         cache_creation_input_tokens: 0,

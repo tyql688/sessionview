@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::sync::atomic::Ordering;
 use std::sync::Mutex;
+use std::sync::atomic::Ordering;
 
 use super::{
-    build_session_turn_outline, session_window_bounds, subagent_meta_title, CancelFlagGuard,
-    LoadRequest,
+    CancelFlagGuard, LoadRequest, build_session_turn_outline, session_window_bounds,
+    subagent_meta_title,
 };
 use crate::commands::LoadToken;
 use crate::models::{Message, MessageRole};

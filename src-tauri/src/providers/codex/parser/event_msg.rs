@@ -1,10 +1,5 @@
-//! `event_msg` line handler for the Codex per-line dispatch.
-//!
-//! Holds the single `CodexScanAccum::handle_event_msg` method,
-//! relocated verbatim from `scan_lines`'s `"event_msg"` arm. The method
-//! stays one cohesive unit (the natural per-event-kind `match`); it
-//! lives in its own file purely to keep `parser/mod.rs` under the
-//! module size limit. `scan_lines` (in `mod.rs`) calls it unchanged.
+//! `event_msg` line handler for the Codex per-line dispatch. Split out of
+//! `parser/mod.rs` for size; the per-event-kind `match` stays one unit.
 
 use std::path::Path;
 
@@ -13,7 +8,7 @@ use serde_json::Value;
 use crate::models::{Message, MessageRole, Provider};
 use crate::provider::UsageEvent;
 use crate::tool_metadata::{
-    build_tool_metadata, enrich_tool_metadata, ToolCallFacts, ToolResultFacts,
+    ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata,
 };
 
 use super::super::tools::*;
@@ -26,14 +21,11 @@ use super::value_helpers::{
     codex_image_generation_result, codex_mcp_tool_call_event_result, codex_patch_event_result,
     dynamic_tool_input, dynamic_tool_result, enrich_existing_tool_message, push_system_event,
 };
-use super::{append_user_message, flush_pending_user_message, CodexLine, CodexScanAccum};
+use super::{CodexLine, CodexScanAccum, append_user_message, flush_pending_user_message};
 
 impl CodexScanAccum {
-    /// Handle an `event_msg` line. Lifted verbatim from the `scan_lines`
-    /// dispatch arm: every `continue` (skip-this-line) in the original
-    /// arm becomes a `return`, since this method is the last action
-    /// `scan_lines` takes for the line — returning lets the loop advance
-    /// to the next line exactly as `continue` did.
+    /// Handle an `event_msg` line. `return` means skip the line: this is the
+    /// last action `scan_lines` takes for it.
     pub(super) fn handle_event_msg(&mut self, entry: &CodexLine, payload: &Value, path: &Path) {
         let event_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
         // agent_message is a duplicate of response_item/message/assistant — skip
@@ -150,22 +142,21 @@ impl CodexScanAccum {
                         .or_else(|| extract_codex_model(payload))
                         .or_else(|| self.current_model.clone())
                         .or_else(|| usage_model.clone());
-                    // Capture the event for the indexer's per-date stats
-                    // in the same pass — replaces a second file read.
-                    // No silent fallback: cost attribution
-                    // requires a real model name. If none
-                    // resolves we'd mislabel usage as GPT-5,
-                    // so we drop BOTH the indexer event and
-                    // the per-message attachment together —
-                    // keeping only one half would leave the
-                    // UI showing tokens with no provenance
-                    // while the daily totals undercount.
+                    // Cost attribution needs a real model name, so an
+                    // unresolvable one drops BOTH the indexer event and the
+                    // per-message attachment: keeping one half would show
+                    // tokens with no provenance while daily totals undercount.
                     let Some(resolved_model) = resolved_model else {
                         if any_nonzero {
-                            log::warn!(
-                                "Codex token_count event at {:?} has no resolvable model — skipping usage record",
-                                entry.timestamp
-                            );
+                            if self.unresolved_usage_event_count == 0 {
+                                log::debug!(
+                                    "first Codex token_count event without a resolvable model is at {:?} in '{}'",
+                                    entry.timestamp,
+                                    path.display()
+                                );
+                            }
+                            self.unresolved_usage_event_count =
+                                self.unresolved_usage_event_count.saturating_add(1);
                         }
                         return;
                     };
@@ -186,16 +177,19 @@ impl CodexScanAccum {
                             return;
                         }
                     }
-                    if any_nonzero {
-                        if let Some(ts) = entry.timestamp.as_ref() {
-                            self.usage_events.push(UsageEvent {
-                                timestamp: ts.clone(),
-                                model: resolved_model.clone(),
-                                input_tokens: input,
-                                output_tokens: output,
-                                cache_read_input_tokens: cached.min(input),
-                            });
-                        }
+                    if any_nonzero && let Some(ts) = entry.timestamp.as_ref() {
+                        self.usage_events.push(UsageEvent {
+                            timestamp: ts.clone(),
+                            model: resolved_model.clone(),
+                            input_tokens: input.saturating_sub(cached.min(input)),
+                            output_tokens: output,
+                            cache_read_input_tokens: cached.min(input),
+                            cache_creation_input_tokens: 0,
+                            // Rollouts never repeat a token_count across
+                            // files; batch-scoped dedup would only make
+                            // incremental rescans nondeterministic.
+                            usage_hash: None,
+                        });
                     }
                     let Some(usage) = codex_token_usage_from_counts(usage_counts) else {
                         return;
@@ -265,8 +259,7 @@ impl CodexScanAccum {
                     .call_id_map
                     .message_mut(Some(call_id), &mut self.messages)
                 else {
-                    log::warn!(
-                        "missing Codex image generation tool message for event call_id {call_id} in '{}'", path.display());
+                    self.record_unmatched_tool_event("image generation", call_id, path);
                     return;
                 };
 
@@ -365,16 +358,15 @@ impl CodexScanAccum {
                     .call_id_map
                     .message_mut(Some(call_id), &mut self.messages)
                 else {
-                    log::warn!(
-                        "missing Codex exec_command tool message for event call_id {call_id} in '{}'", path.display());
+                    self.record_unmatched_tool_event("exec_command", call_id, path);
                     return;
                 };
 
                 let result_value = codex_exec_command_event_result(payload, &message.content);
                 let status = payload.get("status").and_then(|v| v.as_str());
                 let is_error = status.map(|status| matches!(status, "failed" | "declined"));
-                if message.content.is_empty() || message.content.trim_start().starts_with('{') {
-                    if let Some(formatted_output) = result_value
+                if (message.content.is_empty() || message.content.trim_start().starts_with('{'))
+                    && let Some(formatted_output) = result_value
                         .get("formattedOutput")
                         .and_then(|v| v.as_str())
                         .filter(|v| !v.is_empty())
@@ -390,9 +382,8 @@ impl CodexScanAccum {
                                 .and_then(|v| v.as_str())
                                 .filter(|v| !v.is_empty())
                         })
-                    {
-                        message.content = formatted_output.to_string();
-                    }
+                {
+                    message.content = formatted_output.to_string();
                 }
                 enrich_existing_tool_message(message, result_value, is_error, status);
             }
@@ -404,10 +395,7 @@ impl CodexScanAccum {
                     .call_id_map
                     .message_mut(Some(call_id), &mut self.messages)
                 else {
-                    log::warn!(
-                        "missing Codex MCP tool message for event call_id {call_id} in '{}'",
-                        path.display()
-                    );
+                    self.record_unmatched_tool_event("MCP tool", call_id, path);
                     return;
                 };
 
@@ -426,22 +414,20 @@ impl CodexScanAccum {
                     .call_id_map
                     .message_mut(Some(call_id), &mut self.messages)
                 else {
-                    log::warn!(
-                        "missing Codex apply_patch tool message for event call_id {call_id} in '{}'", path.display());
+                    self.record_unmatched_tool_event("apply_patch", call_id, path);
                     return;
                 };
 
                 let result_value = codex_patch_event_result(payload);
                 let status = payload.get("status").and_then(|v| v.as_str());
                 let is_error = payload.get("success").and_then(|v| v.as_bool()).map(|v| !v);
-                if message.content.is_empty() || message.content.trim_start().starts_with('{') {
-                    if let Some(stdout) = result_value
+                if (message.content.is_empty() || message.content.trim_start().starts_with('{'))
+                    && let Some(stdout) = result_value
                         .get("stdout")
                         .and_then(|v| v.as_str())
                         .filter(|v| !v.is_empty())
-                    {
-                        message.content = stdout.to_string();
-                    }
+                {
+                    message.content = stdout.to_string();
                 }
                 enrich_existing_tool_message(message, result_value, is_error, status);
             }
@@ -453,8 +439,7 @@ impl CodexScanAccum {
                     .call_id_map
                     .message_mut(Some(call_id), &mut self.messages)
                 else {
-                    log::warn!(
-                        "missing Codex spawn_agent tool message for event call_id {call_id} in '{}'", path.display());
+                    self.record_unmatched_tool_event("spawn_agent", call_id, path);
                     return;
                 };
 
@@ -469,10 +454,7 @@ impl CodexScanAccum {
                     .call_id_map
                     .message_mut(Some(call_id), &mut self.messages)
                 else {
-                    log::warn!(
-                        "missing Codex wait_agent tool message for event call_id {call_id} in '{}'",
-                        path.display()
-                    );
+                    self.record_unmatched_tool_event("wait_agent", call_id, path);
                     return;
                 };
 
@@ -500,10 +482,7 @@ impl CodexScanAccum {
                     .call_id_map
                     .message_mut(Some(call_id), &mut self.messages)
                 else {
-                    log::warn!(
-                        "missing Codex subagent tool message for event call_id {call_id} in '{}'",
-                        path.display()
-                    );
+                    self.record_unmatched_tool_event("subagent", call_id, path);
                     return;
                 };
                 let kind = payload.get("kind").and_then(|v| v.as_str());
@@ -532,13 +511,13 @@ impl CodexScanAccum {
                 if text.is_empty() {
                     return;
                 }
-                if let Some(last) = self.messages.last_mut() {
-                    if last.role == MessageRole::System && last.content.starts_with("[thinking]\n")
-                    {
-                        last.content.push_str("\n\n");
-                        last.content.push_str(text);
-                        return;
-                    }
+                if let Some(last) = self.messages.last_mut()
+                    && last.role == MessageRole::System
+                    && last.content.starts_with("[thinking]\n")
+                {
+                    last.content.push_str("\n\n");
+                    last.content.push_str(text);
+                    return;
                 }
                 push_system_event(
                     &mut self.messages,
@@ -565,10 +544,7 @@ impl CodexScanAccum {
                     .call_id_map
                     .message_mut(Some(call_id), &mut self.messages)
                 else {
-                    log::warn!(
-                        "missing Codex send_input tool message for event call_id {call_id} in '{}'",
-                        path.display()
-                    );
+                    self.record_unmatched_tool_event("send_input", call_id, path);
                     return;
                 };
 
@@ -586,8 +562,7 @@ impl CodexScanAccum {
                     .call_id_map
                     .message_mut(Some(call_id), &mut self.messages)
                 else {
-                    log::warn!(
-                        "missing Codex close_agent tool message for event call_id {call_id} in '{}'", path.display());
+                    self.record_unmatched_tool_event("close_agent", call_id, path);
                     return;
                 };
 

@@ -21,10 +21,16 @@ impl<'a> ProviderSnapshotService<'a> {
         let mut snapshots = Vec::new();
 
         for provider in Provider::all() {
-            let (path, exists) = provider
-                .build_runtime()
-                .map(|runtime| snapshot_path_info(&runtime.source_roots()))
-                .unwrap_or_default();
+            let (path, exists) = match provider.build_runtime() {
+                Some(runtime) => snapshot_path_info(&runtime.source_roots()),
+                None => {
+                    log::warn!(
+                        "provider {} snapshot unavailable: HOME could not be resolved",
+                        provider.key()
+                    );
+                    (String::new(), false)
+                }
+            };
 
             snapshots.push(ProviderSnapshot {
                 key: provider.clone(),
@@ -67,7 +73,7 @@ fn common_source_root(paths: &[PathBuf]) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{common_source_root, snapshot_path_info, ProviderSnapshotService};
+    use super::{ProviderSnapshotService, common_source_root, snapshot_path_info};
     use crate::db::Database;
     use crate::models::Provider;
     use std::path::PathBuf;

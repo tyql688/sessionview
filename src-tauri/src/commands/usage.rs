@@ -3,13 +3,16 @@ mod aggregate;
 use anyhow::Context;
 use serde::Serialize;
 
-use super::sessions::load_messages_cached;
 use super::AppState;
-use crate::db::queries::UsageDateBounds;
+use super::sessions::load_messages_cached;
+use crate::db::queries::UsageBucketBounds;
 use crate::db::sync::build_tool_stats;
 use crate::error::CommandResult;
 use crate::models::*;
 use crate::services::load_session_meta;
+use crate::services::timeday::{
+    SUPPORTED_QUERY_YEARS, day_range_epochs, resolve_timezone, today_in,
+};
 use aggregate::{build_project_costs, build_recent_sessions};
 
 pub async fn get_usage_stats(
@@ -17,14 +20,17 @@ pub async fn get_usage_stats(
     range_days: Option<u32>,
     date_start: Option<String>,
     date_end: Option<String>,
+    timezone: Option<String>,
     state: AppState,
 ) -> CommandResult<UsageStats> {
-    // Tauri commands are a trust boundary: reject malformed dates instead of
-    // silently passing them into SQL string comparisons.
+    // Tauri commands are a trust boundary: reject malformed dates and
+    // timezones instead of silently passing them downstream.
     let custom_range = parse_custom_range(date_start.as_deref(), date_end.as_deref())?;
-    let stats =
-        super::blocking(move || build_usage_stats(&state, &providers, range_days, custom_range))
-            .await?;
+    let tz = resolve_timezone(timezone.as_deref())?;
+    let stats = super::blocking(move || {
+        build_usage_stats(&state, &providers, range_days, custom_range, tz)
+    })
+    .await?;
     Ok(stats)
 }
 
@@ -39,14 +45,27 @@ fn parse_custom_range(
         }
         return Ok(None);
     };
-    let start = chrono::NaiveDate::parse_from_str(start, "%Y-%m-%d")
-        .with_context(|| format!("invalid date_start '{start}', expected YYYY-MM-DD"))?;
-    let end = chrono::NaiveDate::parse_from_str(end, "%Y-%m-%d")
-        .with_context(|| format!("invalid date_end '{end}', expected YYYY-MM-DD"))?;
+    let start = parse_query_date("date_start", start)?;
+    let end = parse_query_date("date_end", end)?;
     if start > end {
         anyhow::bail!("date_start must not be after date_end");
     }
     Ok(Some((start, end)))
+}
+
+fn parse_query_date(field: &str, raw: &str) -> anyhow::Result<chrono::NaiveDate> {
+    use chrono::Datelike;
+
+    let date = chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d")
+        .with_context(|| format!("invalid {field} '{raw}', expected YYYY-MM-DD"))?;
+    if !SUPPORTED_QUERY_YEARS.contains(&date.year()) {
+        anyhow::bail!(
+            "{field} '{raw}' is outside the supported range {}-{}",
+            SUPPORTED_QUERY_YEARS.start(),
+            SUPPORTED_QUERY_YEARS.end()
+        );
+    }
+    Ok(date)
 }
 
 /// GitHub-style activity calendar: per-day aggregates over `[date_start,
@@ -57,18 +76,22 @@ pub async fn get_activity_calendar(
     providers: Vec<String>,
     date_start: String,
     date_end: String,
+    timezone: Option<String>,
     state: AppState,
 ) -> CommandResult<ActivityCalendar> {
     // Trust boundary: reject malformed dates instead of passing them into SQL.
-    parse_custom_range(Some(&date_start), Some(&date_end))?;
+    let start = parse_query_date("date_start", &date_start)?;
+    let end = parse_query_date("date_end", &date_end)?;
+    if start > end {
+        return Err(anyhow::anyhow!("date_start must not be after date_end").into());
+    }
+    let tz = resolve_timezone(timezone.as_deref())?;
     let calendar = super::blocking(move || -> anyhow::Result<ActivityCalendar> {
-        let bounds = UsageDateBounds {
-            start: Some(&date_start),
-            end: Some(&date_end),
-        };
+        let (start, end) = day_range_epochs(Some(start), Some(end), tz)?;
+        let bounds = UsageBucketBounds { start, end };
         let days = state
             .db
-            .activity_daily(&providers, bounds)
+            .activity_daily(&providers, bounds, tz)
             .context("failed to query activity calendar")?
             .into_iter()
             .map(|(date, sessions, turns, tokens, cost)| ActivityDay {
@@ -81,7 +104,7 @@ pub async fn get_activity_calendar(
             .collect();
         let available_years = state
             .db
-            .activity_years(&providers)
+            .activity_years(&providers, tz)
             .context("failed to query activity years")?;
         Ok(ActivityCalendar {
             days,
@@ -98,11 +121,20 @@ pub async fn get_project_tool_usage(
     range_days: Option<u32>,
     date_start: Option<String>,
     date_end: Option<String>,
+    timezone: Option<String>,
     state: AppState,
 ) -> CommandResult<ProjectToolUsageStats> {
     let custom_range = parse_custom_range(date_start.as_deref(), date_end.as_deref())?;
+    let tz = resolve_timezone(timezone.as_deref())?;
     let stats = super::blocking(move || {
-        build_project_tool_usage(&state, &project_path, &providers, range_days, custom_range)
+        build_project_tool_usage(
+            &state,
+            &project_path,
+            &providers,
+            range_days,
+            custom_range,
+            tz,
+        )
     })
     .await?;
     Ok(stats)
@@ -114,22 +146,33 @@ pub async fn get_project_daily_usage(
     range_days: Option<u32>,
     date_start: Option<String>,
     date_end: Option<String>,
+    timezone: Option<String>,
     state: AppState,
 ) -> CommandResult<Vec<ProjectDailyUsage>> {
     let custom_range = parse_custom_range(date_start.as_deref(), date_end.as_deref())?;
+    let tz = resolve_timezone(timezone.as_deref())?;
     let days = super::blocking(move || {
-        build_project_daily_usage(&state, &project_path, &providers, range_days, custom_range)
+        build_project_daily_usage(
+            &state,
+            &project_path,
+            &providers,
+            range_days,
+            custom_range,
+            tz,
+        )
     })
     .await?;
     Ok(days)
 }
 
-pub async fn get_today_cost(state: AppState) -> CommandResult<f64> {
+pub async fn get_today_cost(timezone: Option<String>, state: AppState) -> CommandResult<f64> {
+    let tz = resolve_timezone(timezone.as_deref())?;
     let cost = super::blocking(move || -> anyhow::Result<f64> {
-        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let today = today_in(tz);
+        let (start, end) = day_range_epochs(Some(today), Some(today), tz)?;
         let cost = state
             .db
-            .cost_for_date(&today)
+            .cost_for_range(start.unwrap_or(i64::MIN), end.unwrap_or(i64::MAX))
             .context("failed to query today cost")?;
         Ok(cost)
     })
@@ -145,12 +188,17 @@ pub struct TodayTokens {
     pub cache_write: u64,
 }
 
-pub async fn get_today_tokens(state: AppState) -> CommandResult<TodayTokens> {
+pub async fn get_today_tokens(
+    timezone: Option<String>,
+    state: AppState,
+) -> CommandResult<TodayTokens> {
+    let tz = resolve_timezone(timezone.as_deref())?;
     let tokens = super::blocking(move || -> anyhow::Result<TodayTokens> {
-        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let today = today_in(tz);
+        let (start, end) = day_range_epochs(Some(today), Some(today), tz)?;
         let (input, output, cache_read, cache_write) = state
             .db
-            .tokens_for_date(&today)
+            .tokens_for_range(start.unwrap_or(i64::MIN), end.unwrap_or(i64::MAX))
             .context("failed to query today tokens")?;
         Ok(TodayTokens {
             input,
@@ -163,24 +211,29 @@ pub async fn get_today_tokens(state: AppState) -> CommandResult<TodayTokens> {
     Ok(tokens)
 }
 
+/// Resolve the effective bucket bounds in `tz`: a validated custom range
+/// takes precedence over the preset day count.
+fn resolve_bounds(
+    range_days: Option<u32>,
+    custom_range: Option<(chrono::NaiveDate, chrono::NaiveDate)>,
+    tz: chrono_tz::Tz,
+) -> anyhow::Result<UsageBucketBounds> {
+    let (start_date, end_date) = match custom_range {
+        Some((start, end)) => (Some(start), Some(end)),
+        None => (range_start_for_days(range_days, tz), None),
+    };
+    let (start, end) = day_range_epochs(start_date, end_date, tz)?;
+    Ok(UsageBucketBounds { start, end })
+}
+
 fn build_usage_stats(
     state: &AppState,
     providers: &[String],
     range_days: Option<u32>,
     custom_range: Option<(chrono::NaiveDate, chrono::NaiveDate)>,
+    tz: chrono_tz::Tz,
 ) -> anyhow::Result<UsageStats> {
-    // A validated custom range takes precedence over the preset day count.
-    let (start_date, end_date) = match custom_range {
-        Some((start, end)) => (
-            Some(start.format("%Y-%m-%d").to_string()),
-            Some(end.format("%Y-%m-%d").to_string()),
-        ),
-        None => (range_days.and_then(cutoff_date_for_range_days), None),
-    };
-    let bounds = UsageDateBounds {
-        start: start_date.as_deref(),
-        end: end_date.as_deref(),
-    };
+    let bounds = resolve_bounds(range_days, custom_range, tz)?;
 
     let total_sessions = state
         .db
@@ -194,7 +247,7 @@ fn build_usage_stats(
 
     let daily_rows = state
         .db
-        .usage_daily(providers, bounds)
+        .usage_daily(providers, bounds, tz)
         .context("failed to query daily usage")?;
     let daily_usage: Vec<DailyUsage> = daily_rows
         .into_iter()
@@ -255,24 +308,27 @@ fn build_usage_stats(
     let prev_window = match custom_range {
         Some((start, end)) => {
             let days = (end - start).num_days() + 1;
-            Some((start - chrono::Duration::days(days), start))
+            start
+                .pred_opt()
+                .map(|prev_end| (days_before(start, days), prev_end))
         }
-        None => range_days.filter(|days| *days > 0).map(|days| {
-            let today = chrono::Local::now().date_naive();
-            let cur_start = today - chrono::Duration::days(i64::from(days.saturating_sub(1)));
-            (
-                cur_start - chrono::Duration::days(i64::from(days)),
-                cur_start,
-            )
+        None => range_days.and_then(|days| {
+            let cur_start = range_start_for_days(Some(days), tz)?;
+            cur_start
+                .pred_opt()
+                .map(|prev_end| (days_before(cur_start, i64::from(days)), prev_end))
         }),
     };
     let prev_period = if let Some((prev_start, prev_end)) = prev_window {
-        let prev_start_str = prev_start.format("%Y-%m-%d").to_string();
-        let prev_end_str = prev_end.format("%Y-%m-%d").to_string();
+        let (start, end) = day_range_epochs(Some(prev_start), Some(prev_end), tz)?;
 
         let (sessions, turns, inp, out, cr, cw, cost) = state
             .db
-            .usage_totals_range(providers, &prev_start_str, &prev_end_str)
+            .usage_totals_range(
+                providers,
+                start.unwrap_or(i64::MIN),
+                end.unwrap_or(i64::MAX),
+            )
             .context("failed to query previous-period usage totals")?;
 
         // Only return if prev period has data
@@ -323,18 +379,9 @@ fn build_project_tool_usage(
     providers: &[String],
     range_days: Option<u32>,
     custom_range: Option<(chrono::NaiveDate, chrono::NaiveDate)>,
+    tz: chrono_tz::Tz,
 ) -> anyhow::Result<ProjectToolUsageStats> {
-    let (start_date, end_date) = match custom_range {
-        Some((start, end)) => (
-            Some(start.format("%Y-%m-%d").to_string()),
-            Some(end.format("%Y-%m-%d").to_string()),
-        ),
-        None => (range_days.and_then(cutoff_date_for_range_days), None),
-    };
-    let bounds = UsageDateBounds {
-        start: start_date.as_deref(),
-        end: end_date.as_deref(),
-    };
+    let bounds = resolve_bounds(range_days, custom_range, tz)?;
     let session_ids = state
         .db
         .usage_project_session_ids(providers, bounds, project_path)
@@ -385,21 +432,12 @@ fn build_project_daily_usage(
     providers: &[String],
     range_days: Option<u32>,
     custom_range: Option<(chrono::NaiveDate, chrono::NaiveDate)>,
+    tz: chrono_tz::Tz,
 ) -> anyhow::Result<Vec<ProjectDailyUsage>> {
-    let (start_date, end_date) = match custom_range {
-        Some((start, end)) => (
-            Some(start.format("%Y-%m-%d").to_string()),
-            Some(end.format("%Y-%m-%d").to_string()),
-        ),
-        None => (range_days.and_then(cutoff_date_for_range_days), None),
-    };
-    let bounds = UsageDateBounds {
-        start: start_date.as_deref(),
-        end: end_date.as_deref(),
-    };
+    let bounds = resolve_bounds(range_days, custom_range, tz)?;
     let rows = state
         .db
-        .usage_project_daily(providers, bounds, project_path)
+        .usage_project_daily(providers, bounds, project_path, tz)
         .with_context(|| format!("failed to query daily usage for project_path={project_path}"))?;
     Ok(rows
         .into_iter()
@@ -425,20 +463,29 @@ fn build_project_daily_usage(
         .collect())
 }
 
-fn cutoff_date_for_range_days(days: u32) -> Option<String> {
-    if days == 0 {
-        return None;
-    }
+/// First civil day (inclusive of today, in `tz`) of an N-day preset range.
+fn range_start_for_days(days: Option<u32>, tz: chrono_tz::Tz) -> Option<chrono::NaiveDate> {
+    let days = days.filter(|days| *days > 0)?;
+    Some(days_before(today_in(tz), i64::from(days.saturating_sub(1))))
+}
 
-    let today = chrono::Local::now().date_naive();
-    let cutoff = today - chrono::Duration::days(i64::from(days.saturating_sub(1)));
-    Some(cutoff.format("%Y-%m-%d").to_string())
+/// `date` minus `days` civil days, clamped to the earliest supported query
+/// date — `range_days` is an unbounded u32, which unchecked would overflow.
+fn days_before(date: chrono::NaiveDate, days: i64) -> chrono::NaiveDate {
+    let Some(floor) = chrono::NaiveDate::from_ymd_opt(*SUPPORTED_QUERY_YEARS.start(), 1, 1) else {
+        return date;
+    };
+    u64::try_from(days)
+        .ok()
+        .and_then(|days| date.checked_sub_days(chrono::Days::new(days)))
+        .filter(|shifted| *shifted >= floor)
+        .unwrap_or(floor)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        build_project_costs, build_recent_sessions, cutoff_date_for_range_days, parse_custom_range,
+        build_project_costs, build_recent_sessions, parse_custom_range, range_start_for_days,
     };
     use crate::db::queries::{UsageProjectModelDetailRow, UsageSessionModelDetailRow};
 
@@ -510,6 +557,21 @@ mod tests {
             parse_custom_range(Some("2026-05-21"), Some("2026-05-20")).is_err(),
             "start after end must be rejected"
         );
+    }
+
+    #[test]
+    fn custom_range_rejects_years_that_would_overflow_day_arithmetic() {
+        // `%Y-%m-%d` accepts expanded years, where +1-day arithmetic panics.
+        assert!(parse_custom_range(Some("2026-05-01"), Some("+262142-12-31")).is_err());
+        assert!(parse_custom_range(Some("-262143-01-01"), Some("2026-05-01")).is_err());
+        assert!(parse_custom_range(Some("1969-12-31"), Some("2026-05-01")).is_err());
+    }
+
+    #[test]
+    fn preset_range_start_clamps_instead_of_overflowing() {
+        let tz = chrono_tz::Tz::UTC;
+        let start = range_start_for_days(Some(u32::MAX), tz).expect("clamped start");
+        assert_eq!(start.to_string(), "1970-01-01");
     }
 
     #[test]
@@ -753,10 +815,11 @@ mod tests {
 
     #[test]
     fn cutoff_range_is_inclusive_of_today() {
-        let cutoff = cutoff_date_for_range_days(7).expect("cutoff");
-        let expected = (chrono::Local::now().date_naive() - chrono::Duration::days(6))
-            .format("%Y-%m-%d")
-            .to_string();
+        let tz = chrono_tz::Tz::UTC;
+        let cutoff = range_start_for_days(Some(7), tz).expect("cutoff");
+        let expected = chrono::Utc::now().date_naive() - chrono::Duration::days(6);
         assert_eq!(cutoff, expected);
+        assert!(range_start_for_days(Some(0), tz).is_none());
+        assert!(range_start_for_days(None, tz).is_none());
     }
 }

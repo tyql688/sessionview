@@ -3,10 +3,10 @@ mod row_mapper;
 pub(crate) mod sync;
 
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-use rusqlite::{params_from_iter, Connection};
+use rusqlite::{Connection, TransactionBehavior, params_from_iter};
 
 /// Number of read-only connections in the pool. SQLite WAL allows
 /// concurrent readers across distinct connections, so each connection in
@@ -57,6 +57,16 @@ impl Database {
     }
 }
 
+/// Whether `session_token_stats` still has the pre-bucket `date` column.
+fn has_legacy_date_stats(conn: &Connection) -> Result<bool, rusqlite::Error> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('session_token_stats') WHERE name = 'date'",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
 impl Database {
     /// Fold the WAL back into the main file and truncate it. Heavy sync
     /// passes append hundreds of MB of WAL, and the passive autocheckpoint
@@ -98,18 +108,11 @@ impl Database {
     where
         F: FnOnce(&Connection) -> Result<T, rusqlite::Error>,
     {
-        let conn = self.lock_write()?;
-        conn.execute_batch("BEGIN IMMEDIATE TRANSACTION")?;
-        match f(&conn) {
-            Ok(value) => {
-                conn.execute_batch("COMMIT")?;
-                Ok(value)
-            }
-            Err(err) => {
-                let _ = conn.execute_batch("ROLLBACK");
-                Err(err)
-            }
-        }
+        let mut conn = self.lock_write()?;
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let value = f(&transaction)?;
+        transaction.commit()?;
+        Ok(value)
     }
 
     pub fn open(data_dir: &Path) -> Result<Self, rusqlite::Error> {
@@ -129,6 +132,36 @@ impl Database {
              PRAGMA synchronous = NORMAL;
              PRAGMA cache_size = -2000;",
         )?;
+
+        // Stats are derived: drop the pre-bucket shape and reset the totals
+        // and `source_mtime` so the next scan rebuilds them. The probe stays
+        // outside the transaction — taking the write lock on every open makes
+        // startup fail with SQLITE_BUSY while the other process indexes — and
+        // the re-check inside keeps two upgrading processes from both acting.
+        if has_legacy_date_stats(&write_conn)? {
+            write_conn.execute_batch("BEGIN IMMEDIATE")?;
+            let migration = (|| -> Result<(), rusqlite::Error> {
+                if has_legacy_date_stats(&write_conn)? {
+                    write_conn.execute_batch(
+                        "DROP TABLE IF EXISTS session_token_stats;
+                         UPDATE sessions SET
+                            input_tokens = 0,
+                            output_tokens = 0,
+                            cache_read_tokens = 0,
+                            cache_write_tokens = 0,
+                            source_mtime = 0;",
+                    )?;
+                }
+                Ok(())
+            })();
+            match migration {
+                Ok(()) => write_conn.execute_batch("COMMIT")?,
+                Err(err) => {
+                    let _ = write_conn.execute_batch("ROLLBACK");
+                    return Err(err);
+                }
+            }
+        }
 
         write_conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS sessions (
@@ -203,7 +236,7 @@ impl Database {
 
             CREATE TABLE IF NOT EXISTS session_token_stats (
                 session_id          TEXT    NOT NULL,
-                date                TEXT    NOT NULL,
+                bucket              INTEGER NOT NULL,
                 model               TEXT    NOT NULL DEFAULT '',
                 turn_count          INTEGER NOT NULL DEFAULT 0,
                 input_tokens        INTEGER NOT NULL DEFAULT 0,
@@ -211,11 +244,11 @@ impl Database {
                 cache_read_tokens   INTEGER NOT NULL DEFAULT 0,
                 cache_write_tokens  INTEGER NOT NULL DEFAULT 0,
                 cost_usd            REAL    NOT NULL DEFAULT 0,
-                PRIMARY KEY (session_id, date, model)
+                PRIMARY KEY (session_id, bucket, model)
             );
 
-            CREATE INDEX IF NOT EXISTS idx_token_stats_date
-                ON session_token_stats(date);
+            CREATE INDEX IF NOT EXISTS idx_token_stats_bucket
+                ON session_token_stats(bucket);
 
             CREATE TABLE IF NOT EXISTS session_tool_stats (
                 session_id          TEXT    NOT NULL,

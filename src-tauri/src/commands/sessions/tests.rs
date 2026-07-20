@@ -1,4 +1,4 @@
-use super::{build_session_messages_window, canceled_error, CANCEL_ERROR};
+use super::{CANCEL_ERROR, build_session_messages_window, canceled_error};
 use crate::error::CommandError;
 use crate::models::{Message, TokenTotals};
 

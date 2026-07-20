@@ -1,25 +1,21 @@
 pub mod parser;
 pub mod types;
 
-use std::fs;
 use std::path::PathBuf;
 
 use rayon::prelude::*;
+use walkdir::WalkDir;
 
 use std::collections::HashMap;
 
 use crate::models::Provider;
 use crate::provider::{
-    partition_files_by_freshness, LoadedSession, ParsedSession, ProviderError, ScanOutcome,
-    SessionProvider, SourceState,
+    LoadedSession, ParsedSession, ProviderError, ScanOutcome, SessionProvider, SourceState,
+    partition_files_by_freshness,
 };
 
 pub(crate) struct Descriptor;
 impl crate::provider::ProviderDescriptor for Descriptor {
-    fn owns_source_path(&self, source_path: &str) -> bool {
-        let p = source_path.replace('\\', "/");
-        p.contains("/.pi/agent/sessions/")
-    }
     fn resume_command(&self, session_id: &str, _variant_name: Option<&str>) -> Option<String> {
         Some(format!("pi --session {}", session_id))
     }
@@ -68,44 +64,23 @@ impl PiProvider {
             return Vec::new();
         }
 
-        let mut all_files: Vec<PathBuf> = Vec::new();
-        let project_dirs = match fs::read_dir(&sessions_dir) {
-            Ok(d) => d,
-            Err(e) => {
-                log::warn!(
-                    "cannot read Pi sessions dir '{}': {e}",
-                    sessions_dir.display()
-                );
-                return Vec::new();
-            }
-        };
-
-        for entry in project_dirs {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-            let project_dir = entry.path();
-            if !project_dir.is_dir() {
-                continue;
-            }
-            let files = match fs::read_dir(&project_dir) {
-                Ok(f) => f,
-                Err(_) => continue,
-            };
-            for file_entry in files {
-                let file_entry = match file_entry {
-                    Ok(e) => e,
-                    Err(_) => continue,
-                };
-                let path = file_entry.path();
-                if path.extension().is_some_and(|ext| ext == "jsonl") {
-                    all_files.push(path);
+        let mut files = Vec::new();
+        for entry in WalkDir::new(&sessions_dir) {
+            match entry {
+                Ok(entry)
+                    if entry.file_type().is_file()
+                        && entry.path().extension().is_some_and(|ext| ext == "jsonl") =>
+                {
+                    files.push(entry.into_path());
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    log::warn!("failed to scan Pi sessions: {error}");
                 }
             }
         }
-
-        all_files
+        files.sort();
+        files
     }
 }
 
@@ -176,15 +151,6 @@ mod tests {
     use crate::provider::ProviderDescriptor;
 
     #[test]
-    fn descriptor_owns_source_path() {
-        let descriptor = Descriptor;
-        assert!(descriptor.owns_source_path(
-            "/Users/test/.pi/agent/sessions/--Users-test-project--/2024-12-03_abc123.jsonl"
-        ));
-        assert!(!descriptor.owns_source_path("/Users/test/.claude/projects/project/session.jsonl"));
-    }
-
-    #[test]
     fn descriptor_resume_command() {
         let descriptor = Descriptor;
         assert_eq!(
@@ -209,6 +175,22 @@ mod tests {
     fn descriptor_color() {
         let descriptor = Descriptor;
         assert_eq!(descriptor.color(), "#000000");
+    }
+
+    #[test]
+    fn collect_jsonl_files_includes_nested_sessions() {
+        let home = tempfile::tempdir().unwrap();
+        let sessions = home.path().join(".pi/agent/sessions/project");
+        let direct = sessions.join("direct.jsonl");
+        let nested = sessions.join("parent/agent/run/session.jsonl");
+        std::fs::create_dir_all(nested.parent().unwrap()).unwrap();
+        std::fs::write(&direct, "{}").unwrap();
+        std::fs::write(&nested, "{}").unwrap();
+        std::fs::write(sessions.join("ignored.txt"), "{}").unwrap();
+
+        let files = PiProvider::with_home(home.path().to_path_buf()).collect_jsonl_files();
+
+        assert_eq!(files, vec![direct, nested]);
     }
 
     #[test]

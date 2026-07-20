@@ -22,10 +22,10 @@ pub(crate) fn extract_text_from_content(content: Option<&Value>) -> String {
     match content {
         Some(Value::String(s)) => {
             // Some legacy records store the array as a JSON-encoded string.
-            if s.trim_start().starts_with('[') {
-                if let Ok(arr) = serde_json::from_str::<Vec<Value>>(s) {
-                    return extract_text_from_parts(&arr);
-                }
+            if s.trim_start().starts_with('[')
+                && let Ok(arr) = serde_json::from_str::<Vec<Value>>(s)
+            {
+                return extract_text_from_parts(&arr);
             }
             s.clone()
         }
@@ -123,10 +123,10 @@ pub(crate) fn rewrite_image_files_block(text: &str) -> String {
             .map(|(prefix, rest)| (prefix.trim(), rest.trim()))
             .filter(|(prefix, _)| !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit()))
             .map(|(_, rest)| rest);
-        if let Some(p) = path {
-            if !p.is_empty() {
-                markers.push(format!("[Image: source: {p}]"));
-            }
+        if let Some(p) = path
+            && !p.is_empty()
+        {
+            markers.push(format!("[Image: source: {p}]"));
         }
     }
     // Drop the original `<image_files>` block (and the `[Image]` stub

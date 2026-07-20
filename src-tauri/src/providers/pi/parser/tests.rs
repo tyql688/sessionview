@@ -162,6 +162,57 @@ fn parse_session_file_stores_meta_timestamps_as_epoch_seconds() {
 }
 
 #[test]
+fn parse_session_file_counts_usage_outside_the_active_branch() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("session.jsonl");
+    std::fs::write(
+        &path,
+        [
+            r#"{"type":"session","version":3,"id":"session-1","timestamp":"2026-06-10T07:00:00.000Z","cwd":"/tmp/project"}"#,
+            r#"{"type":"message","id":"user-1","parentId":null,"timestamp":"2026-06-10T07:00:01.000Z","message":{"role":"user","content":"Choose","timestamp":1781074801000}}"#,
+            r#"{"type":"message","id":"discarded","parentId":"user-1","timestamp":"2026-06-10T07:00:02.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Discarded answer"}],"provider":"pi-test","model":"model-a","usage":{"input":10,"output":2,"cacheRead":3,"cacheWrite":1,"totalTokens":16},"stopReason":"stop","timestamp":1781074802000}}"#,
+            r#"{"type":"message","id":"active","parentId":"user-1","timestamp":"2026-06-10T07:00:03.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Active answer"}],"provider":"pi-test","model":"model-a","usage":{"input":20,"output":4,"cacheRead":6,"cacheWrite":2,"totalTokens":32},"stopReason":"stop","timestamp":1781074803000}}"#,
+        ]
+        .join("\n"),
+    )
+    .unwrap();
+
+    let session = parse_session_file(&path).unwrap();
+    let loaded = load_messages(&path).unwrap();
+
+    assert_eq!(session.messages.len(), 2);
+    assert_eq!(session.messages[1].content, "Active answer");
+    assert_eq!(session.usage_events.len(), 2);
+    assert_eq!(session.meta.input_tokens, 30);
+    assert_eq!(session.meta.output_tokens, 6);
+    assert_eq!(session.meta.cache_read_tokens, 9);
+    assert_eq!(session.meta.cache_write_tokens, 3);
+    assert_eq!(loaded.token_totals.input_tokens, 30);
+    assert_eq!(loaded.messages[1].content, "Active answer");
+}
+
+#[test]
+fn parse_session_file_skips_usage_without_model() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("session.jsonl");
+    std::fs::write(
+        &path,
+        [
+            r#"{"type":"session","version":3,"id":"session-1","timestamp":"2026-06-10T07:00:00.000Z","cwd":"/tmp/project"}"#,
+            r#"{"type":"message","id":"assistant-1","parentId":null,"timestamp":"2026-06-10T07:00:01.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Answer"}],"usage":{"input":10,"output":2,"cacheRead":3,"cacheWrite":1,"totalTokens":16},"stopReason":"stop","timestamp":1781074801000}}"#,
+        ]
+        .join("\n"),
+    )
+    .unwrap();
+
+    let session = parse_session_file(&path).unwrap();
+
+    assert!(session.usage_events.is_empty());
+    assert_eq!(session.parse_warning_count, 1);
+    assert_eq!(session.meta.input_tokens, 0);
+}
+
+#[test]
 fn parse_session_file_uses_pi_message_activity_for_updated_at() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("session.jsonl");

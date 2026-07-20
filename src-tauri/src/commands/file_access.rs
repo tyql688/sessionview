@@ -1,6 +1,7 @@
+use std::io::Read;
 use std::path::Path;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 
 use crate::error::CommandResult;
 
@@ -66,8 +67,7 @@ pub async fn read_image_base64(path: String) -> CommandResult<String> {
 }
 
 fn read_image_base64_sync(path: &str) -> CommandResult<String> {
-    use crate::services::image_cache::{image_cache_data_dir, ImageCacheService};
-    use base64::{engine::general_purpose::STANDARD, Engine};
+    use crate::services::image_cache::{ImageCacheService, image_cache_data_dir};
 
     let path = path.trim().trim_start_matches('\u{feff}').to_string();
     let p = Path::new(&path);
@@ -84,35 +84,61 @@ fn read_image_base64_sync(path: &str) -> CommandResult<String> {
             .ok_or_else(|| anyhow!("image not found: {path}"))?
     };
 
-    if let Ok(canonical) = resolved.canonicalize() {
-        if !read_image_canonical_allowed(&canonical) {
-            log::warn!(
-                "read_image_base64 denied (not under home/temp): {}",
-                canonical.display()
-            );
-            return Err(anyhow!("image path not allowed: {path}").into());
-        }
+    // Reachable over HTTP: fail closed, no canonical path means no read.
+    let canonical = resolved
+        .canonicalize()
+        .with_context(|| format!("failed to resolve image path {}", resolved.display()))?;
+    if !read_image_canonical_allowed(&canonical) {
+        log::warn!(
+            "read_image_base64 denied (not under home/temp): {}",
+            canonical.display()
+        );
+        return Err(anyhow!("image path not allowed: {path}").into());
+    }
+    read_image_within(&canonical, MAX_IMAGE_BYTES)
+}
+
+/// Read and encode an already-authorized image path, refusing anything over
+/// `max_bytes` or whose bytes are not an image.
+fn read_image_within(canonical: &Path, max_bytes: u64) -> CommandResult<String> {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+
+    // A FIFO under the home dir would block this thread forever on open.
+    if !std::fs::metadata(canonical)
+        .with_context(|| format!("failed to stat {}", canonical.display()))?
+        .is_file()
+    {
+        return Err(anyhow!("not a regular file: {}", canonical.display()).into());
+    }
+    // Cap the read itself: the file may grow after the stat.
+    let mut data = Vec::new();
+    std::io::copy(
+        &mut std::fs::File::open(canonical)
+            .with_context(|| format!("failed to open {}", canonical.display()))?
+            .take(max_bytes + 1),
+        &mut data,
+    )
+    .with_context(|| format!("failed to read {}", canonical.display()))?;
+    if data.len() as u64 > max_bytes {
+        return Err(anyhow!("image exceeds {max_bytes} bytes").into());
     }
 
-    let ext = resolved
+    // Sniff first, or naming a secret `x.png` turns this into a file reader.
+    // SVG is text with no magic bytes, so it stays extension-gated.
+    let extension = canonical
         .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("png")
-        .to_lowercase();
-    let mime = match ext.as_str() {
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "svg" => "image/svg+xml",
-        "bmp" => "image/bmp",
-        _ => "image/png",
+        .and_then(|ext| ext.to_str())
+        .map(str::to_lowercase);
+    let mime = match infer::get(&data).map(|kind| kind.mime_type()) {
+        Some(mime) if mime.starts_with("image/") => mime,
+        _ if extension.as_deref() == Some("svg") => "image/svg+xml",
+        _ => return Err(anyhow!("not a recognized image").into()),
     };
-
-    let data = std::fs::read(&resolved)
-        .with_context(|| format!("failed to read image {}", resolved.display()))?;
     let b64 = STANDARD.encode(&data);
     Ok(format!("data:{mime};base64,{b64}"))
 }
+
+const MAX_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
 
 fn read_tool_result_canonical_allowed(canonical: &Path) -> bool {
     if !canonical
@@ -268,4 +294,65 @@ fn open_in_folder_sync(path: &str) -> CommandResult<()> {
             .context("failed to open")?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_IMAGE_BYTES, read_image_within};
+
+    fn png_bytes() -> Vec<u8> {
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        png.extend_from_slice(&[0u8; 64]);
+        png
+    }
+
+    #[test]
+    fn serves_images_and_refuses_everything_else() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let sniffed = dir.path().join("screenshot");
+        std::fs::write(&sniffed, png_bytes()).unwrap();
+        assert!(
+            read_image_within(&sniffed, MAX_IMAGE_BYTES)
+                .unwrap()
+                .starts_with("data:image/png;base64,")
+        );
+
+        // Named like an image, but not one.
+        let disguised = dir.path().join("id_rsa.png");
+        std::fs::write(&disguised, b"-----BEGIN OPENSSH PRIVATE KEY-----").unwrap();
+        assert!(read_image_within(&disguised, MAX_IMAGE_BYTES).is_err());
+
+        // Text, so extension-gated rather than sniffed.
+        let svg = dir.path().join("diagram.svg");
+        std::fs::write(&svg, b"<svg xmlns='http://www.w3.org/2000/svg'/>").unwrap();
+        assert!(
+            read_image_within(&svg, MAX_IMAGE_BYTES)
+                .unwrap()
+                .starts_with("data:image/svg+xml;base64,")
+        );
+
+        // The cap is enforced on the read, at exactly the limit.
+        let png = png_bytes();
+        assert!(read_image_within(&sniffed, png.len() as u64).is_ok());
+        assert!(read_image_within(&sniffed, png.len() as u64 - 1).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_non_regular_files_instead_of_blocking() {
+        use std::os::unix::fs::FileTypeExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("pipe.png");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("mkfifo must run");
+        assert!(status.success());
+        assert!(std::fs::metadata(&fifo).unwrap().file_type().is_fifo());
+
+        // Returns instead of hanging: the guard rejects it before the open.
+        assert!(read_image_within(&fifo, MAX_IMAGE_BYTES).is_err());
+    }
 }

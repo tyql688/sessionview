@@ -6,8 +6,8 @@
 //! and bails out at the next checkpoint.
 
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub type CancelFlag = Arc<AtomicUsize>;
 

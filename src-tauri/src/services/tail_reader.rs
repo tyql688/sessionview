@@ -134,14 +134,14 @@ pub(crate) fn open_tail_reader(
     };
 
     let mut reader = BufReader::new(file);
-    if window.start_offset > 0 {
-        if let Err(error) = reader.seek(SeekFrom::Start(window.start_offset)) {
-            log::warn!(
-                "failed to seek {label} session for tail parse '{}': {error}",
-                path.display()
-            );
-            return None;
-        }
+    if window.start_offset > 0
+        && let Err(error) = reader.seek(SeekFrom::Start(window.start_offset))
+    {
+        log::warn!(
+            "failed to seek {label} session for tail parse '{}': {error}",
+            path.display()
+        );
+        return None;
     }
 
     Some((reader, window))

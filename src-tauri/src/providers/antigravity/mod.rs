@@ -17,11 +17,6 @@ struct ParentInfo {
 pub(crate) struct Descriptor;
 
 impl ProviderDescriptor for Descriptor {
-    fn owns_source_path(&self, source_path: &str) -> bool {
-        let p = source_path.replace('\\', "/");
-        p.contains("/.gemini/antigravity-cli/brain/") && p.ends_with("/transcript.jsonl")
-    }
-
     fn resume_command(&self, session_id: &str, _variant_name: Option<&str>) -> Option<String> {
         Some(format!("agy --conversation {session_id}"))
     }

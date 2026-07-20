@@ -10,10 +10,10 @@
 //! Format quirks:
 //! - `chat_history.jsonl` has no timestamps and no token usage. Both come
 //!   from `updates.jsonl`: timestamps via `promptIndex` / `toolCallId`
-//!   anchors, usage via per-turn `turn_completed` events (`inputTokens`
-//!   INCLUDES `cachedReadTokens` — keep input/cache disjoint downstream).
-//!   Usage lands in `ParsedSession::usage_events`, plus each turn's totals
-//!   attach to that turn's final assistant message for display.
+//!   anchors, usage via per-turn `turn_completed` events. The wire's
+//!   `inputTokens` INCLUDES `cachedReadTokens`; the parser subtracts it so
+//!   `ParsedSession::usage_events` stores the two disjoint, and each turn's
+//!   totals also attach to that turn's final assistant message for display.
 //! - Real user prompts carry a numeric `prompt_index` and a `<user_query>`
 //!   wrapper; CLI-injected context (`<user_info>`, `synthetic_reason`
 //!   entries) does not and is skipped.
@@ -48,17 +48,17 @@ use serde_json::Value;
 use crate::models::{Message, MessageRole, Provider, SessionMeta, TokenUsage};
 use crate::provider::ParsedSession;
 use crate::provider_utils::{
-    for_each_jsonl_record, project_name_from_path, session_title, ToolCallPairer,
+    ToolCallPairer, for_each_jsonl_record, project_name_from_path, session_title,
 };
 use crate::tool_metadata::{
-    build_tool_metadata, enrich_tool_metadata, ToolCallFacts, ToolResultFacts,
+    ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata,
 };
 
 use types::{
-    content_text_raw, prompt_index_u64, user_content_to_text, GrokChatEntry, GrokSubagentMeta,
-    GrokSummary, GrokToolCall,
+    GrokChatEntry, GrokSubagentMeta, GrokSummary, GrokToolCall, content_text_raw, prompt_index_u64,
+    user_content_to_text,
 };
-use updates::{scan_updates, UpdateAnchors};
+use updates::{UpdateAnchors, scan_updates};
 
 /// Provider-derived title. Shared by the full parse and `scan_incremental`'s
 /// staleness check — the two derivations must stay identical or unchanged
@@ -71,13 +71,12 @@ pub(super) fn derive_title_of(session_dir: &Path) -> Option<String> {
 fn derive_title(session_dir: &Path, summary: &GrokSummary) -> Option<String> {
     // Subagents: the parent-side meta.json description reads far better
     // than the child's generated_title (first line of the task prompt).
-    if is_subagent(summary) {
-        if let Some((_parent_id, Some(description))) =
+    if is_subagent(summary)
+        && let Some((_parent_id, Some(description))) =
             find_parent_link(session_dir, &summary.info.id)
                 .map(|link| (link.parent_session_id, non_empty(link.description)))
-        {
-            return Some(description);
-        }
+    {
+        return Some(description);
     }
     [&summary.generated_title, &summary.session_summary]
         .into_iter()
@@ -457,10 +456,10 @@ fn attach_turn_usage(
         return;
     };
     // Regeneration repeats an index; only the final occurrence keeps usage.
-    if let Some(previous_idx) = attached_turns.insert(prompt_index, idx) {
-        if let Some(previous) = messages.get_mut(previous_idx) {
-            previous.token_usage = None;
-        }
+    if let Some(previous_idx) = attached_turns.insert(prompt_index, idx)
+        && let Some(previous) = messages.get_mut(previous_idx)
+    {
+        previous.token_usage = None;
     }
     let Some(message) = messages.get_mut(idx) else {
         return;

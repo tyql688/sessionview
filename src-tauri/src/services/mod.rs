@@ -12,6 +12,7 @@ mod session_resolution;
 pub mod session_view;
 pub mod tail_reader;
 pub(crate) mod terminal;
+pub mod timeday;
 
 pub use error::{ServiceError, ServiceResult};
 pub use events::{EventBus, NullEventBus};

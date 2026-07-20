@@ -1,7 +1,7 @@
 use super::steps::*;
 use super::*;
 use crate::models::MessageRole;
-use crate::tool_metadata::{build_tool_metadata, ToolCallFacts};
+use crate::tool_metadata::{ToolCallFacts, build_tool_metadata};
 use serde_json::json;
 
 const PARENT_A: &str = "11111111-1111-4111-a111-111111111111";

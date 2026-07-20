@@ -7,7 +7,7 @@ use rayon::prelude::*;
 
 use crate::db::Database;
 use crate::models::{Provider, SessionMeta, TreeNode, TreeNodeType};
-use crate::pricing::{self, PricingCatalog, PRICING_CATALOG_JSON_KEY};
+use crate::pricing::{self, PRICING_CATALOG_JSON_KEY, PricingCatalog};
 use crate::provider::{ParsedSession, SessionProvider, TokenStatRow};
 use crate::services::error::{ServiceError, ServiceResult};
 use crate::services::image_cache::ImageCacheService;
@@ -269,28 +269,22 @@ impl Indexer {
         aggressive: bool,
         image_service: &ImageCacheService,
     ) -> ServiceResult<usize> {
-        self.db
-            .sync_provider_snapshot(
-                &work.provider_kind,
-                &work.sessions,
-                aggressive,
-                &work.unchanged_source_paths,
-            )
-            .map_err(|e| {
-                ServiceError::SyncProvider(work.provider_kind.key().to_string(), e.to_string())
-            })?;
-
-        let batch_refs: Vec<(&str, &[TokenStatRow])> = work
+        let token_stats: Vec<(&str, &[TokenStatRow])> = work
             .stats_batch
             .iter()
             .map(|(id, rows)| (id.as_str(), rows.as_slice()))
             .collect();
-        if let Err(e) = self.db.replace_token_stats_batch(&batch_refs) {
-            log::warn!(
-                "failed to write token stats batch for {}: {e}",
-                work.provider_kind.key()
-            );
-        }
+        self.db
+            .sync_provider_snapshot_with_token_stats(
+                &work.provider_kind,
+                &work.sessions,
+                aggressive,
+                &work.unchanged_source_paths,
+                &token_stats,
+            )
+            .map_err(|e| {
+                ServiceError::SyncProvider(work.provider_kind.key().to_string(), e.to_string())
+            })?;
 
         for parsed in &work.sessions {
             image_service.cache_images(&parsed.messages);
