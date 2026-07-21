@@ -150,13 +150,18 @@ impl HistoryBuilder {
         let status = update.get("status").and_then(Value::as_str);
         let display_text = content_blocks_text(update);
         let raw_output = update.get("rawOutput");
-        let (raw_text, result_extra) = raw_output.map(decode_raw_output).unwrap_or_default();
+        let (raw_text, result_extra, raw_is_raw) =
+            raw_output.map(decode_raw_output).unwrap_or_default();
 
-        let text = if !display_text.is_empty() {
-            display_text
+        let (text, is_raw) = if !display_text.is_empty() {
+            (display_text, false)
         } else {
-            raw_text
+            (raw_text, raw_is_raw)
         };
+        // Only updates that actually carry a result body get a say on the
+        // raw verdict: a status-only update must not demote (or promote) an
+        // earlier verdict while the body it judged is still displayed.
+        let raw_output = (!text.is_empty()).then_some(is_raw);
         if !text.is_empty() {
             message.content = text;
         }
@@ -181,6 +186,7 @@ impl HistoryBuilder {
                     is_error: status.map(|s| s == "failed"),
                     status,
                     artifact_path: None,
+                    raw_output,
                 },
             );
         }
@@ -235,15 +241,24 @@ fn content_blocks_text(update: &Value) -> String {
 
 /// Decode a variant-typed `rawOutput` into (display text, structured extras).
 /// Unknown variants fall back to compact JSON so nothing silently disappears.
-fn decode_raw_output(raw: &Value) -> (String, Option<Value>) {
+fn decode_raw_output(raw: &Value) -> (String, Option<Value>, bool) {
     if let Some(text) = raw.pointer("/Content/content").and_then(Value::as_str) {
-        return (text.to_string(), None);
+        return (text.to_string(), None, false);
+    }
+    if let Some(file) = raw.get("FileContent") {
+        let text = file
+            .get("content")
+            .or_else(|| file.get("content_concise"))
+            .or_else(|| file.get("raw_output"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        return (text.to_string(), Some(file.clone()), false);
     }
     if let Some(summary) = raw
         .pointer("/TodosUpdated/summary_for_prompt")
         .and_then(Value::as_str)
     {
-        return (summary.to_string(), None);
+        return (summary.to_string(), None, false);
     }
     if let Some(edits) = raw.get("EditsApplied") {
         let (old, new) = (
@@ -254,16 +269,181 @@ fn decode_raw_output(raw: &Value) -> (String, Option<Value>) {
             return (
                 String::new(),
                 Some(json!({ "oldString": old, "newString": new })),
+                false,
             );
         }
     }
     if let Some(result) = raw.get("Result") {
         let text = result
             .get("output")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .unwrap_or_default();
-        return (text, Some(result.clone()));
+            .map(|output| {
+                output
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| output.to_string())
+            })
+            .unwrap_or_else(|| result.to_string());
+        return (text, Some(result.clone()), false);
     }
-    (raw.to_string(), None)
+    if let Some(result) = raw.get("MultiResult") {
+        return (result.to_string(), Some(result.clone()), false);
+    }
+    if raw.get("type").and_then(Value::as_str) == Some("Bash") {
+        let text = raw
+            .get("output_for_prompt")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        return (text.to_string(), Some(raw.clone()), false);
+    }
+    if let Some(text) = raw.get("text").and_then(Value::as_str) {
+        return (text.to_string(), None, false);
+    }
+    if let Some(summary) = raw.get("summary").and_then(Value::as_str) {
+        return (summary.to_string(), Some(raw.clone()), false);
+    }
+    if raw.get("type").and_then(Value::as_str) == Some("ImageGen")
+        && let Some(path) = raw.get("path").and_then(Value::as_str)
+    {
+        return (format!("[Image: source: {path}]"), Some(raw.clone()), false);
+    }
+    if raw.get("action").is_some() && raw.get("status").is_some() {
+        return (raw.to_string(), Some(raw.clone()), false);
+    }
+    if let Some(message) = raw.get("message").and_then(Value::as_str) {
+        return (message.to_string(), Some(raw.clone()), false);
+    }
+    if matches!(
+        raw.get("type").and_then(Value::as_str),
+        Some("GrepSearch" | "FileNotFound" | "NoMatchesFound" | "NotFound")
+    ) {
+        return (raw.to_string(), Some(raw.clone()), false);
+    }
+    (raw.to_string(), None, true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HistoryBuilder, decode_raw_output};
+    use crate::models::ToolResultMode;
+    use serde_json::json;
+
+    #[test]
+    fn multi_result_is_known_structured_output_not_raw() {
+        let raw = json!({
+            "type": "TaskOutput",
+            "MultiResult": {
+                "mode": "all",
+                "summary": "done",
+                "results": [{"task_id": "one", "output": "ok"}]
+            }
+        });
+        let (text, structured, is_raw) = decode_raw_output(&raw);
+        assert!(!is_raw);
+        assert!(structured.is_some());
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&text).unwrap()["summary"],
+            "done"
+        );
+    }
+
+    #[test]
+    fn unknown_result_variant_is_raw() {
+        let raw = json!({"type": "FutureResult", "payload": {"keep": true}});
+        let (text, structured, is_raw) = decode_raw_output(&raw);
+        assert!(is_raw);
+        assert!(structured.is_none());
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+            raw
+        );
+    }
+
+    #[test]
+    fn later_readable_update_replaces_an_earlier_raw_fallback() {
+        let mut history = HistoryBuilder::new(1);
+        history.push_update(
+            "tool_call",
+            &json!({
+                "toolCallId": "call-1",
+                "title": "Read",
+                "rawInput": {"path": "/tmp/example.txt"}
+            }),
+            None,
+        );
+        history.push_update(
+            "tool_call_update",
+            &json!({
+                "toolCallId": "call-1",
+                "status": "in_progress",
+                "rawOutput": {"type": "FutureResult", "payload": {"keep": true}}
+            }),
+            None,
+        );
+        history.push_update(
+            "tool_call_update",
+            &json!({
+                "toolCallId": "call-1",
+                "status": "completed",
+                "content": [{"content": {"text": "readable result"}}]
+            }),
+            None,
+        );
+
+        let messages = history.into_messages();
+        let result = &messages[0];
+        assert_eq!(result.content, "readable result");
+        assert_eq!(
+            result
+                .tool_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.presentation.as_ref())
+                .map(|presentation| presentation.result_mode),
+            Some(ToolResultMode::Output)
+        );
+    }
+
+    #[test]
+    fn status_only_update_keeps_the_raw_verdict() {
+        let mut history = HistoryBuilder::new(1);
+        history.push_update(
+            "tool_call",
+            &json!({
+                "toolCallId": "call-1",
+                "title": "Read",
+                "rawInput": {"path": "/tmp/example.txt"}
+            }),
+            None,
+        );
+        history.push_update(
+            "tool_call_update",
+            &json!({
+                "toolCallId": "call-1",
+                "status": "in_progress",
+                "rawOutput": {"type": "FutureResult", "payload": {"keep": true}}
+            }),
+            None,
+        );
+        // A status-only update carries no result body; the raw payload is
+        // still what the message displays, so the verdict must survive.
+        history.push_update(
+            "tool_call_update",
+            &json!({
+                "toolCallId": "call-1",
+                "status": "completed"
+            }),
+            None,
+        );
+
+        let messages = history.into_messages();
+        let result = &messages[0];
+        assert!(result.content.contains("FutureResult"));
+        assert_eq!(
+            result
+                .tool_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.presentation.as_ref())
+                .map(|presentation| presentation.result_mode),
+            Some(ToolResultMode::Raw)
+        );
+    }
 }

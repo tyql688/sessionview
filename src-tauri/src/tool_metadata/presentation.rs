@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use super::registry;
-use crate::models::{RawOutputPolicy, ToolMetadata, ToolPresentation};
+use crate::models::{ToolMetadata, ToolPresentation, ToolResultMode};
 
 pub(super) fn refresh_tool_presentation(metadata: &mut ToolMetadata, input: Option<&Value>) {
     let input_detail = input
@@ -13,7 +13,26 @@ pub(super) fn refresh_tool_presentation(metadata: &mut ToolMetadata, input: Opti
                 .and_then(|presentation| presentation.input_detail.clone())
         });
     let result_detail = result_detail_for(metadata);
-    let raw_output_policy = raw_output_policy(metadata.result_kind.as_deref());
+    let has_diff = result_detail
+        .as_ref()
+        .is_some_and(|detail| detail.diff.is_some() || detail.patch_diff.is_some());
+    let failed = matches!(
+        metadata.status.as_deref(),
+        Some("error" | "failed" | "failure" | "cancelled" | "canceled")
+    );
+    let result_mode = if metadata.result_raw {
+        ToolResultMode::Raw
+    } else if metadata.canonical_name == "Bash" {
+        ToolResultMode::Terminal
+    } else if (metadata.result_kind.as_deref() == Some("file_patch")
+        || matches!(metadata.canonical_name.as_str(), "Edit" | "Write"))
+        && has_diff
+        && !failed
+    {
+        ToolResultMode::Diff
+    } else {
+        ToolResultMode::Output
+    };
 
     metadata.presentation = Some(ToolPresentation {
         icon: registry::icon_for(
@@ -23,16 +42,8 @@ pub(super) fn refresh_tool_presentation(metadata: &mut ToolMetadata, input: Opti
         ),
         input_detail,
         result_detail,
-        raw_output_policy,
+        result_mode,
     });
-}
-
-fn raw_output_policy(result_kind: Option<&str>) -> RawOutputPolicy {
-    match result_kind {
-        Some("terminal_output") => RawOutputPolicy::SuppressTerminal,
-        Some("file_patch") => RawOutputPolicy::SuppressPatchWhenDiffPresent,
-        _ => RawOutputPolicy::Keep,
-    }
 }
 
 mod input;

@@ -31,31 +31,6 @@ pub(super) fn append_generic_lines(
     }
 }
 
-pub(super) fn append_call_metadata_lines(
-    lines: &mut Vec<ToolLine>,
-    structured: &serde_json::Map<String, Value>,
-) {
-    if let Some(description) = first_string(structured, &["callDescription"]) {
-        lines.push(line("description", description));
-    }
-    let Some(display) = structured.get("callDisplay").and_then(Value::as_object) else {
-        return;
-    };
-    append_present_fields(
-        lines,
-        display,
-        &[
-            ("kind", &["kind"][..]),
-            ("operation", &["operation"][..]),
-            ("path", &["path"][..]),
-            ("cwd", &["cwd"][..]),
-            ("language", &["language"][..]),
-            ("command", &["command"][..]),
-            ("agent_name", &["agent_name"][..]),
-        ],
-    );
-}
-
 pub(super) fn append_present_fields(
     lines: &mut Vec<ToolLine>,
     obj: &serde_json::Map<String, Value>,
@@ -123,28 +98,6 @@ pub(super) fn nested_status_text(value: Option<&Value>) -> Option<String> {
         }
     }
     None
-}
-
-pub(super) fn mcp_result_summary(structured: &serde_json::Map<String, Value>) -> Option<String> {
-    let result = structured.get("result").and_then(Value::as_object)?;
-    if let Some(err) = result.get("Err").and_then(Value::as_str)
-        && !err.is_empty()
-    {
-        return Some(err.to_string());
-    }
-
-    let ok = result
-        .get("Ok")
-        .and_then(Value::as_object)
-        .and_then(|value| value.get("content"))
-        .and_then(Value::as_array)?;
-    let text = ok
-        .iter()
-        .filter_map(Value::as_object)
-        .filter_map(|part| first_string(part, &["text"]))
-        .collect::<Vec<_>>()
-        .join("\n");
-    if text.is_empty() { None } else { Some(text) }
 }
 
 pub(super) fn patch_files(structured: &serde_json::Map<String, Value>) -> Vec<String> {
@@ -417,6 +370,7 @@ pub(super) fn detail(lines: Vec<ToolLine>) -> ToolDetail {
         diff: None,
         patch_diff: None,
         persisted_output_path: None,
+        media: Vec::new(),
     }
 }
 
@@ -466,6 +420,91 @@ pub(super) fn value_to_display_string(value: &Value) -> String {
         }
         Value::Null => String::new(),
     }
+}
+
+/// Extract image sources from the structured result's content-part envelope.
+/// Covers the shapes providers store today: `output` / `content` /
+/// `experimental_content` part arrays (or JSON-encoded arrays), plus MCP's
+/// `result.content` and `result.Ok.content`. This is the single owner of
+/// that wire knowledge — the frontend renders `ToolDetail::media` verbatim.
+pub(super) fn structured_media(structured: &serde_json::Map<String, Value>) -> Vec<String> {
+    let mut candidates: Vec<&Value> = Vec::new();
+    for key in ["output", "content", "experimental_content"] {
+        if let Some(value) = structured.get(key) {
+            candidates.push(value);
+        }
+    }
+    match structured.get("result") {
+        Some(result @ (Value::Array(_) | Value::String(_))) => candidates.push(result),
+        Some(Value::Object(result)) => {
+            if let Some(content) = result.get("content") {
+                candidates.push(content);
+            }
+            if let Some(content) = result.get("Ok").and_then(|ok| ok.get("content")) {
+                candidates.push(content);
+            }
+        }
+        _ => {}
+    }
+
+    for candidate in candidates {
+        let parsed;
+        let parts = match candidate {
+            Value::Array(parts) => parts.as_slice(),
+            Value::String(text) if text.trim_start().starts_with('[') => {
+                match serde_json::from_str::<Value>(text) {
+                    Ok(Value::Array(owned)) => {
+                        parsed = owned;
+                        parsed.as_slice()
+                    }
+                    _ => continue,
+                }
+            }
+            _ => continue,
+        };
+        let sources: Vec<String> = parts.iter().filter_map(image_source).collect();
+        if !sources.is_empty() {
+            return sources;
+        }
+    }
+    Vec::new()
+}
+
+fn image_source(part: &Value) -> Option<String> {
+    let obj = part.as_object()?;
+    let part_type = obj.get("type").and_then(Value::as_str).unwrap_or("");
+    let has_url_key = obj.contains_key("image_url") || obj.contains_key("imageUrl");
+    if matches!(part_type, "input_image" | "image_url") || (part_type.is_empty() && has_url_key) {
+        return part_media_url(obj);
+    }
+    if part_type != "image" {
+        return None;
+    }
+    if let Some(url) = part_media_url(obj) {
+        return Some(url);
+    }
+    let data = obj.get("data").and_then(Value::as_str)?.trim();
+    let mime = obj
+        .get("mimeType")
+        .or_else(|| obj.get("mime_type"))
+        .and_then(Value::as_str)?;
+    if data.is_empty() || !mime.starts_with("image/") {
+        return None;
+    }
+    Some(if data.starts_with("data:image/") {
+        data.to_string()
+    } else {
+        format!("data:{mime};base64,{data}")
+    })
+}
+
+fn part_media_url(obj: &serde_json::Map<String, Value>) -> Option<String> {
+    let value = obj.get("image_url").or_else(|| obj.get("imageUrl"))?;
+    let url = value
+        .as_str()
+        .or_else(|| value.get("url").and_then(Value::as_str))?
+        .trim();
+    (!url.is_empty()).then(|| url.to_string())
 }
 
 #[cfg(test)]

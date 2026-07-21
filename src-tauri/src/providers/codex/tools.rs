@@ -1,9 +1,28 @@
 use serde_json::Value;
 
+use crate::provider_utils::{ContentPartsRender, RenderedToolOutput, render_content_parts};
+
 // Provider-agnostic marker helpers — see `services::image_markers`.
 pub(crate) use crate::services::image_markers::{
     extract_image_source_segments, is_image_placeholder,
 };
+
+pub(crate) fn render_tool_output(output: Option<&Value>) -> RenderedToolOutput {
+    match output {
+        Some(Value::String(text)) => RenderedToolOutput::rendered(extract_tool_output(text)),
+        Some(Value::Array(parts)) => match render_content_parts(parts) {
+            ContentPartsRender::Rendered(text) => {
+                RenderedToolOutput::rendered(omit_base64_image_sources(&text))
+            }
+            ContentPartsRender::Empty => RenderedToolOutput::rendered(String::new()),
+            ContentPartsRender::Unsupported => {
+                RenderedToolOutput::raw(Value::Array(parts.clone()).to_string())
+            }
+        },
+        Some(value) => RenderedToolOutput::raw(value.to_string()),
+        None => RenderedToolOutput::rendered(String::new()),
+    }
+}
 
 pub(crate) fn extract_codex_content(payload: &Value) -> String {
     match payload.get("content") {
@@ -69,6 +88,7 @@ pub(crate) fn extract_tool_output(raw: &str) -> String {
     // Try JSON object with "output" field (custom_tool_call_output)
     if trimmed.starts_with('{')
         && let Ok(v) = serde_json::from_str::<Value>(trimmed)
+        && v.get("metadata").is_some_and(Value::is_object)
         && let Some(out) = v.get("output").and_then(|o| o.as_str())
     {
         return omit_base64_image_sources(out);
@@ -77,24 +97,10 @@ pub(crate) fn extract_tool_output(raw: &str) -> String {
     if trimmed.starts_with('[')
         && let Ok(arr) = serde_json::from_str::<Vec<Value>>(trimmed)
     {
-        let parts: Vec<String> = arr
-            .iter()
-            .filter_map(|item| {
-                if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
-                    return Some(omit_base64_image_sources(text));
-                }
-                if item
-                    .get("image_url")
-                    .and_then(|v| v.as_str())
-                    .is_some_and(is_base64_image_url)
-                {
-                    return Some("[Image]".to_string());
-                }
-                None
-            })
-            .collect();
-        if !parts.is_empty() {
-            return parts.join("\n");
+        match render_content_parts(&arr) {
+            ContentPartsRender::Rendered(text) => return omit_base64_image_sources(&text),
+            ContentPartsRender::Empty => return String::new(),
+            ContentPartsRender::Unsupported => {}
         }
     }
     omit_base64_image_sources(raw)

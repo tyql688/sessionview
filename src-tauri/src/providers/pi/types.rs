@@ -256,8 +256,15 @@ pub enum PiContent {
 
 /// Content block types
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[serde(untagged)]
 pub enum PiContentBlock {
+    Known(PiKnownContentBlock),
+    Unknown(serde_json::Value),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum PiKnownContentBlock {
     #[serde(rename = "text")]
     Text { text: String },
     #[serde(rename = "image")]

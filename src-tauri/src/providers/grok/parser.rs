@@ -523,6 +523,7 @@ fn merge_tool_result(
                     is_error: None,
                     status: None,
                     artifact_path: None,
+                    raw_output: Some(false),
                 },
             );
         }
@@ -545,6 +546,7 @@ fn merge_tool_result(
             is_error: None,
             status: None,
             artifact_path: None,
+            raw_output: Some(false),
         },
     );
     messages.push(Message {
@@ -554,9 +556,9 @@ fn merge_tool_result(
     });
 }
 
-/// Structured result payload for a tool result. Output is mirrored into
-/// `structured.output` only for tools whose result kind suppresses the raw
-/// block — otherwise the same text would render twice.
+/// Structured result payload for a tool result. Bash mirrors its output so
+/// the dedicated terminal renderer can read the stream; ordinary tools use
+/// the shared message output.
 fn grok_result_value(canonical_name: &str, content: &str) -> Value {
     let mut result = serde_json::Map::new();
     if should_mirror_output_into_structured(canonical_name) {
@@ -629,8 +631,7 @@ fn compaction_history_cutoff(entries: &[GrokChatEntry]) -> Option<u64> {
     )
 }
 
-/// Tools whose result kind (`terminal_output`) suppresses the raw output
-/// block, making `structured.output` the single render.
+/// Tools whose dedicated renderer reads the structured output stream.
 fn should_mirror_output_into_structured(canonical_name: &str) -> bool {
-    matches!(canonical_name, "Bash" | "TaskOutput")
+    canonical_name == "Bash"
 }

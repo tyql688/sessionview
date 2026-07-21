@@ -252,6 +252,19 @@
   margin: 0;
 }
 
+.msg-tool-output-label {
+  margin-bottom: 6px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.msg-tool-raw-output {
+  background: color-mix(in srgb, var(--bg-editor) 92%, var(--warning-amber));
+}
+
 .terminal-tool {
   width: fit-content;
   max-width: 98%;

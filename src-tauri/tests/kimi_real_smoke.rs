@@ -16,7 +16,7 @@
 use std::collections::HashSet;
 
 use sessionview_lib::models::{MessageRole, Provider};
-use sessionview_lib::provider::SessionProvider;
+use sessionview_lib::provider::{ParsedSession, SessionProvider};
 use sessionview_lib::providers::kimi::KimiProvider;
 
 #[test]
@@ -38,6 +38,9 @@ fn scan_real_kimi_code_directory() {
 
     let parsed = provider.scan_all().expect("scan_all");
     eprintln!("Parsed {} kimi sessions", parsed.len());
+    let mut normalized_task_statuses = 0usize;
+    let mut normalized_subagent_tasks = 0usize;
+    let mut explicit_task_output_tools = 0usize;
 
     for s in &parsed {
         eprintln!(
@@ -92,21 +95,12 @@ fn scan_real_kimi_code_directory() {
             );
         }
 
-        // Every message keeps its role and shouldn't have empty timestamps
-        // when the parser could derive one from metadata.created_at.
-        for (i, m) in s.messages.iter().enumerate() {
-            assert!(
-                matches!(
-                    m.role,
-                    MessageRole::User
-                        | MessageRole::Assistant
-                        | MessageRole::Tool
-                        | MessageRole::System
-                ),
-                "message {i} in {:?} has unexpected role",
-                s.meta.id,
-            );
-        }
+        // Every message keeps its role, and PromptOrigin normalization keeps
+        // runtime statuses separate from human and explicit tool messages.
+        let (task_statuses, subagent_tasks, task_output_tools) = assert_message_roles(s);
+        normalized_task_statuses += task_statuses;
+        normalized_subagent_tasks += subagent_tasks;
+        explicit_task_output_tools += task_output_tools;
 
         // First few messages preview (helps eyeball Format A vs B).
         for m in s.messages.iter().take(3) {
@@ -165,6 +159,10 @@ fn scan_real_kimi_code_directory() {
         }
     }
 
+    eprintln!(
+        "Normalized {normalized_task_statuses} task notifications and {normalized_subagent_tasks} subagent assignments; kept {explicit_task_output_tools} explicit TaskOutput tools"
+    );
+
     // The provider scans something useful — fail loudly if the user
     // logged in but no sessions were picked up (likely a path/glob bug
     // in collect_wire_files).
@@ -174,6 +172,59 @@ fn scan_real_kimi_code_directory() {
             .any(|s| s.meta.id.starts_with("session_") && !s.meta.is_sidechain);
         eprintln!("Found at least one native parent session: {any_native}");
     }
+}
+
+fn assert_message_roles(session: &ParsedSession) -> (usize, usize, usize) {
+    let mut task_statuses = 0;
+    let mut subagent_tasks = 0;
+    let mut task_output_tools = 0;
+    for (index, message) in session.messages.iter().enumerate() {
+        assert!(
+            matches!(
+                message.role,
+                MessageRole::User
+                    | MessageRole::Assistant
+                    | MessageRole::Tool
+                    | MessageRole::System
+            ),
+            "message {index} in {:?} has unexpected role",
+            session.meta.id,
+        );
+        if message.content.contains("source_kind=\"background_task\"") {
+            task_statuses += 1;
+            assert_eq!(
+                message.role,
+                MessageRole::System,
+                "background task notification must not render as user text"
+            );
+            assert!(
+                message.content.starts_with("[task_status")
+                    || message.content.starts_with("[task_status_error"),
+                "background task notification should use a task status bubble"
+            );
+        }
+        if message.content.starts_with("[subagent_task]") {
+            subagent_tasks += 1;
+            assert_eq!(
+                message.role,
+                MessageRole::System,
+                "subagent assignment must not render as human text"
+            );
+        }
+        if message
+            .tool_metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.canonical_name == "TaskOutput")
+        {
+            task_output_tools += 1;
+            assert_eq!(
+                message.role,
+                MessageRole::Tool,
+                "explicit TaskOutput calls must remain tool messages"
+            );
+        }
+    }
+    (task_statuses, subagent_tasks, task_output_tools)
 }
 
 fn agent_swarm_ids_by_outcome<'a>(output: &'a str, outcome: &str) -> Vec<&'a str> {

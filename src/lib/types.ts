@@ -62,7 +62,7 @@ interface McpToolMetadata {
   display: string;
 }
 
-type RawOutputPolicy = "keep" | "suppress_terminal" | "suppress_patch_when_diff_present";
+type ToolResultMode = "output" | "raw" | "terminal" | "diff";
 
 export type ToolDiffLineType = "context" | "add" | "remove" | "skip";
 
@@ -83,13 +83,15 @@ interface ToolDetail {
   diff?: { old: string; new: string };
   patchDiff?: ToolDiffLine[];
   persistedOutputPath?: string;
+  /** Image sources extracted by the backend; omitted when empty. */
+  media?: string[];
 }
 
 interface ToolPresentation {
   icon: string;
   inputDetail?: ToolDetail;
   resultDetail?: ToolDetail;
-  rawOutputPolicy: RawOutputPolicy;
+  resultMode: ToolResultMode;
 }
 
 export interface ToolMetadata {

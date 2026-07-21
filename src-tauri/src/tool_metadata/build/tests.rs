@@ -122,6 +122,7 @@ fn promotes_snake_case_ids_and_nested_output_path() {
             is_error: Some(false),
             status: None,
             artifact_path: None,
+            raw_output: None,
         },
     );
 
@@ -171,6 +172,7 @@ fn promotes_new_thread_id_to_agent_id_alias() {
             is_error: Some(false),
             status: Some("success"),
             artifact_path: None,
+            raw_output: None,
         },
     );
     assert_eq!(
@@ -214,6 +216,7 @@ fn preserves_call_metadata_when_result_enriches_structured() {
             is_error: Some(false),
             status: None,
             artifact_path: None,
+            raw_output: None,
         },
     );
 
@@ -357,6 +360,7 @@ fn summarizes_new_tool_aliases_and_preserves_media_fields() {
             is_error: Some(false),
             status: None,
             artifact_path: None,
+            raw_output: None,
         },
     );
     assert_eq!(
@@ -476,6 +480,7 @@ fn enriches_recent_tool_result_shapes() {
             is_error: Some(false),
             status: None,
             artifact_path: None,
+            raw_output: None,
         },
     );
     assert_eq!(send_message.result_kind.as_deref(), Some("tool_output"));
@@ -502,6 +507,7 @@ fn enriches_recent_tool_result_shapes() {
             is_error: Some(false),
             status: None,
             artifact_path: None,
+            raw_output: None,
         },
     );
     assert_eq!(task_list.result_kind.as_deref(), Some("task_status"));
@@ -524,6 +530,7 @@ fn enriches_recent_tool_result_shapes() {
             is_error: Some(false),
             status: None,
             artifact_path: None,
+            raw_output: None,
         },
     );
     assert_eq!(web_search.result_kind.as_deref(), Some("web_result"));
@@ -542,6 +549,7 @@ fn enriches_recent_tool_result_shapes() {
             is_error: Some(false),
             status: None,
             artifact_path: None,
+            raw_output: None,
         },
     );
     assert_eq!(skill.result_kind.as_deref(), Some("tool_output"));
@@ -631,6 +639,7 @@ fn preserves_large_structured_results() {
             is_error: Some(false),
             status: None,
             artifact_path: None,
+            raw_output: None,
         },
     );
 

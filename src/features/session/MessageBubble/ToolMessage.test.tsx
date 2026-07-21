@@ -92,7 +92,7 @@ const readNoDetailMessage: Message = {
 };
 
 describe("ToolMessage", () => {
-  it("renders raw output after expansion", () => {
+  it("renders terminal output after expansion", () => {
     const { container } = render(<ToolMessage message={bashOutputMessage} />);
 
     expect(container.querySelector(".msg-tool-output")).toBeNull();
@@ -108,11 +108,39 @@ describe("ToolMessage", () => {
     );
   });
 
-  it("uses presentation raw output policy to suppress terminal output", () => {
+  it("renders a plain Codex exec input as the terminal command", () => {
+    const input = 'const result = await tools.exec_command({ cmd: "pwd" });\ntext(result.output);';
     const { container } = render(
       <ToolMessage
         message={{
           ...bashOutputMessage,
+          tool_input: input,
+          tool_metadata: {
+            raw_name: "exec",
+            canonical_name: "Bash",
+            display_name: "Bash",
+            category: "shell",
+            presentation: { icon: "💻", resultMode: "terminal" },
+          },
+        }}
+      />,
+    );
+
+    const header = container.querySelector(".terminal-tool-toggle");
+    if (!header) throw new Error("expected terminal tool header");
+    fireEvent.click(header);
+
+    expect(container.querySelector(".terminal-tool-command-text")?.textContent).toBe(input);
+  });
+
+  it("keeps the provider terminal body when structured stdout omits a warning", () => {
+    const providerOutput =
+      "line one\nline two\n[This command modified 2 files. Call Read before editing.]";
+    const { container } = render(
+      <ToolMessage
+        message={{
+          ...bashOutputMessage,
+          content: providerOutput,
           tool_metadata: {
             raw_name: "Bash",
             canonical_name: "Bash",
@@ -120,10 +148,14 @@ describe("ToolMessage", () => {
             category: "shell",
             presentation: {
               icon: "💻",
-              rawOutputPolicy: "suppress_terminal",
+              resultMode: "terminal",
               resultDetail: {
-                lines: [{ label: "stdout", value: "line one\nline two" }],
+                lines: [{ label: "exit", value: "0" }],
               },
+            },
+            structured: {
+              stdout: "line one\nline two",
+              staleReadFileStateHint: "[This command modified 2 files. Call Read before editing.]",
             },
           },
         }}
@@ -136,9 +168,8 @@ describe("ToolMessage", () => {
 
     expect(container.querySelector(".terminal-tool")).not.toBeNull();
     expect(container.querySelector(".msg-tool-result-detail")).toBeNull();
-    expect(container.querySelector(".msg-tool-output pre")?.textContent).toBe(
-      "line one\nline two",
-    );
+    expect(container.querySelector(".msg-tool-output pre")?.textContent).toBe(providerOutput);
+    expect(container.textContent?.match(/Call Read before editing/g)).toHaveLength(1);
   });
 
   it("does not warn for bracket-prefixed terminal text output", () => {
@@ -161,7 +192,7 @@ describe("ToolMessage", () => {
     }
   });
 
-  it("does not suppress ordinary output when presentation policy is keep", () => {
+  it("renders ordinary provider output through the default output mode", () => {
     const { container } = render(
       <ToolMessage
         message={{
@@ -173,7 +204,7 @@ describe("ToolMessage", () => {
             category: "unknown",
             presentation: {
               icon: "⚙",
-              rawOutputPolicy: "keep",
+              resultMode: "output",
               resultDetail: {
                 lines: [{ label: "status", value: "success" }],
               },
@@ -190,6 +221,301 @@ describe("ToolMessage", () => {
     expect(container.querySelector(".msg-tool-output pre")?.textContent).toBe(
       "line one\nline two",
     );
+  });
+
+  it("renders normalized Kimi output once without displaying its result envelope", () => {
+    const output = "1\tfirst line\n2\tsecond line";
+    const { container } = render(
+      <ToolMessage
+        message={{
+          ...readNoDetailMessage,
+          content: output,
+          tool_metadata: {
+            raw_name: "Read",
+            canonical_name: "Read",
+            display_name: "Read",
+            category: "file",
+            structured: {
+              note: "<system>2 lines read.</system>",
+              output,
+            },
+            presentation: {
+              icon: "📄",
+              resultMode: "output",
+            },
+          },
+        }}
+      />,
+    );
+
+    const header = container.querySelector(".msg-tool-toggle-row");
+    if (!header) throw new Error("expected tool header");
+    fireEvent.click(header);
+
+    expect(container.querySelector(".msg-tool-result-detail")).toBeNull();
+    expect(container.querySelector(".msg-tool-output pre")?.textContent).toBe(output);
+    expect(container.textContent?.match(/first line/g)).toHaveLength(1);
+    expect(container.textContent).not.toContain("<system>");
+  });
+
+  it("hydrates Codex typed media inside the single output renderer", () => {
+    const { container } = render(
+      <ToolMessage
+        message={{
+          ...readNoDetailMessage,
+          tool_name: "JavaScript",
+          content: "captured\n[Image]",
+          tool_metadata: {
+            raw_name: "js",
+            canonical_name: "JavaScript",
+            display_name: "JavaScript",
+            category: "tool",
+            presentation: {
+              icon: "🟨",
+              resultMode: "output",
+              resultDetail: { lines: [], media: ["data:image/png;base64,AAAA"] },
+            },
+          },
+        }}
+      />,
+    );
+
+    const header = container.querySelector(".msg-tool-toggle-row");
+    if (!header) throw new Error("expected tool header");
+    fireEvent.click(header);
+
+    expect(container.querySelectorAll(".msg-tool-output")).toHaveLength(1);
+    expect(container.querySelectorAll(".msg-image-wrap")).toHaveLength(1);
+    expect(container.querySelector(".msg-tool-output")?.textContent).not.toContain("[Image]");
+    expect(container.querySelector(".msg-tool-output-label")).toBeNull();
+  });
+
+  it("keeps typed media inert when the result mode is raw", () => {
+    const { container } = render(
+      <ToolMessage
+        message={{
+          ...readNoDetailMessage,
+          tool_name: "FutureTool",
+          content: "[Image]",
+          tool_metadata: {
+            raw_name: "FutureTool",
+            canonical_name: "FutureTool",
+            display_name: "FutureTool",
+            category: "unknown",
+            presentation: { icon: "⚙", resultMode: "raw" },
+            structured: {
+              output: [{ type: "input_image", image_url: "data:image/png;base64,AAAA" }],
+            },
+          },
+        }}
+      />,
+    );
+
+    const header = container.querySelector(".msg-tool-toggle-row");
+    if (!header) throw new Error("expected tool header");
+    fireEvent.click(header);
+
+    expect(container.querySelectorAll(".msg-tool-output")).toHaveLength(1);
+    expect(container.querySelector(".msg-image-wrap")).toBeNull();
+    expect(container.querySelector(".msg-tool-raw-output pre")?.textContent).toBe("[Image]");
+  });
+
+  it("renders terminal text and typed media in one terminal output stream", () => {
+    const { container } = render(
+      <ToolMessage
+        message={{
+          ...bashOutputMessage,
+          content: "Script completed\n[Image]",
+          tool_metadata: {
+            raw_name: "exec_command",
+            canonical_name: "Bash",
+            display_name: "Bash",
+            category: "shell",
+            presentation: {
+              icon: "💻",
+              resultMode: "terminal",
+              resultDetail: { lines: [], media: ["data:image/png;base64,AAAA"] },
+            },
+          },
+        }}
+      />,
+    );
+
+    const header = container.querySelector(".terminal-tool-toggle");
+    if (!header) throw new Error("expected terminal tool header");
+    fireEvent.click(header);
+
+    expect(container.querySelectorAll(".terminal-tool")).toHaveLength(1);
+    expect(container.querySelectorAll(".msg-tool-output")).toHaveLength(1);
+    expect(container.querySelectorAll(".msg-image-wrap")).toHaveLength(1);
+    expect(container.querySelector(".msg-tool-output")?.textContent).not.toContain("[Image]");
+    expect(container.querySelector(".msg-tool-output-label")).toBeNull();
+  });
+
+  it("keeps provider-rendered output instead of structured file content", () => {
+    const { container } = render(
+      <ToolMessage
+        message={{
+          ...readNoDetailMessage,
+          tool_name: "Write",
+          content: "File created successfully.",
+          tool_metadata: {
+            raw_name: "Write",
+            canonical_name: "Write",
+            display_name: "Write",
+            category: "file",
+            presentation: {
+              icon: "📝",
+              resultMode: "output",
+            },
+            structured: { content: "fn main() {}" },
+          },
+        }}
+      />,
+    );
+
+    const header = container.querySelector(".msg-tool-toggle-row");
+    if (!header) throw new Error("expected tool header");
+    fireEvent.click(header);
+
+    expect(container.querySelector(".msg-tool-output pre")?.textContent).toBe("File created successfully.");
+    expect(container.textContent).not.toContain("fn main()");
+  });
+
+  it("uses raw as an explicit mutually exclusive fallback", () => {
+    const raw = JSON.stringify([{ type: "future_media", payload: "keep" }]);
+    const { container } = render(
+      <ToolMessage
+        message={{
+          ...readNoDetailMessage,
+          tool_name: "FutureTool",
+          content: raw,
+          tool_metadata: {
+            raw_name: "FutureTool",
+            canonical_name: "FutureTool",
+            display_name: "FutureTool",
+            category: "unknown",
+            presentation: { icon: "⚙", resultMode: "raw" },
+          },
+        }}
+      />,
+    );
+
+    const header = container.querySelector(".msg-tool-toggle-row");
+    if (!header) throw new Error("expected tool header");
+    fireEvent.click(header);
+
+    expect(container.querySelectorAll(".msg-tool-output")).toHaveLength(1);
+    expect(container.querySelector(".msg-tool-raw-output pre")?.textContent).toBe(raw);
+    expect(container.querySelector(".msg-tool-output-label")?.textContent).toBe("raw");
+  });
+
+  it("keeps raw bytes literal instead of interpreting content markers", () => {
+    const raw = '[{"payload":"[Image: source: /tmp/not-an-image.png]\\n```json\\n{\\"keep\\":true}\\n```"}]';
+    const { container } = render(
+      <ToolMessage
+        message={{
+          ...readNoDetailMessage,
+          tool_name: "FutureTool",
+          content: raw,
+          tool_metadata: {
+            raw_name: "FutureTool",
+            canonical_name: "FutureTool",
+            display_name: "FutureTool",
+            category: "unknown",
+            presentation: { icon: "⚙", resultMode: "raw" },
+          },
+        }}
+      />,
+    );
+
+    const header = container.querySelector(".msg-tool-toggle-row");
+    if (!header) throw new Error("expected tool header");
+    fireEvent.click(header);
+
+    expect(container.querySelectorAll(".msg-tool-raw-output pre")).toHaveLength(1);
+    expect(container.querySelector(".msg-tool-raw-output pre")?.textContent).toBe(raw);
+    expect(container.querySelector(".msg-tool-raw-output img")).toBeNull();
+  });
+
+  it("keeps persisted-output markers literal in raw mode", () => {
+    const raw =
+      '[{"type":"future_content","payload":"<persisted-output>\\nFull output saved to: /tmp/raw.txt\\n</persisted-output>"}]';
+    const { container } = render(
+      <ToolMessage
+        message={{
+          ...readNoDetailMessage,
+          tool_name: "FutureTool",
+          content: raw,
+          tool_metadata: {
+            raw_name: "FutureTool",
+            canonical_name: "FutureTool",
+            display_name: "FutureTool",
+            category: "unknown",
+            structured: { persistedOutputPath: "/tmp/raw.txt" },
+            presentation: { icon: "⚙", resultMode: "raw" },
+          },
+        }}
+      />,
+    );
+
+    const header = container.querySelector(".msg-tool-toggle-row");
+    if (!header) throw new Error("expected tool header");
+    fireEvent.click(header);
+
+    expect(container.querySelector(".msg-tool-raw-output pre")?.textContent).toBe(raw);
+    expect(container.textContent).not.toContain("Load full result");
+  });
+
+  it("uses the raw renderer instead of the terminal renderer for an unknown Bash payload", () => {
+    const raw = JSON.stringify([{ type: "future_content", payload: { keep: true } }]);
+    const { container } = render(
+      <ToolMessage
+        message={{
+          ...bashOutputMessage,
+          content: raw,
+          tool_metadata: {
+            raw_name: "exec_command",
+            canonical_name: "Bash",
+            display_name: "Bash",
+            category: "shell",
+            presentation: { icon: "💻", resultMode: "raw" },
+          },
+        }}
+      />,
+    );
+
+    expect(container.querySelector(".terminal-tool")).toBeNull();
+    const header = container.querySelector(".msg-tool-toggle-row");
+    if (!header) throw new Error("expected tool header");
+    fireEvent.click(header);
+
+    expect(container.querySelectorAll(".msg-tool-output")).toHaveLength(1);
+    expect(container.querySelector(".msg-tool-raw-output pre")?.textContent).toBe(raw);
+    expect(container.querySelector(".msg-tool-output-label")?.textContent).toBe("raw");
+  });
+
+  it("keeps a JSON file as ordinary output", () => {
+    const jsonFile = '{"32360":"cursor"}';
+    const { container } = render(
+      <ToolMessage
+        message={{
+          ...readNoDetailMessage,
+          content: jsonFile,
+          tool_metadata: {
+            ...readNoDetailMessage.tool_metadata!,
+            presentation: { icon: "📄", resultMode: "output" },
+          },
+        }}
+      />,
+    );
+
+    const header = container.querySelector(".msg-tool-toggle-row");
+    if (!header) throw new Error("expected tool header");
+    fireEvent.click(header);
+
+    expect(container.querySelector(".msg-tool-output pre")?.textContent).toBe('{\n  "32360": "cursor"\n}');
+    expect(container.querySelector(".msg-tool-output-label")).toBeNull();
   });
 
   it("renders tools with no expandable detail as static rows", () => {

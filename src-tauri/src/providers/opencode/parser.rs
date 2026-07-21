@@ -108,24 +108,17 @@ fn build_tool_message(part: &serde_json::Value, msg_id: &str, timestamp: Option<
             .unwrap_or_else(|| i.to_string())
     });
 
-    let output = match status {
-        "completed" => state
-            .and_then(|s| s.get("output"))
-            .and_then(|o| o.as_str())
-            .unwrap_or("")
-            .to_string(),
-        "error" => state
-            .and_then(|s| s.get("error"))
-            .and_then(|e| e.as_str())
-            .map(|e| format!("[Error] {e}"))
-            .unwrap_or_default(),
-        _ => String::new(),
+    let (output, is_raw) = match (status, state) {
+        ("completed", Some(state)) => render_opencode_result(state.get("output"), false),
+        ("error", Some(state)) => render_opencode_result(state.get("error"), true),
+        _ => (String::new(), false),
     };
 
     let result_value = opencode_tool_result_value(state, &output);
     enrich_tool_metadata(
         &mut metadata,
         ToolResultFacts {
+            raw_output: Some(is_raw),
             raw_result: result_value.as_ref(),
             is_error: Some(status == "error"),
             status: (!status.is_empty()).then_some(status),
@@ -146,6 +139,15 @@ fn build_tool_message(part: &serde_json::Value, msg_id: &str, timestamp: Option<
         tool_input,
         tool_metadata: Some(metadata),
         ..Message::new(MessageRole::Tool, output)
+    }
+}
+
+fn render_opencode_result(value: Option<&serde_json::Value>, prefix_error: bool) -> (String, bool) {
+    match value {
+        Some(serde_json::Value::String(text)) if prefix_error => (format!("[Error] {text}"), false),
+        Some(serde_json::Value::String(text)) => (text.clone(), false),
+        Some(serde_json::Value::Null) | None => (String::new(), false),
+        Some(value) => (value.to_string(), true),
     }
 }
 
@@ -344,6 +346,7 @@ pub(crate) fn extract_tokens(msg_json: &serde_json::Value) -> Option<TokenUsage>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::ToolResultMode;
     use serde_json::json;
 
     const TS: &str = "2026-01-02T03:04:05+00:00";
@@ -418,6 +421,29 @@ mod tests {
         assert_eq!(msg.content, "[Error] command failed");
         let metadata = msg.tool_metadata.as_ref().expect("metadata");
         assert_eq!(metadata.status.as_deref(), Some("error"));
+    }
+
+    #[test]
+    fn build_tool_message_preserves_non_string_future_output_as_raw() {
+        let part = json!({
+            "type": "tool",
+            "tool": "read",
+            "callID": "call-raw",
+            "state": {
+                "status": "completed",
+                "input": { "path": "future.json" },
+                "output": { "future": true },
+            },
+        });
+        let msg = build_tool_message(&part, "msg-1", Some(TS));
+        assert_eq!(msg.content, r#"{"future":true}"#);
+        assert_eq!(
+            msg.tool_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.presentation.as_ref())
+                .map(|presentation| presentation.result_mode),
+            Some(ToolResultMode::Raw)
+        );
     }
 
     #[test]

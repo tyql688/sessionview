@@ -17,6 +17,10 @@
 
 use serde_json::Value;
 
+use crate::provider_utils::{ContentPartsRender, render_content_parts};
+
+pub(crate) use crate::provider_utils::RenderedToolOutput;
+
 /// Strip the `<system>…</system>` wrappers legacy kimi-cli used to inject
 /// around tool results. Returns the original string when nothing matches.
 fn strip_system_wrapper(text: &str) -> &str {
@@ -29,42 +33,78 @@ fn strip_system_wrapper(text: &str) -> &str {
 
 /// Render a Format A tool message's content into a single rendered
 /// string. Drops `<system>` decorations when there's also real content
-/// alongside them. Returns `(rendered, is_error)` — Format A doesn't
-/// carry an explicit error flag so the bool is always `None`.
-pub(crate) fn render_format_a_tool_output(parts: &[Value]) -> (String, Option<bool>) {
-    let mut texts: Vec<String> = Vec::new();
-    let mut system_only: Vec<String> = Vec::new();
-    for part in parts {
-        if part.get("type").and_then(|v| v.as_str()) != Some("text") {
-            continue;
-        }
-        let raw = part.get("text").and_then(|v| v.as_str()).unwrap_or("");
-        if raw.is_empty() {
-            continue;
-        }
-        let trimmed = raw.trim();
-        if trimmed.starts_with("<system>") && trimmed.ends_with("</system>") {
-            system_only.push(strip_system_wrapper(raw).to_string());
-        } else {
-            texts.push(raw.to_string());
-        }
+/// alongside them. Format A doesn't carry an explicit error flag.
+pub(crate) fn render_format_a_tool_output(parts: &[Value]) -> RenderedToolOutput {
+    if render_content_parts(parts) == ContentPartsRender::Unsupported {
+        return RenderedToolOutput {
+            text: Value::Array(parts.to_vec()).to_string(),
+            is_error: None,
+            is_raw: true,
+        };
     }
-    let rendered = if texts.is_empty() {
-        system_only.join("\n")
-    } else {
-        texts.join("\n")
+
+    let has_semantic_output = parts.iter().any(|part| {
+        let part_type = part
+            .get("type")
+            .and_then(Value::as_str)
+            .or_else(|| part.get("text").and_then(Value::as_str).map(|_| "text"))
+            .unwrap_or("");
+        if matches!(part_type, "text" | "input_text" | "output_text") {
+            return part
+                .get("text")
+                .or_else(|| part.get("input_text"))
+                .or_else(|| part.get("output_text"))
+                .and_then(Value::as_str)
+                .is_some_and(|text| {
+                    let trimmed = text.trim();
+                    !trimmed.is_empty()
+                        && !(trimmed.starts_with("<system>") && trimmed.ends_with("</system>"))
+                });
+        }
+        true
+    });
+    let normalized = parts
+        .iter()
+        .filter_map(|part| {
+            let Some(text) = part.get("text").and_then(Value::as_str) else {
+                return Some(part.clone());
+            };
+            let trimmed = text.trim();
+            if !(trimmed.starts_with("<system>") && trimmed.ends_with("</system>")) {
+                return Some(part.clone());
+            }
+            if has_semantic_output {
+                return None;
+            }
+            let mut part = part.clone();
+            part["text"] = Value::String(strip_system_wrapper(text).to_string());
+            Some(part)
+        })
+        .collect::<Vec<_>>();
+    let rendered = match render_content_parts(&normalized) {
+        ContentPartsRender::Rendered(text) => text,
+        ContentPartsRender::Empty => String::new(),
+        ContentPartsRender::Unsupported => unreachable!("content parts were validated above"),
     };
-    (rendered, None)
+    RenderedToolOutput {
+        text: rendered,
+        is_error: None,
+        is_raw: false,
+    }
 }
 
 /// Render a Format B `tool.result.result` payload. Looks for `output`
 /// first (the common case in kimi-code 0.1.1), then falls back to
 /// `message`, then serialises the whole result if nothing readable was
-/// found. Returns `(rendered, is_error)` where `is_error` mirrors the
-/// `is_error`/`isError`/`success` flags when the tool surfaces them.
-pub(crate) fn render_format_b_tool_output(result: Option<&Value>) -> (String, Option<bool>) {
+/// found. Unknown shapes are preserved as the sole raw result; `is_error`
+/// mirrors the `is_error`/`isError`/`success` flags when available.
+pub(crate) fn render_format_b_tool_output(result: Option<&Value>) -> RenderedToolOutput {
     let Some(result) = result else {
-        return (String::new(), None);
+        return RenderedToolOutput {
+            text: String::new(),
+            is_error: None,
+            is_raw: false,
+        };
     };
     let is_error = result
         .get("is_error")
@@ -77,20 +117,69 @@ pub(crate) fn render_format_b_tool_output(result: Option<&Value>) -> (String, Op
                 .map(|ok| !ok)
         });
 
-    if let Some(output) = result.get("output").and_then(|v| v.as_str())
-        && !output.is_empty()
-    {
-        return (output.to_string(), is_error);
+    let mut known_empty_output = false;
+    if let Some(output) = result.get("output") {
+        if let Some(output) = output.as_str() {
+            if !output.is_empty() {
+                return RenderedToolOutput {
+                    text: output.to_string(),
+                    is_error,
+                    is_raw: false,
+                };
+            }
+            known_empty_output = true;
+        }
+        if let Some(parts) = output.as_array() {
+            match render_content_parts(parts) {
+                ContentPartsRender::Rendered(rendered) => {
+                    return RenderedToolOutput {
+                        text: rendered,
+                        is_error,
+                        is_raw: false,
+                    };
+                }
+                ContentPartsRender::Empty => known_empty_output = true,
+                ContentPartsRender::Unsupported => {
+                    if let Ok(raw) = serde_json::to_string(output) {
+                        return RenderedToolOutput {
+                            text: raw,
+                            is_error,
+                            is_raw: true,
+                        };
+                    }
+                }
+            }
+        } else if output.is_null() {
+            known_empty_output = true;
+        } else if !output.is_string() {
+            return RenderedToolOutput {
+                text: output.to_string(),
+                is_error,
+                is_raw: true,
+            };
+        }
     }
     if let Some(message) = result.get("message").and_then(|v| v.as_str())
         && !message.is_empty()
     {
-        return (message.to_string(), is_error);
+        return RenderedToolOutput {
+            text: message.to_string(),
+            is_error,
+            is_raw: false,
+        };
     }
-    // Last resort: serialise the result so we don't drop information.
-    match serde_json::to_string(result) {
-        Ok(s) => (s, is_error),
-        Err(_) => (String::new(), is_error),
+    if known_empty_output {
+        return RenderedToolOutput {
+            text: String::new(),
+            is_error,
+            is_raw: false,
+        };
+    }
+    let text = serde_json::to_string(result).unwrap_or_default();
+    RenderedToolOutput {
+        is_raw: !text.is_empty(),
+        text,
+        is_error,
     }
 }
 
@@ -105,9 +194,10 @@ mod tests {
             json!({"type": "text", "text": "<system>Command executed successfully.</system>"}),
             json!({"type": "text", "text": "file1\nfile2"}),
         ];
-        let (rendered, err) = render_format_a_tool_output(&parts);
-        assert_eq!(rendered, "file1\nfile2");
-        assert_eq!(err, None);
+        let rendered = render_format_a_tool_output(&parts);
+        assert_eq!(rendered.text, "file1\nfile2");
+        assert_eq!(rendered.is_error, None);
+        assert!(!rendered.is_raw);
     }
 
     #[test]
@@ -115,43 +205,107 @@ mod tests {
         let parts = vec![
             json!({"type": "text", "text": "<system>Command executed successfully.</system>"}),
         ];
-        let (rendered, _) = render_format_a_tool_output(&parts);
-        assert_eq!(rendered, "Command executed successfully.");
+        let rendered = render_format_a_tool_output(&parts);
+        assert_eq!(rendered.text, "Command executed successfully.");
+        assert!(!rendered.is_raw);
+    }
+
+    #[test]
+    fn format_a_preserves_unknown_parts_as_raw_json() {
+        let parts = vec![json!({"type": "future_result", "payload": {"value": 1}})];
+        let rendered = render_format_a_tool_output(&parts);
+        assert_eq!(
+            rendered.text,
+            r#"[{"payload":{"value":1},"type":"future_result"}]"#
+        );
+        assert!(rendered.is_raw);
+    }
+
+    #[test]
+    fn format_a_renders_known_media_parts_as_output() {
+        let parts = vec![json!({"type": "input_audio", "audio_url": "/tmp/result.wav"})];
+        let rendered = render_format_a_tool_output(&parts);
+        assert_eq!(rendered.text, "[Audio: source: /tmp/result.wav]");
+        assert!(!rendered.is_raw);
     }
 
     #[test]
     fn format_b_prefers_output_over_message() {
         let result = json!({"output": "hello", "message": "ok"});
-        let (rendered, err) = render_format_b_tool_output(Some(&result));
-        assert_eq!(rendered, "hello");
-        assert_eq!(err, None);
+        let rendered = render_format_b_tool_output(Some(&result));
+        assert_eq!(rendered.text, "hello");
+        assert_eq!(rendered.is_error, None);
+        assert!(!rendered.is_raw);
+    }
+
+    #[test]
+    fn format_b_renders_content_part_arrays_without_raw_json() {
+        let result = json!({
+            "output": [
+                {"type": "text", "text": "<image path=\"/tmp/screenshot.png\">"},
+                {"type": "image_url", "imageUrl": {"url": "blobref:image/png;abc"}},
+                {"type": "text", "text": "</image>"}
+            ]
+        });
+        let rendered = render_format_b_tool_output(Some(&result));
+        assert_eq!(rendered.text, "[Image: source: /tmp/screenshot.png]");
+        assert_eq!(rendered.is_error, None);
+        assert!(!rendered.is_raw);
+    }
+
+    #[test]
+    fn format_b_keeps_unknown_output_arrays_as_json() {
+        let result = json!({"output": [{"type": "future_media", "payload": "keep"}]});
+        let rendered = render_format_b_tool_output(Some(&result));
+        assert_eq!(
+            rendered.text,
+            r#"[{"payload":"keep","type":"future_media"}]"#
+        );
+        assert!(rendered.is_raw);
+    }
+
+    #[test]
+    fn format_b_keeps_unknown_output_objects_as_raw_json() {
+        let result = json!({"output": {"future": 1}, "message": "do not hide the payload"});
+        let rendered = render_format_b_tool_output(Some(&result));
+        assert_eq!(rendered.text, r#"{"future":1}"#);
+        assert!(rendered.is_raw);
     }
 
     #[test]
     fn format_b_falls_back_to_message_when_output_empty() {
         let result = json!({"output": "", "message": "File written."});
-        let (rendered, _) = render_format_b_tool_output(Some(&result));
-        assert_eq!(rendered, "File written.");
+        let rendered = render_format_b_tool_output(Some(&result));
+        assert_eq!(rendered.text, "File written.");
+        assert!(!rendered.is_raw);
+    }
+
+    #[test]
+    fn format_b_does_not_render_known_empty_content_parts_as_raw_json() {
+        let result = json!({"output": [{"type": "text", "text": ""}]});
+        let rendered = render_format_b_tool_output(Some(&result));
+        assert_eq!(rendered.text, "");
+        assert!(!rendered.is_raw);
     }
 
     #[test]
     fn format_b_surfaces_error_flag() {
         let result = json!({"is_error": true, "output": "boom"});
-        let (_, err) = render_format_b_tool_output(Some(&result));
-        assert_eq!(err, Some(true));
+        let rendered = render_format_b_tool_output(Some(&result));
+        assert_eq!(rendered.is_error, Some(true));
     }
 
     #[test]
     fn format_b_surfaces_camelcase_error_flag() {
         let result = json!({"isError": true, "output": "boom"});
-        let (_, err) = render_format_b_tool_output(Some(&result));
-        assert_eq!(err, Some(true));
+        let rendered = render_format_b_tool_output(Some(&result));
+        assert_eq!(rendered.is_error, Some(true));
     }
 
     #[test]
     fn format_b_translates_success_false_to_error_true() {
         let result = json!({"success": false, "output": "boom"});
-        let (_, err) = render_format_b_tool_output(Some(&result));
-        assert_eq!(err, Some(true));
+        let rendered = render_format_b_tool_output(Some(&result));
+        assert_eq!(rendered.is_error, Some(true));
     }
 }

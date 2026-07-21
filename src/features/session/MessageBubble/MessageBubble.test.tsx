@@ -120,9 +120,23 @@ describe("MessageBubble", () => {
   });
 
   it.each([
-    ["[turn_duration] 1.5s, 6 messages", "1.5s, 6 messages"],
-    ["[stop_hook_summary] 2 hooks: lint (120ms), test (340ms)", "2 hooks: lint (120ms), test (340ms)"],
-  ])("renders %s as a collapsed system disclosure", (content, detail) => {
+    ["[turn_duration] 1.5s, 6 messages", "1.5s, 6 messages", "1.5s, 6 messages"],
+    [
+      "[stop_hook_summary] 2 hooks: lint (120ms), test (340ms)",
+      "2 hooks: lint (120ms), test (340ms)",
+      "2 hooks: lint (120ms), test (340ms)",
+    ],
+    [
+      "[task_status_error] failed · bash-demo1234\n<notification>failed</notification>",
+      "failed · bash-demo1234",
+      "failed · bash-demo1234\n<notification>failed</notification>",
+    ],
+    [
+      "[subagent_task] Inspect the parser\nUse structured origins.",
+      "Inspect the parser",
+      "Inspect the parser\nUse structured origins.",
+    ],
+  ])("renders %s as a collapsed system disclosure", (content, summary, detail) => {
     const { container } = render(
       <MessageBubble
         message={message({
@@ -136,7 +150,7 @@ describe("MessageBubble", () => {
     expect(toggle).not.toBeNull();
     if (!toggle) throw new Error("missing system disclosure toggle");
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(toggle).toHaveTextContent(detail);
+    expect(toggle).toHaveTextContent(summary);
     expect(container.querySelector(".msg-system-body")).toBeNull();
 
     fireEvent.click(toggle);
@@ -189,6 +203,20 @@ describe("MessageBubble", () => {
 
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(container.querySelector(".msg-system-body")?.textContent).toBe(detail);
+    expect(markdownMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps parsed system context visible even when it contains template markers", () => {
+    const { container } = render(
+      <MessageBubble
+        message={message({
+          role: "system",
+          content: "[subagent_task] Inspect context\n<environment_context>synthetic</environment_context>",
+        })}
+      />,
+    );
+
+    expect(container.querySelector(".msg-system-toggle")).not.toBeNull();
     expect(markdownMock).not.toHaveBeenCalled();
   });
 

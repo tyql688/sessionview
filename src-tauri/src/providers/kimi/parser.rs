@@ -8,11 +8,16 @@
 //!   `context.append_message` lines. Messages carry `role` and structured
 //!   `content[]`/`toolCalls[]` arrays. No per-line `time` field.
 //! * **Native** (kimi-code 0.1.1+): events split into `metadata`,
-//!   `config.update`, `turn.prompt`, `context.append_message` (user
-//!   prompts only), `context.append_loop_event` (assistant
-//!   `content.part` / `tool.call` / `tool.result` / step bookkeeping),
-//!   `usage.record`. Each event-bearing line carries `"time"` in epoch
-//!   milliseconds.
+//!   `config.update`, `turn.prompt`, `context.append_message`,
+//!   `context.append_loop_event` (assistant `content.part` / `tool.call` /
+//!   `tool.result` / step bookkeeping), and `usage.record`. Each
+//!   event-bearing line carries `"time"` in epoch milliseconds.
+//!
+//! Native `context.append_message` records need special care: kimi-code uses
+//! `role:"user"` for every input fed back into the model, including runtime
+//! task notifications, subagent assignments, skills, hooks, and cron events.
+//! The structured `message.origin.kind` — not the transport role — determines
+//! whether SessionView renders a human bubble, a command, or a system status.
 //!
 //! The parser walks the file once, dispatching per-line by `type`, and
 //! reuses a single accumulator so the message order matches on-disk

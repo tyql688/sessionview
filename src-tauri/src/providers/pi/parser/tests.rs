@@ -1,5 +1,5 @@
 use super::*;
-use crate::models::MessageRole;
+use crate::models::{MessageRole, ToolResultMode};
 
 #[test]
 fn parse_session_header() {
@@ -134,6 +134,60 @@ fn extract_messages_keeps_tool_only_turn_as_tool_with_error_status() {
             .as_ref()
             .and_then(|metadata| metadata.status.as_deref()),
         Some("error")
+    );
+}
+
+#[test]
+fn extract_messages_preserves_unknown_tool_result_blocks_as_raw() {
+    let entries: Vec<PiEntry> = [
+        r#"{"type":"message","id":"assistant-1","parentId":null,"timestamp":"2026-06-10T07:00:01.000Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"call-read","name":"read","arguments":{"path":"future.json"}}],"provider":"pi-test","model":"mimo-test","timestamp":1781074801000}}"#,
+        r#"{"type":"message","id":"result-1","parentId":"assistant-1","timestamp":"2026-06-10T07:00:02.000Z","message":{"role":"toolResult","toolCallId":"call-read","toolName":"read","content":[{"type":"future_content","payload":{"keep":true}}],"details":{},"isError":false,"timestamp":1781074802000}}"#,
+    ]
+    .into_iter()
+    .map(|json| serde_json::from_str(json).unwrap())
+    .collect();
+
+    let branch = build_active_branch(&entries);
+    let messages = extract_messages(&entries, &branch);
+    let tool = messages
+        .iter()
+        .find(|message| message.role == MessageRole::Tool)
+        .expect("tool message");
+    assert_eq!(
+        tool.tool_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.presentation.as_ref())
+            .map(|presentation| presentation.result_mode),
+        Some(ToolResultMode::Raw)
+    );
+    let raw: serde_json::Value = serde_json::from_str(&tool.content).expect("raw content array");
+    assert_eq!(raw[0]["type"], "future_content");
+    assert_eq!(raw[0]["payload"]["keep"], true);
+}
+
+#[test]
+fn extract_messages_keeps_json_file_text_as_output() {
+    let entries: Vec<PiEntry> = [
+        r#"{"type":"message","id":"assistant-1","parentId":null,"timestamp":"2026-06-10T07:00:01.000Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"call-read","name":"read","arguments":{"path":"package.json"}}],"provider":"pi-test","model":"mimo-test","timestamp":1781074801000}}"#,
+        r#"{"type":"message","id":"result-1","parentId":"assistant-1","timestamp":"2026-06-10T07:00:02.000Z","message":{"role":"toolResult","toolCallId":"call-read","toolName":"read","content":[{"type":"text","text":"{\"name\":\"sessionview\"}"}],"details":{},"isError":false,"timestamp":1781074802000}}"#,
+    ]
+    .into_iter()
+    .map(|json| serde_json::from_str(json).unwrap())
+    .collect();
+
+    let branch = build_active_branch(&entries);
+    let messages = extract_messages(&entries, &branch);
+    let tool = messages
+        .iter()
+        .find(|message| message.role == MessageRole::Tool)
+        .expect("tool message");
+    assert_eq!(tool.content, r#"{"name":"sessionview"}"#);
+    assert_eq!(
+        tool.tool_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.presentation.as_ref())
+            .map(|presentation| presentation.result_mode),
+        Some(ToolResultMode::Output)
     );
 }
 

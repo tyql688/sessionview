@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use serde_json::{Map, Value};
 
 use crate::models::{Message, MessageRole, Provider, TokenUsage};
-use crate::provider_utils::ToolCallPairer;
+use crate::provider_utils::{RenderedToolOutput, ToolCallPairer};
 use crate::tool_metadata::{
     ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata,
 };
@@ -135,15 +135,15 @@ fn push_assistant_message(
     let mut text_parts: Vec<String> = Vec::new();
     for block in &assistant.content {
         match block {
-            PiContentBlock::Text { text } => {
+            PiContentBlock::Known(PiKnownContentBlock::Text { text }) => {
                 if !text.is_empty() {
                     text_parts.push(text.clone());
                 }
             }
-            PiContentBlock::Image { .. } => {
+            PiContentBlock::Known(PiKnownContentBlock::Image { .. }) => {
                 text_parts.push("[Image]".to_string());
             }
-            PiContentBlock::Thinking { thinking } => {
+            PiContentBlock::Known(PiKnownContentBlock::Thinking { thinking }) => {
                 flush_assistant_text(
                     &mut text_parts,
                     messages,
@@ -160,11 +160,11 @@ fn push_assistant_message(
                     );
                 }
             }
-            PiContentBlock::ToolCall {
+            PiContentBlock::Known(PiKnownContentBlock::ToolCall {
                 id,
                 name,
                 arguments,
-            } => {
+            }) => {
                 flush_assistant_text(
                     &mut text_parts,
                     messages,
@@ -184,6 +184,9 @@ fn push_assistant_message(
                 if usage_target_idx.is_none() {
                     usage_target_idx = Some(idx);
                 }
+            }
+            PiContentBlock::Unknown(value) => {
+                log::warn!("skipping unknown Pi assistant content block: {value}");
             }
         }
     }
@@ -264,12 +267,12 @@ fn merge_tool_result(
     messages: &mut Vec<Message>,
     pairer: &ToolCallPairer,
 ) {
-    let content = extract_content_blocks_text(&result.content);
-    let result_value = tool_result_value(result, &content);
+    let rendered = render_tool_result_content(&result.content);
+    let result_value = tool_result_value(result, &rendered.text);
     let artifact_path = tool_result_artifact_path(result);
 
     if let Some(message) = pairer.message_mut(Some(&result.tool_call_id), messages) {
-        message.content = content;
+        message.content = rendered.text;
         if let Some(metadata) = message.tool_metadata.as_mut() {
             enrich_tool_metadata(
                 metadata,
@@ -278,6 +281,7 @@ fn merge_tool_result(
                     is_error: Some(result.is_error),
                     status: None,
                     artifact_path,
+                    raw_output: Some(rendered.is_raw),
                 },
             );
         }
@@ -298,13 +302,14 @@ fn merge_tool_result(
             is_error: Some(result.is_error),
             status: None,
             artifact_path,
+            raw_output: Some(rendered.is_raw),
         },
     );
     messages.push(Message {
         timestamp: format_millis_timestamp(result.timestamp),
         tool_name: Some(metadata.canonical_name.clone()),
         tool_metadata: Some(metadata),
-        ..Message::new(MessageRole::Tool, content)
+        ..Message::new(MessageRole::Tool, rendered.text)
     });
 }
 
@@ -333,6 +338,7 @@ fn push_bash_execution(bash: &PiBashExecutionMessage, messages: &mut Vec<Message
             is_error: Some(is_error),
             status: None,
             artifact_path: bash.full_output_path.as_deref(),
+            raw_output: Some(false),
         },
     );
     messages.push(Message {
@@ -404,6 +410,27 @@ fn tool_result_artifact_path(result: &PiToolResultMessage) -> Option<&str> {
         })
 }
 
+fn render_tool_result_content(blocks: &[PiContentBlock]) -> RenderedToolOutput {
+    let mut parts = Vec::new();
+    for block in blocks {
+        match block {
+            PiContentBlock::Known(PiKnownContentBlock::Text { text }) => {
+                parts.push(text.clone());
+            }
+            PiContentBlock::Known(PiKnownContentBlock::Image { .. }) => {
+                parts.push("[Image]".to_string());
+            }
+            PiContentBlock::Known(
+                PiKnownContentBlock::Thinking { .. } | PiKnownContentBlock::ToolCall { .. },
+            )
+            | PiContentBlock::Unknown(_) => {
+                return RenderedToolOutput::raw(serde_json::to_string(blocks).unwrap_or_default());
+            }
+        }
+    }
+    RenderedToolOutput::rendered(parts.join("\n"))
+}
+
 /// Extract text from content
 pub(super) fn extract_content_text(content: &PiContent) -> String {
     match content {
@@ -417,11 +444,16 @@ fn extract_content_blocks_text(blocks: &[PiContentBlock]) -> String {
     let mut parts = Vec::new();
     for block in blocks {
         match block {
-            PiContentBlock::Text { text } => parts.push(text.clone()),
-            PiContentBlock::Image { .. } => {
+            PiContentBlock::Known(PiKnownContentBlock::Text { text }) => parts.push(text.clone()),
+            PiContentBlock::Known(PiKnownContentBlock::Image { .. }) => {
                 parts.push("[Image]".to_string());
             }
-            PiContentBlock::Thinking { .. } | PiContentBlock::ToolCall { .. } => {}
+            PiContentBlock::Known(
+                PiKnownContentBlock::Thinking { .. } | PiKnownContentBlock::ToolCall { .. },
+            ) => {}
+            PiContentBlock::Unknown(value) => {
+                log::warn!("skipping unknown Pi content block: {value}");
+            }
         }
     }
     parts.join("\n")

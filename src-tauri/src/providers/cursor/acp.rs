@@ -31,7 +31,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 
 use crate::models::{Message, MessageRole, Provider};
 use crate::provider_utils::ToolCallPairer;
-use crate::tool_metadata::{ToolCallFacts, build_tool_metadata};
+use crate::tool_metadata::{ToolCallFacts, build_tool_metadata, set_tool_result_raw};
 
 use super::store_db::{
     default_cursor_image_cache_dir, read_blob, read_meta_value, scan_pb_hash_refs,
@@ -433,24 +433,38 @@ fn merge_tool_result_acp(
     cache_dir: Option<&Path>,
 ) {
     let call_id = part.get("toolCallId").and_then(|v| v.as_str());
-    let mut body = part
-        .get("result")
-        .and_then(|v| v.as_str())
-        .or_else(|| {
-            part.get("experimental_content")
-                .and_then(|v| v.as_array())
-                .and_then(|arr| {
-                    arr.iter().find_map(|item| {
-                        if item.get("type").and_then(|v| v.as_str()) == Some("text") {
-                            item.get("text").and_then(|v| v.as_str())
-                        } else {
-                            None
-                        }
-                    })
-                })
-        })
-        .unwrap_or("")
-        .to_string();
+    let experimental_content = part.get("experimental_content").and_then(Value::as_array);
+    let (mut body, mut is_raw) = match part.get("result") {
+        Some(Value::String(result)) => (result.clone(), false),
+        Some(Value::Null) | None => (String::new(), false),
+        Some(result) => (result.to_string(), true),
+    };
+    if body.is_empty()
+        && !is_raw
+        && let Some(parts) = experimental_content
+    {
+        let mut texts = Vec::new();
+        let mut unsupported = false;
+        for item in parts {
+            match item.get("type").and_then(Value::as_str) {
+                Some("text") => match item.get("text").and_then(Value::as_str) {
+                    Some(text) if !text.is_empty() => texts.push(text.to_string()),
+                    Some(_) => {}
+                    None => unsupported = true,
+                },
+                Some("image")
+                    if item.get("data").and_then(Value::as_str).is_some()
+                        && item.get("mimeType").and_then(Value::as_str).is_some() => {}
+                _ => unsupported = true,
+            }
+        }
+        if unsupported {
+            body = Value::Array(parts.clone()).to_string();
+            is_raw = true;
+        } else {
+            body = texts.join("\n");
+        }
+    }
 
     // Cache any base64-encoded images in experimental_content and
     // append `[Image: source: <path>]` markers to the body so the
@@ -459,10 +473,7 @@ fn merge_tool_result_acp(
     // intentionally disabled it) we skip the write — the parent
     // function logged the warning once at startup, no need to repeat
     // it per image.
-    if let (Some(cache_dir), Some(arr)) = (
-        cache_dir,
-        part.get("experimental_content").and_then(|v| v.as_array()),
-    ) {
+    if !is_raw && let (Some(cache_dir), Some(arr)) = (cache_dir, experimental_content) {
         for item in arr {
             if item.get("type").and_then(|v| v.as_str()) != Some("image") {
                 continue;
@@ -491,6 +502,9 @@ fn merge_tool_result_acp(
 
     if let Some(msg) = pairer.message_mut(call_id, messages) {
         msg.content = body;
+        if let Some(metadata) = msg.tool_metadata.as_mut() {
+            set_tool_result_raw(metadata, is_raw);
+        }
         return;
     }
     messages.push(Message {
@@ -531,6 +545,7 @@ pub(crate) fn collect_acp_sessions(home_dir: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::ToolResultMode;
     use serde_json::json;
 
     struct TranslateContext {
@@ -635,6 +650,42 @@ mod tests {
             .find(|m| m.role == MessageRole::Tool)
             .expect("tool message");
         assert_eq!(tool.content, "file contents here");
+    }
+
+    #[test]
+    fn tool_result_preserves_unknown_experimental_content_as_raw() {
+        let mut ctx = TranslateContext::new();
+        ctx.push(assistant_envelope(vec![json!({
+            "type": "tool-call",
+            "toolCallId": "tool_future",
+            "toolName": "Read",
+            "args": {"path": "/tmp/future"}
+        })]));
+        ctx.push(json!({
+            "role": "tool",
+            "content": [{
+                "type": "tool-result",
+                "toolCallId": "tool_future",
+                "experimental_content": [
+                    {"type": "future_content", "payload": {"keep": true}}
+                ]
+            }]
+        }));
+        let tool = ctx
+            .messages
+            .iter()
+            .find(|message| message.role == MessageRole::Tool)
+            .expect("tool message");
+        assert_eq!(
+            tool.tool_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.presentation.as_ref())
+                .map(|presentation| presentation.result_mode),
+            Some(ToolResultMode::Raw)
+        );
+        let raw: Value = serde_json::from_str(&tool.content).expect("raw content array");
+        assert_eq!(raw[0]["type"], "future_content");
+        assert_eq!(raw[0]["payload"]["keep"], true);
     }
 
     #[test]

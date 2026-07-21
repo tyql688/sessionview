@@ -44,14 +44,22 @@ export interface ContentSegment {
 /** Split raw tool output into text / fenced-code / image segments. Tool
  * output is NOT markdown — only ``` fences and image placeholders get
  * structure; everything else stays verbatim text. */
-export function parseContent(raw: string): ContentSegment[] {
-  if (!raw.includes("```") && !raw.includes("[Image")) {
+export function parseContent(
+  raw: string,
+  structuredImageSources: readonly string[] = [],
+  options: { parseCodeFences?: boolean } = {},
+): ContentSegment[] {
+  const parseCodeFences = options.parseCodeFences !== false;
+  if ((!parseCodeFences || !raw.includes("```")) && !raw.includes("[Image") && structuredImageSources.length === 0) {
     return [{ type: "text", content: raw }];
   }
 
   const segments: ContentSegment[] = [];
-  const blockRegex = /```([\w+#.-]*)\n?([\s\S]*?)```|\[Image(?:\s*#\d+)?(?::\s*source:\s*([^\]]+))?\]/g;
+  const blockRegex = parseCodeFences
+    ? /```([\w+#.-]*)\n?([\s\S]*?)```|\[Image(?:\s*#\d+)?(?::\s*source:\s*([^\]]+))?\]/g
+    : /\[Image(?:\s*#\d+)?(?::\s*source:\s*([^\]]+))?\]/g;
   let lastIndex = 0;
+  let structuredImageIndex = 0;
   let match: RegExpExecArray | null;
 
   while ((match = blockRegex.exec(raw)) !== null) {
@@ -62,14 +70,16 @@ export function parseContent(raw: string): ContentSegment[] {
       });
     }
 
-    if (match[2] !== undefined) {
+    if (parseCodeFences && match[2] !== undefined) {
       segments.push({
         type: "code",
         content: match[2],
         language: match[1] || undefined,
       });
     } else {
-      const imagePath = match[3]?.trim();
+      const explicitImagePath = parseCodeFences ? match[3] : match[1];
+      const imagePath = explicitImagePath?.trim() || structuredImageSources[structuredImageIndex];
+      if (structuredImageIndex < structuredImageSources.length) structuredImageIndex += 1;
       if (imagePath) {
         segments.push({ type: "image", content: imagePath });
       } else {
@@ -82,6 +92,11 @@ export function parseContent(raw: string): ContentSegment[] {
 
   if (lastIndex < raw.length) {
     segments.push({ type: "text", content: raw.slice(lastIndex) });
+  }
+
+  for (; structuredImageIndex < structuredImageSources.length; structuredImageIndex += 1) {
+    const source = structuredImageSources[structuredImageIndex];
+    if (source) segments.push({ type: "image", content: source });
   }
 
   return segments;

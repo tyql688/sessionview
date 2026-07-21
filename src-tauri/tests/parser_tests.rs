@@ -2321,12 +2321,10 @@ fn grok_image_prompt_pairs_saved_asset_paths() {
 }
 
 #[test]
-fn grok_task_output_result_suppresses_duplicate_raw_output() {
+fn grok_task_output_result_uses_common_output() {
     let session = parse_grok_fixture_session(GROK_BASIC_ID);
-    // The spawn tool's Agent result keeps its kind; TaskOutput-style results
-    // (get_command_or_subagent_output) mark terminal_output so the UI hides
-    // the raw copy that the result detail already shows. Covered here via
-    // metadata on a synthetic enrich to avoid inflating the fixture.
+    // TaskOutput is not a terminal renderer. Its captured stream stays in the
+    // shared output area while task metadata remains structured.
     use sessionview_lib::tool_metadata::{
         ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata,
     };
@@ -2346,17 +2344,22 @@ fn grok_task_output_result_suppresses_duplicate_raw_output() {
             is_error: None,
             status: None,
             artifact_path: None,
+            raw_output: None,
         },
     );
-    assert_eq!(metadata.result_kind.as_deref(), Some("terminal_output"));
+    assert_eq!(metadata.result_kind, None);
+    let presentation = metadata.presentation.as_ref().unwrap();
+    assert_eq!(
+        presentation.result_mode,
+        sessionview_lib::models::ToolResultMode::Output
+    );
     let _ = session;
 }
 
 #[test]
 fn grok_non_terminal_results_stay_out_of_structured_output() {
     let session = parse_grok_fixture_session(GROK_BASIC_ID);
-    // Glob (list-like) results render as the raw output block only —
-    // structured.output would duplicate the same text in the detail lines.
+    // Glob (list-like) results render through the shared output body only.
     let read = session
         .messages
         .iter()
@@ -2368,10 +2371,9 @@ fn grok_non_terminal_results_stay_out_of_structured_output() {
         .and_then(|m| m.structured.as_ref());
     assert!(
         structured.and_then(|s| s.get("output")).is_none(),
-        "non-terminal tools must not mirror raw output into structured"
+        "non-terminal tools must not mirror output into structured"
     );
-    // Bash keeps output in structured: its terminal_output kind suppresses
-    // the raw copy, so the detail line is the only render.
+    // Bash keeps a structured fallback for the terminal renderer.
     let bash = session
         .messages
         .iter()

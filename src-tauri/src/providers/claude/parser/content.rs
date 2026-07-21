@@ -7,6 +7,7 @@ use std::hash::{Hash, Hasher};
 use serde_json::Value;
 
 use crate::models::TokenUsage;
+use crate::provider_utils::RenderedToolOutput;
 use crate::tool_metadata::ToolResultFacts;
 
 use super::super::images::{count_image_markers, normalize_image_source_segments};
@@ -14,6 +15,7 @@ use super::super::images::{count_image_markers, normalize_image_source_segments}
 pub(super) fn tool_result_facts<'a>(
     result_item: &'a Value,
     top_level_result: Option<&'a Value>,
+    raw_output: bool,
 ) -> ToolResultFacts<'a> {
     // Async-Agent results carry a lifecycle marker
     // (`"async_launched"` / `"completed"` / …). Surface it so the UI
@@ -29,6 +31,7 @@ pub(super) fn tool_result_facts<'a>(
         artifact_path: top_level_result
             .and_then(|v| v.get("persistedOutputPath"))
             .and_then(|v| v.as_str()),
+        raw_output: Some(raw_output),
     }
 }
 
@@ -280,17 +283,20 @@ pub fn resolve_persisted_outputs(content: &str) -> String {
 
 /// Extract text content from a single tool_result block.
 /// The `content` field can be a string, an array of text blocks, or absent.
-pub(super) fn extract_tool_result_content(result: &Value) -> String {
+pub(super) fn extract_tool_result_content(result: &Value) -> RenderedToolOutput {
     match result.get("content") {
-        Some(Value::String(s)) => s.clone(),
+        Some(Value::String(s)) => RenderedToolOutput::rendered(s.clone()),
         Some(Value::Array(arr)) => {
             let mut parts = Vec::new();
+            let mut unsupported = false;
             for item in arr {
                 match item.get("type").and_then(|t| t.as_str()) {
                     Some("text") => {
-                        if let Some(t) = item.get("text").and_then(|t| t.as_str()) {
-                            parts.push(t.to_string());
-                        }
+                        let Some(t) = item.get("text").and_then(Value::as_str) else {
+                            unsupported = true;
+                            continue;
+                        };
+                        parts.push(t.to_string());
                     }
                     Some("image") => {
                         let source = item.get("source");
@@ -312,7 +318,7 @@ pub(super) fn extract_tool_result_content(result: &Value) -> String {
                                         media, b64
                                     ));
                                 } else {
-                                    parts.push("[Image]".to_string());
+                                    unsupported = true;
                                 }
                             }
                             "url" => {
@@ -321,34 +327,40 @@ pub(super) fn extract_tool_result_content(result: &Value) -> String {
                                 {
                                     parts.push(format!("[Image: source: {url}]"));
                                 } else {
-                                    parts.push("[Image]".to_string());
+                                    unsupported = true;
                                 }
                             }
                             other => {
                                 log::debug!(
                                     "unknown Claude tool_result image source.type '{other}'"
                                 );
-                                parts.push("[Image]".to_string());
+                                unsupported = true;
                             }
                         }
                     }
                     Some("tool_reference") => {
-                        let name = item
-                            .get("tool_name")
-                            .and_then(|n| n.as_str())
-                            .unwrap_or("?");
-                        parts.push(format!("[Tool: {name}]"));
+                        if let Some(name) = item.get("tool_name").and_then(Value::as_str) {
+                            parts.push(format!("[Tool: {name}]"));
+                        } else {
+                            unsupported = true;
+                        }
                     }
                     Some(other) => {
                         log::debug!(
-                            "unknown Claude tool_result content block type '{other}' — skipped"
+                            "preserving Claude tool_result with unknown content block type '{other}' as raw"
                         );
+                        unsupported = true;
                     }
-                    None => {}
+                    None => unsupported = true,
                 }
             }
-            parts.join("\n")
+            if unsupported {
+                RenderedToolOutput::raw(serde_json::to_string(arr).unwrap_or_default())
+            } else {
+                RenderedToolOutput::rendered(parts.join("\n"))
+            }
         }
-        _ => String::new(),
+        Some(value) => RenderedToolOutput::raw(serde_json::to_string(value).unwrap_or_default()),
+        None => RenderedToolOutput::rendered(String::new()),
     }
 }

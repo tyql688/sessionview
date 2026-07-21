@@ -115,6 +115,10 @@ describe("i18n dictionaries", () => {
     for (const dict of [en, zh]) {
       expect(dict.system.awaySummary).toBeTruthy();
       expect(dict.system.scheduledTask).toBeTruthy();
+      expect(dict.system.taskStatus).toBeTruthy();
+      expect(dict.system.subagentTask).toBeTruthy();
+      expect(dict.system.skillActivation).toBeTruthy();
+      expect(dict.system.kimiContext).toBeTruthy();
       expect(dict.system.prLink).toBeTruthy();
       expect(dict.system.error).toBeTruthy();
       expect(dict.system.turnAborted).toBeTruthy();

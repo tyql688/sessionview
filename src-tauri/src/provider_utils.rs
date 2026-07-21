@@ -8,7 +8,9 @@ use serde_json::Value;
 
 use crate::models::TokenUsage;
 
+mod content_parts;
 mod tool_pairing;
+pub(crate) use content_parts::{ContentPartsRender, RenderedToolOutput, render_content_parts};
 pub(crate) use tool_pairing::ToolCallPairer;
 
 pub const NO_PROJECT: &str = "(No Project)";

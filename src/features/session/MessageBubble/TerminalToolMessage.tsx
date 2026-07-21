@@ -5,8 +5,10 @@ import { useI18n } from "@/i18n/index";
 import type { Message } from "@/lib/types";
 import { readToolResultText } from "@/lib/tauri";
 import { formatToolInput, formatToolResultMetadata, toolSummary } from "@/lib/tools";
+import { parseContent } from "@/lib/message-content";
 import { toastError } from "@/stores/toast";
 import { COPY_FEEDBACK_MS } from "@/features/session/MessageBubble/TokenUsage";
+import { ImagePreview, LocalImage, RemoteImage, isLocalPath } from "@/features/session/MessageBubble/ImagePreview";
 
 type ToolDetail = NonNullable<ReturnType<typeof formatToolResultMetadata>>;
 
@@ -112,20 +114,21 @@ function buildTerminalData(message: Message): TerminalData {
   const structured = isRecord(message.tool_metadata?.structured) ? message.tool_metadata.structured : null;
   const inputDetail = formatToolInput(message);
   const resultDetail = formatToolResultMetadata(message.tool_metadata);
-  const rawOutputPolicy = message.tool_metadata?.presentation?.rawOutputPolicy;
-  const rawContentAllowed = rawOutputPolicy !== "suppress_terminal";
+  const providerOutput = message.content.trim().length > 0 ? message.content : "";
 
   const command = firstText(
-    detailLineValue(inputDetail, ["command"]),
+    detailLineValue(inputDetail, ["command", "raw"]),
     fieldValue(inputRecord, ["command", "cmd", "CommandLine"]),
     fieldValue(structured, ["command", "cmd", "CommandLine"]),
+    message.tool_input ?? "",
   );
-  const stdout = firstText(
-    fieldValue(structured, ["stdout", "output", "aggregated_output", "formatted_output"]),
-    fieldValue(contentRecord, ["stdout", "output", "aggregated_output", "formatted_output"]),
-    detailLineValue(resultDetail, ["stdout", "output"]),
-    rawContentAllowed ? message.content : "",
-  );
+  const stdout = providerOutput
+    ? providerOutput
+    : firstText(
+        fieldValue(structured, ["stdout", "output", "aggregated_output", "formatted_output"]),
+        fieldValue(contentRecord, ["stdout", "output", "aggregated_output", "formatted_output"]),
+        detailLineValue(resultDetail, ["stdout", "output"]),
+      );
 
   return {
     command,
@@ -140,11 +143,13 @@ function buildTerminalData(message: Message): TerminalData {
     ),
     status: firstText(message.tool_metadata?.status ?? "", detailLineValue(resultDetail, ["status"])),
     stdout,
-    stderr: firstText(
-      fieldValue(structured, ["stderr"]),
-      fieldValue(contentRecord, ["stderr"]),
-      detailLineValue(resultDetail, ["stderr"]),
-    ),
+    stderr: providerOutput
+      ? ""
+      : firstText(
+          fieldValue(structured, ["stderr"]),
+          fieldValue(contentRecord, ["stderr"]),
+          detailLineValue(resultDetail, ["stderr"]),
+        ),
     persistedOutputPath: resultDetail?.persistedOutputPath ?? "",
   };
 }
@@ -157,13 +162,24 @@ export function TerminalToolMessage(props: { message: Message }) {
   const [fullResult, setFullResult] = useState<string | null>(null);
   const [fullResultError, setFullResultError] = useState<string | null>(null);
   const [loadingFullResult, setLoadingFullResult] = useState(false);
+  const [previewImage, setPreviewImage] = useState<{ src: string; source?: string } | null>(null);
   const data = useMemo(() => buildTerminalData(props.message), [props.message]);
   const summary = useMemo(() => collapsedSummary(props.message, t), [props.message, t]);
   const stdout = fullResult ?? data.stdout;
+  const structuredImageSources = useMemo(
+    () => formatToolResultMetadata(props.message.tool_metadata)?.media ?? [],
+    [props.message.tool_metadata],
+  );
+  const outputSegments = useMemo(
+    () => parseContent(stdout, structuredImageSources, { parseCodeFences: false }),
+    [stdout, structuredImageSources],
+  );
+  const outputLabel = props.message.content.trim().length > 0 ? t("tool.output") : t("tool.stdout");
   const kind = statusKind(data.status, data.exitCode);
   const status = displayStatus(data.status, data.exitCode, t);
   const toolLabel = props.message.tool_metadata?.display_name || props.message.tool_name || t("tool.terminal");
-  const hasOutput = stdout.trim().length > 0 || data.stderr.trim().length > 0;
+  const hasPrimaryOutput = stdout.trim().length > 0 || structuredImageSources.length > 0;
+  const hasOutput = hasPrimaryOutput || data.stderr.trim().length > 0;
   const canExpand =
     data.command.length > 0 || hasOutput || data.cwd.length > 0 || data.source.length > 0 || !!data.persistedOutputPath;
   const meta = [
@@ -257,37 +273,64 @@ export function TerminalToolMessage(props: { message: Message }) {
 
           {hasOutput ? (
             <>
-              {stdout.trim().length > 0 && (
+              {hasPrimaryOutput && (
                 <section className="terminal-tool-stream">
                   <div className="terminal-tool-stream-header">
-                    <span>{t("tool.stdout")}</span>
-                    <div className="terminal-tool-stream-actions">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        className="terminal-tool-action"
-                        onClick={() => setWrapOutput((value) => !value)}
-                        title={t("tool.wrapOutput")}
-                        aria-label={t("tool.wrapOutput")}
-                      >
-                        <WrapText className="size-3" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        className="terminal-tool-action"
-                        onClick={() => void copyText(stdout, "output")}
-                        title={t("tool.copyOutput")}
-                        aria-label={t("tool.copyOutput")}
-                      >
-                        {copiedTarget === "output" ? <Check className="size-3" /> : <Copy className="size-3" />}
-                      </Button>
-                    </div>
+                    <span>{outputLabel}</span>
+                    {stdout.trim().length > 0 && (
+                      <div className="terminal-tool-stream-actions">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          className="terminal-tool-action"
+                          onClick={() => setWrapOutput((value) => !value)}
+                          title={t("tool.wrapOutput")}
+                          aria-label={t("tool.wrapOutput")}
+                        >
+                          <WrapText className="size-3" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          className="terminal-tool-action"
+                          onClick={() => void copyText(stdout, "output")}
+                          title={t("tool.copyOutput")}
+                          aria-label={t("tool.copyOutput")}
+                        >
+                          {copiedTarget === "output" ? <Check className="size-3" /> : <Copy className="size-3" />}
+                        </Button>
+                      </div>
+                    )}
                   </div>
                   <div className="terminal-tool-output msg-tool-output">
-                    <pre className={`terminal-tool-code${wrapOutput ? " wrap" : ""}`}>{stdout}</pre>
+                    {outputSegments.map((segment, index) => {
+                      if (segment.type === "image") {
+                        if (isLocalPath(segment.content)) {
+                          return (
+                            <LocalImage
+                              key={index}
+                              path={segment.content}
+                              onPreview={(src, source) => setPreviewImage({ src, source })}
+                            />
+                          );
+                        }
+                        return (
+                          <RemoteImage
+                            key={index}
+                            src={segment.content}
+                            onPreview={(src, source) => setPreviewImage({ src, source })}
+                          />
+                        );
+                      }
+                      if (!segment.content) return null;
+                      return (
+                        <pre key={index} className={`terminal-tool-code${wrapOutput ? " wrap" : ""}`}>
+                          {segment.content}
+                        </pre>
+                      );
+                    })}
                   </div>
                 </section>
               )}
@@ -334,6 +377,9 @@ export function TerminalToolMessage(props: { message: Message }) {
           )}
           {fullResultError && <pre className="terminal-tool-load-error">{fullResultError}</pre>}
         </div>
+      )}
+      {previewImage && (
+        <ImagePreview src={previewImage.src} source={previewImage.source} onClose={() => setPreviewImage(null)} />
       )}
     </div>
   );

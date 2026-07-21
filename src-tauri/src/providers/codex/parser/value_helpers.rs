@@ -23,7 +23,13 @@ pub(super) fn codex_tool_input_value(
         return tool_input.map(|patch| json!({ "patch": patch }));
     }
 
-    parse_json_str(tool_input).or_else(|| parse_json_str(raw_input))
+    parse_json_str(tool_input)
+        .or_else(|| parse_json_str(raw_input))
+        .or_else(|| {
+            tool_input
+                .or(raw_input)
+                .map(|input| Value::String(input.to_string()))
+        })
 }
 
 pub(super) fn codex_tool_result_value(raw_output: &str, output: &str) -> Option<Value> {
@@ -232,6 +238,7 @@ pub(super) fn enrich_existing_tool_message(
             is_error,
             status,
             artifact_path: None,
+            raw_output: None,
         },
     );
 }

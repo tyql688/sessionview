@@ -129,32 +129,46 @@ impl ScanAccum {
         Some(rfc)
     }
 
-    fn push_user_text(&mut self, text: &str, ts: Option<String>, is_real_user: bool) {
+    fn begin_visible_turn(&mut self) {
+        self.current_turn_usage_idx = None;
+        self.current_turn_usage_event_idx = None;
+    }
+
+    fn note_title_candidate(&mut self, text: &str) {
+        if self.first_user_message.is_some() {
+            return;
+        }
+        // Match the title heuristic used elsewhere: pick the first
+        // non-image line as the title.
+        let title = text
+            .lines()
+            .find(|line| !line.starts_with("[Image:"))
+            .unwrap_or(text)
+            .to_string();
+        self.first_user_message = Some(title);
+    }
+
+    fn push_user_text(&mut self, text: &str, ts: Option<String>) {
         if text.is_empty() {
             return;
         }
-        // Only a REAL user prompt (origin.kind == "user") marks a turn
-        // boundary. `system_trigger` injections (subagent spawn, etc.)
-        // can fire mid-turn and clearing the index would let the next
-        // usage.record land on the wrong message.
-        if is_real_user {
-            self.current_turn_usage_idx = None;
-            self.current_turn_usage_event_idx = None;
-        }
-        if self.first_user_message.is_none() {
-            // Match the title heuristic used elsewhere: pick the first
-            // non-image line as the title.
-            let title = text
-                .lines()
-                .find(|l| !l.starts_with("[Image:"))
-                .unwrap_or(text)
-                .to_string();
-            self.first_user_message = Some(title);
-        }
+        self.begin_visible_turn();
+        self.note_title_candidate(text);
         self.content_parts.push(text.to_string());
         self.messages.push(Message {
             timestamp: ts,
             ..Message::user(text.to_string())
+        });
+    }
+
+    fn push_system_context(&mut self, content: String, indexed_text: &str, ts: Option<String>) {
+        if indexed_text.is_empty() {
+            return;
+        }
+        self.content_parts.push(indexed_text.to_string());
+        self.messages.push(Message {
+            timestamp: ts,
+            ..Message::system(content)
         });
     }
 
@@ -241,6 +255,7 @@ impl ScanAccum {
         call_id: Option<&str>,
         rendered_output: String,
         is_error: Option<bool>,
+        is_raw: bool,
         raw_result: Option<&Value>,
         ts: Option<String>,
     ) {
@@ -256,6 +271,7 @@ impl ScanAccum {
                         is_error,
                         status: None,
                         artifact_path: None,
+                        raw_output: Some(is_raw),
                     },
                 );
                 attach_agent_swarm_children(meta, &rendered_output);
@@ -424,6 +440,7 @@ fn attach_agent_swarm_children(metadata: &mut ToolMetadata, rendered_output: &st
 #[allow(clippy::items_after_test_module)]
 mod turn_cancel_tests {
     use super::*;
+    use crate::models::ToolResultMode;
     use serde_json::json;
 
     #[test]
@@ -755,7 +772,7 @@ mod turn_cancel_tests {
             &mut accum,
             &json!({"type":"usage.record","usageScope":"turn","model":"kimi-test","usage":{"output":1},"time":1000}),
         );
-        accum.push_user_text("next", Some("2026-07-19T00:00:01Z".into()), true);
+        accum.push_user_text("next", Some("2026-07-19T00:00:01Z".into()));
         dispatch_line(
             &mut accum,
             &json!({"type":"usage.record","usageScope":"turn","model":"kimi-test","usage":{"output":2},"time":2000}),
@@ -772,6 +789,191 @@ mod turn_cancel_tests {
         assert!(accum.messages[1].token_usage.is_none());
         assert_eq!(accum.usage_events.len(), 2);
         assert_eq!(accum.parse_warning_count, 1);
+    }
+
+    #[test]
+    fn background_task_origin_renders_status_instead_of_user() {
+        let mut accum = ScanAccum::new();
+        let notification = r#"<notification id="task:bash-demo1234:failed" category="task" type="task.failed" source_kind="background_task" source_id="bash-demo1234">
+Title: Background process failed
+Severity: warning
+Synthetic test task failed.
+</notification>"#;
+
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_message",
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "text", "text": notification}],
+                    "toolCalls": [],
+                    "origin": {
+                        "kind": "background_task",
+                        "taskId": "bash-demo1234",
+                        "status": "failed",
+                        "notificationId": "task:bash-demo1234:failed"
+                    }
+                },
+                "time": 1779701196500i64
+            }),
+        );
+
+        assert_eq!(accum.messages.len(), 1);
+        assert_eq!(accum.messages[0].role, MessageRole::System);
+        assert!(
+            accum.messages[0]
+                .content
+                .starts_with("[task_status_error] failed · bash-demo1234\n")
+        );
+        assert!(accum.messages[0].content.contains(notification));
+        assert_eq!(accum.first_user_message, None);
+        assert_eq!(accum.content_parts, vec![notification]);
+
+        // A real TaskOutput call remains a tool bubble. Runtime task status
+        // normalization must not blur the tool/event boundary.
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_loop_event",
+                "event": {
+                    "type": "tool.call",
+                    "toolCallId": "tool-task-output",
+                    "name": "TaskOutput",
+                    "args": {"task_id": "bash-demo1234", "block": true}
+                },
+                "time": 1779701196600i64
+            }),
+        );
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_loop_event",
+                "event": {
+                    "type": "tool.result",
+                    "toolCallId": "tool-task-output",
+                    "result": {"output": "status: failed"}
+                },
+                "time": 1779701196700i64
+            }),
+        );
+
+        assert_eq!(accum.messages.len(), 2);
+        assert_eq!(accum.messages[1].role, MessageRole::Tool);
+        assert_eq!(accum.messages[1].tool_name.as_deref(), Some("TaskOutput"));
+        assert_eq!(
+            accum.messages[1]
+                .tool_metadata
+                .as_ref()
+                .map(|metadata| metadata.canonical_name.as_str()),
+            Some("TaskOutput")
+        );
+    }
+
+    #[test]
+    fn subagent_system_trigger_renders_task_context_instead_of_user() {
+        let mut accum = ScanAccum::new();
+
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_message",
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "Inspect parser behavior"}],
+                    "toolCalls": [],
+                    "origin": {"kind": "system_trigger", "name": "subagent"}
+                },
+                "time": 1779701196500i64
+            }),
+        );
+
+        assert_eq!(accum.messages.len(), 1);
+        assert_eq!(accum.messages[0].role, MessageRole::System);
+        assert_eq!(
+            accum.messages[0].content,
+            "[subagent_task] Inspect parser behavior"
+        );
+        assert_eq!(
+            accum.first_user_message.as_deref(),
+            Some("Inspect parser behavior")
+        );
+    }
+
+    #[test]
+    fn unknown_prompt_origin_renders_as_generic_context() {
+        let mut accum = ScanAccum::new();
+
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_message",
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "runtime payload"}],
+                    "origin": {"kind": "future_runtime_event"}
+                },
+                "time": 1779701196500i64
+            }),
+        );
+
+        assert_eq!(accum.messages.len(), 1);
+        assert_eq!(accum.messages[0].role, MessageRole::System);
+        assert_eq!(
+            accum.messages[0].content,
+            "[kimi_context] future_runtime_event\nruntime payload"
+        );
+        // Unknown kinds are future protocol, fully rendered — not a parse
+        // warning; the text is still indexed for search.
+        assert_eq!(accum.parse_warning_count, 0);
+        assert_eq!(accum.content_parts, vec!["runtime payload"]);
+        assert_eq!(accum.first_user_message, None);
+    }
+
+    #[test]
+    fn unsupported_native_tool_result_uses_the_exclusive_raw_mode() {
+        let mut accum = ScanAccum::new();
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_loop_event",
+                "event": {
+                    "type": "tool.call",
+                    "toolCallId": "future-call",
+                    "name": "FutureTool",
+                    "args": {}
+                },
+                "time": 1779701196500i64
+            }),
+        );
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_loop_event",
+                "event": {
+                    "type": "tool.result",
+                    "toolCallId": "future-call",
+                    "result": {
+                        "output": [{"type": "future_media", "payload": "keep"}]
+                    }
+                },
+                "time": 1779701196600i64
+            }),
+        );
+
+        let message = accum.messages.first().unwrap();
+        assert_eq!(
+            message.content,
+            r#"[{"payload":"keep","type":"future_media"}]"#
+        );
+        assert_eq!(
+            message
+                .tool_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.presentation.as_ref())
+                .map(|presentation| presentation.result_mode),
+            Some(ToolResultMode::Raw)
+        );
     }
 
     #[test]
@@ -936,8 +1138,9 @@ pub(super) fn dispatch_line(accum: &mut ScanAccum, entry: &Value) {
     }
 }
 
-/// Handle a migrated (Format A) `context.append_message` line: user
-/// prompts, assistant think/text + toolCalls, and tool results.
+/// Handle a `context.append_message` line shared by both wire formats:
+/// human prompts and runtime-origin context, plus migrated assistant/tool
+/// messages.
 fn handle_migrated_line(accum: &mut ScanAccum, entry: &Value, line_time_ms: Option<i64>) {
     let ts = accum.note_time(line_time_ms);
     let Some(message) = entry.get("message") else {
@@ -950,32 +1153,184 @@ fn handle_migrated_line(accum: &mut ScanAccum, entry: &Value, line_time_ms: Opti
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
-
-    // kimi-code auto-injects user-role messages for permission
-    // mode banners and similar system reminders. They carry
-    // `origin.kind = "injection"` and the content is pure
-    // `<system-reminder>` noise — drop them so the transcript
-    // (and title heuristic) doesn't surface them as real user
-    // input. `system_trigger` (subagent spawn etc.) is kept,
-    // since that text drives the conversation.
-    let origin_kind = message
-        .get("origin")
-        .and_then(|o| o.get("kind"))
-        .and_then(|v| v.as_str())
+    let origin = message.get("origin");
+    let origin_kind = origin
+        .and_then(|value| value.get("kind"))
+        .and_then(Value::as_str)
         .unwrap_or("");
-    if origin_kind == "injection" {
-        return;
-    }
 
     match role {
         "user" => {
             let text = text_from_parts(&content_array);
-            // Only origin.kind == "user" (or missing, for the
-            // migrated format) is a turn boundary. Treat
-            // `system_trigger` (subagent spawn etc.) as mid-
-            // turn content that must not reset usage tracking.
-            let is_real_user = matches!(origin_kind, "user" | "");
-            accum.push_user_text(&text, ts, is_real_user);
+            match origin_kind {
+                // Migrated transcripts predate PromptOrigin. A missing origin
+                // there still represents a genuine user prompt.
+                "" | "user" => accum.push_user_text(&text, ts),
+                // Permission banners and tool reminders are intentionally not
+                // transcript content.
+                "injection" => {}
+                // Kimi serializes asynchronous task lifecycle notifications as
+                // role=user because they are fed back into the model context.
+                // In the transcript they are status events, never human text.
+                "task" | "background_task" => {
+                    let task_id = origin
+                        .and_then(|value| value.get("taskId"))
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.is_empty());
+                    let status = origin
+                        .and_then(|value| value.get("status"))
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.is_empty());
+                    let (Some(task_id), Some(status)) = (task_id, status) else {
+                        log::warn!(
+                            "Kimi {origin_kind} context missing taskId or status; rendering as generic context"
+                        );
+                        accum.note_warning();
+                        accum.push_system_context(
+                            format!("[kimi_context] {origin_kind}\n{text}"),
+                            &text,
+                            ts,
+                        );
+                        return;
+                    };
+                    let subtype = if matches!(status, "completed" | "running") {
+                        "task_status"
+                    } else {
+                        "task_status_error"
+                    };
+                    accum.push_system_context(
+                        format!("[{subtype}] {status} · {task_id}\n{text}"),
+                        &text,
+                        ts,
+                    );
+                }
+                "system_trigger" => {
+                    let Some(name) = origin
+                        .and_then(|value| value.get("name"))
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.is_empty())
+                    else {
+                        log::warn!(
+                            "Kimi system_trigger context missing name; rendering as generic context"
+                        );
+                        accum.note_warning();
+                        accum.push_system_context(
+                            format!("[kimi_context] system_trigger\n{text}"),
+                            &text,
+                            ts,
+                        );
+                        return;
+                    };
+                    if name == "subagent" {
+                        // Keep this as a title fallback when the parent Agent
+                        // call is unavailable, but don't attribute it to the
+                        // human user in the child transcript.
+                        accum.note_title_candidate(&text);
+                        accum.push_system_context(format!("[subagent_task] {text}"), &text, ts);
+                    } else {
+                        accum.push_system_context(
+                            format!("[kimi_context] {name}\n{text}"),
+                            &text,
+                            ts,
+                        );
+                    }
+                }
+                "skill_activation" => {
+                    let Some(skill_name) = origin
+                        .and_then(|value| value.get("skillName"))
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.is_empty())
+                    else {
+                        log::warn!(
+                            "Kimi skill_activation context missing skillName; rendering as generic context"
+                        );
+                        accum.note_warning();
+                        accum.push_system_context(
+                            format!("[kimi_context] skill_activation\n{text}"),
+                            &text,
+                            ts,
+                        );
+                        return;
+                    };
+                    if origin
+                        .and_then(|value| value.get("trigger"))
+                        .and_then(Value::as_str)
+                        == Some("user-slash")
+                    {
+                        accum.begin_visible_turn();
+                    }
+                    accum.push_system_context(
+                        format!("[skill_activation] {skill_name}\n{text}"),
+                        &text,
+                        ts,
+                    );
+                }
+                "plugin_command" => {
+                    if origin
+                        .and_then(|value| value.get("trigger"))
+                        .and_then(Value::as_str)
+                        == Some("user-slash")
+                    {
+                        accum.begin_visible_turn();
+                    }
+                    accum.push_system_context(
+                        format!("[kimi_context] plugin command\n{text}"),
+                        &text,
+                        ts,
+                    );
+                }
+                "shell_command" => {
+                    let phase = origin
+                        .and_then(|value| value.get("phase"))
+                        .and_then(Value::as_str);
+                    let message = match phase {
+                        Some("input") => {
+                            accum.begin_visible_turn();
+                            accum.note_title_candidate(&text);
+                            Message::command_input(text.clone())
+                        }
+                        Some("output") => Message::command_output(text.clone()),
+                        _ => {
+                            log::warn!(
+                                "Kimi shell_command context missing phase; rendering as generic context"
+                            );
+                            accum.note_warning();
+                            accum.push_system_context(
+                                format!("[kimi_context] shell_command\n{text}"),
+                                &text,
+                                ts,
+                            );
+                            return;
+                        }
+                    };
+                    if !text.is_empty() {
+                        accum.content_parts.push(text);
+                        accum.messages.push(Message {
+                            timestamp: ts,
+                            ..message
+                        });
+                    }
+                }
+                "compaction_summary" => {
+                    accum.push_system_context(format!("[context_compacted]\n{text}"), &text, ts)
+                }
+                "cron_job" | "cron_missed" | "hook_result" | "retry" => accum.push_system_context(
+                    format!("[kimi_context] {origin_kind}\n{text}"),
+                    &text,
+                    ts,
+                ),
+                // Unknown kinds are future protocol, not malformed data:
+                // render the text under a generic label so nothing the model
+                // saw is missing from the transcript.
+                unknown => {
+                    log::warn!("rendering Kimi context with unknown origin.kind '{unknown}'");
+                    accum.push_system_context(
+                        format!("[kimi_context] {unknown}\n{text}"),
+                        &text,
+                        ts,
+                    );
+                }
+            }
         }
         "assistant" => {
             // Format A puts assistant think/text under content[],
@@ -1018,8 +1373,15 @@ fn handle_migrated_line(accum: &mut ScanAccum, entry: &Value, line_time_ms: Opti
         }
         "tool" => {
             let call_id = message.get("toolCallId").and_then(|v| v.as_str());
-            let (rendered, is_error) = render_format_a_tool_output(&content_array);
-            accum.merge_tool_result(call_id, rendered, is_error, None, ts);
+            let rendered = render_format_a_tool_output(&content_array);
+            accum.merge_tool_result(
+                call_id,
+                rendered.text,
+                rendered.is_error,
+                rendered.is_raw,
+                None,
+                ts,
+            );
         }
         _ => {}
     }
@@ -1068,8 +1430,15 @@ fn handle_native_event(accum: &mut ScanAccum, entry: &Value, line_time_ms: Optio
                 .or_else(|| event.get("parentUuid"))
                 .and_then(|v| v.as_str());
             let result = event.get("result");
-            let (rendered, is_error) = render_format_b_tool_output(result);
-            accum.merge_tool_result(id, rendered, is_error, result, ts);
+            let rendered = render_format_b_tool_output(result);
+            accum.merge_tool_result(
+                id,
+                rendered.text,
+                rendered.is_error,
+                rendered.is_raw,
+                result,
+                ts,
+            );
         }
         "step.end" => {
             // `usage.record` carries the same totals plus the

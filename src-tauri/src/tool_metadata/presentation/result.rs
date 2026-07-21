@@ -11,13 +11,7 @@ pub(super) fn result_detail_for(metadata: &ToolMetadata) -> Option<ToolDetail> {
         .structured
         .as_ref()
         .and_then(|value| value.as_object());
-    let mut lines = Vec::new();
-    if let Some(status) = metadata.status.as_deref() {
-        lines.push(line("status", status));
-    }
-    if let Some(structured) = structured {
-        append_call_metadata_lines(&mut lines, structured);
-    }
+    let lines = Vec::new();
     let persisted_output_path = structured.and_then(persisted_output_path);
 
     let mut detail = match (metadata.canonical_name.as_str(), structured) {
@@ -48,16 +42,23 @@ pub(super) fn result_detail_for(metadata: &ToolMetadata) -> Option<ToolDetail> {
         ("CreateGoal" | "GetGoal" | "SetGoalBudget" | "UpdateGoal", Some(structured)) => {
             goal_result_detail(lines, structured)
         }
-        (_, Some(structured)) if metadata.category == "mcp" => {
-            mcp_result_detail(lines, metadata, structured)
-        }
+        (_, Some(_)) if metadata.category == "mcp" => detail(lines),
         (_, Some(structured)) => default_result_detail(lines, metadata, structured),
-        (_, None) if !lines.is_empty() => detail(lines),
-        (_, None) => return None,
+        (_, None) => detail(lines),
     };
 
     detail.persisted_output_path = persisted_output_path.map(str::to_string);
-    Some(detail)
+    detail.media = structured.map(structured_media).unwrap_or_default();
+    if detail.lines.is_empty()
+        && detail.diff.is_none()
+        && detail.patch_diff.is_none()
+        && detail.persisted_output_path.is_none()
+        && detail.media.is_empty()
+    {
+        None
+    } else {
+        Some(detail)
+    }
 }
 
 pub(super) fn bash_result_detail(
@@ -72,8 +73,6 @@ pub(super) fn bash_result_detail(
             ("source", &["source"][..]),
             ("exit", &["exitCode", "exit_code"][..]),
             ("duration", &["durationSeconds", "duration_seconds"][..]),
-            ("stdout", &["stdout", "output"][..]),
-            ("stderr", &["stderr"][..]),
         ],
     );
     detail(lines)
@@ -191,17 +190,6 @@ pub(super) fn task_result_detail(
     if metadata.canonical_name == "TaskList" {
         if let Some(tasks) = structured.get("tasks").and_then(Value::as_array) {
             lines.push(line("tasks", tasks.len().to_string()));
-            let preview = tasks
-                .iter()
-                .filter_map(Value::as_object)
-                .filter_map(|record| {
-                    first_string(record, &["subject", "description", "task_id", "id"])
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            if !preview.is_empty() {
-                lines.push(line("preview", preview));
-            }
         }
         return detail(lines);
     }
@@ -213,7 +201,6 @@ pub(super) fn task_result_detail(
             ("status", &["status"][..]),
             ("type", &["task_type"][..]),
             ("description", &["description"][..]),
-            ("output", &["output"][..]),
         ] {
             let value = task
                 .and_then(|record| first_string(record, keys))
@@ -229,14 +216,12 @@ pub(super) fn task_result_detail(
         &mut lines,
         structured,
         &[
-            ("taskId", &["taskId"][..]),
-            ("task_id", &["task_id"][..]),
-            ("task_type", &["task_type"][..]),
+            ("task", &["taskId", "task_id"][..]),
+            ("type", &["task_type"][..]),
             ("status", &["status"][..]),
             ("statusChange", &["statusChange"][..]),
             ("updatedFields", &["updatedFields"][..]),
             ("command", &["command"][..]),
-            ("message", &["message"][..]),
             ("success", &["success"][..]),
         ],
     );
@@ -293,7 +278,6 @@ pub(super) fn web_fetch_result_detail(
             ("codeText", &["codeText"][..]),
             ("bytes", &["bytes"][..]),
             ("durationMs", &["durationMs"][..]),
-            ("result", &["result"][..]),
         ],
     );
     detail(lines)
@@ -325,8 +309,6 @@ pub(super) fn dynamic_result_detail(
             ("tool", &["tool", "name"][..]),
             ("success", &["success"][..]),
             ("duration", &["duration"][..]),
-            ("result", &["content"][..]),
-            ("error", &["error"][..]),
         ],
     );
     detail(lines)
@@ -340,12 +322,6 @@ pub(super) fn output_result_detail(
         &mut lines,
         structured,
         &[
-            ("output", &["output"][..]),
-            ("content", &["content"][..]),
-            ("result", &["result"][..]),
-            ("stdout", &["stdout"][..]),
-            ("stderr", &["stderr"][..]),
-            ("error", &["error"][..]),
             ("success", &["success"][..]),
             ("duration", &["durationSeconds", "duration_seconds"][..]),
         ],
@@ -405,7 +381,6 @@ pub(super) fn workflow_result_detail(
         &[
             ("workflowName", &["workflowName"][..]),
             ("status", &["status"][..]),
-            ("summary", &["summary"][..]),
             ("runId", &["runId"][..]),
             ("taskId", &["taskId"][..]),
             ("taskType", &["taskType"][..]),
@@ -434,22 +409,6 @@ pub(super) fn goal_result_detail(
     detail(lines)
 }
 
-pub(super) fn mcp_result_detail(
-    mut lines: Vec<ToolLine>,
-    metadata: &ToolMetadata,
-    structured: &serde_json::Map<String, Value>,
-) -> ToolDetail {
-    if let Some(mcp) = &metadata.mcp {
-        lines.push(line("server", &mcp.server));
-        lines.push(line("tool", &mcp.tool));
-    }
-    if let Some(output) = mcp_result_summary(structured) {
-        lines.push(line("output", output));
-    }
-    append_generic_lines(&mut lines, structured);
-    detail(lines)
-}
-
 pub(super) fn default_result_detail(
     mut lines: Vec<ToolLine>,
     metadata: &ToolMetadata,
@@ -466,7 +425,6 @@ pub(super) fn default_result_detail(
                     ("task_id", &["task_id"][..]),
                     ("status", &["status"][..]),
                     ("task_type", &["task_type"][..]),
-                    ("output", &["output"][..]),
                 ],
             );
         }
@@ -474,6 +432,5 @@ pub(super) fn default_result_detail(
             lines.push(line("tasks", tasks.len().to_string()));
         }
     }
-    append_generic_lines(&mut lines, structured);
     detail(lines)
 }

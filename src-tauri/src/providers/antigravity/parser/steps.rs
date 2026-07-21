@@ -587,6 +587,7 @@ impl AntigravityScanAccum {
                             is_error: Some(step.status == "ERROR"),
                             status: Some(&step.status),
                             artifact_path: None,
+                            raw_output: None,
                         },
                     );
 

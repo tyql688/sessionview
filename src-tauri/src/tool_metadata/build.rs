@@ -16,12 +16,17 @@ pub struct ToolCallFacts<'a> {
     pub assistant_id: Option<&'a str>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct ToolResultFacts<'a> {
     pub raw_result: Option<&'a Value>,
     pub is_error: Option<bool>,
     pub status: Option<&'a str>,
     pub artifact_path: Option<&'a str>,
+    /// Whether the result body merged into `Message::content` is an
+    /// uninterpreted raw payload. `None` means this update makes no statement
+    /// about the body (e.g. a status-only update) and the previous verdict is
+    /// kept.
+    pub raw_output: Option<bool>,
 }
 
 pub fn build_tool_metadata(call: ToolCallFacts<'_>) -> ToolMetadata {
@@ -45,6 +50,7 @@ pub fn build_tool_metadata(call: ToolCallFacts<'_>) -> ToolMetadata {
         ids,
         mcp: parse_mcp_tool_name(call.raw_name),
         result_kind: None,
+        result_raw: false,
         structured: None,
         presentation: None,
     };
@@ -92,8 +98,22 @@ pub fn attach_call_metadata<I>(
     refresh_tool_presentation(metadata, None);
 }
 
+/// Record the raw-output verdict for providers that merge a result body
+/// without any other result facts (e.g. Cursor's ACP merge, where status and
+/// structured data are not part of the result update).
+pub fn set_tool_result_raw(metadata: &mut ToolMetadata, raw: bool) {
+    if metadata.result_raw == raw {
+        return;
+    }
+    metadata.result_raw = raw;
+    refresh_tool_presentation(metadata, None);
+}
+
 pub fn enrich_tool_metadata(metadata: &mut ToolMetadata, result: ToolResultFacts<'_>) {
     metadata.status = normalized_status(ToolResultFacts { ..result });
+    if let Some(raw) = result.raw_output {
+        metadata.result_raw = raw;
+    }
     metadata.result_kind = result_kind_for_tool(
         &metadata.canonical_name,
         &metadata.category,

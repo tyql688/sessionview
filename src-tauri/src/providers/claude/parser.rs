@@ -47,6 +47,7 @@ struct ParseState {
 
 struct PendingToolResult {
     result_text: String,
+    is_raw: bool,
     result_item: Value,
     top_level_result: Option<Value>,
     timestamp: Option<String>,

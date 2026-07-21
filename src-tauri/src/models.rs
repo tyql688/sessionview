@@ -112,11 +112,12 @@ pub struct McpToolMetadata {
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
-pub enum RawOutputPolicy {
+pub enum ToolResultMode {
     #[default]
-    Keep,
-    SuppressTerminal,
-    SuppressPatchWhenDiffPresent,
+    Output,
+    Raw,
+    Terminal,
+    Diff,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -128,7 +129,7 @@ pub struct ToolPresentation {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result_detail: Option<ToolDetail>,
     #[serde(default)]
-    pub raw_output_policy: RawOutputPolicy,
+    pub result_mode: ToolResultMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -141,6 +142,11 @@ pub struct ToolDetail {
     pub patch_diff: Option<Vec<ToolDiffLine>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub persisted_output_path: Option<String>,
+    /// Image sources extracted from the structured result's content-part
+    /// envelope (local paths, URLs, or data: URIs). The frontend renders
+    /// these; it never digs into `structured` itself.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub media: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -190,6 +196,12 @@ pub struct ToolMetadata {
     pub mcp: Option<McpToolMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result_kind: Option<String>,
+    /// True when the merged result body is an uninterpreted payload (unknown
+    /// wire shape kept verbatim) rather than rendered output. Providers report
+    /// this via `ToolResultFacts::raw_output`; presentation derives
+    /// `ToolResultMode::Raw` from it and never from provider-side writes.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub result_raw: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub structured: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]

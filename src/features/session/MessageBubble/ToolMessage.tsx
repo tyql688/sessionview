@@ -58,7 +58,14 @@ interface ToolMessageProps {
 }
 
 export function ToolMessage(props: ToolMessageProps) {
-  if ((props.message.tool_metadata?.canonical_name ?? props.message.tool_name) === "Bash") {
+  const metadata = props.message.tool_metadata;
+  const resultMode = metadata?.presentation?.resultMode;
+  // The backend owns the terminal-vs-generic decision via resultMode; the
+  // name check only covers messages indexed before presentation existed.
+  const isTerminal =
+    resultMode === "terminal" ||
+    (resultMode === undefined && (metadata?.canonical_name ?? props.message.tool_name) === "Bash");
+  if (isTerminal) {
     return <TerminalToolMessage message={props.message} />;
   }
 
@@ -78,19 +85,31 @@ function GenericToolMessage(props: ToolMessageProps) {
   const [fullResultError, setFullResultError] = useState<string | null>(null);
   const [loadingFullResult, setLoadingFullResult] = useState(false);
 
+  /** Parsed tool_input/tool_output JSON, memoized so downstream extractors
+   *  reuse the same JSON.parse call. Many real tool payloads are plain text
+   *  or partial streamed values, so parse misses simply mean "no metadata". */
+  const toolInputObj = useMemo<Record<string, unknown> | undefined>(
+    () => parseToolJsonObject(props.message.tool_input),
+    [props.message.tool_input],
+  );
+  const toolOutputObj = useMemo<Record<string, unknown> | undefined>(
+    () => parseToolJsonObject(props.message.content),
+    [props.message.content],
+  );
   const hasInput = () => !!props.message.tool_input && props.message.tool_input.trim().length > 0;
-  const hasOutput = () => !!props.message.content && props.message.content.trim().length > 0;
   const hasName = () => !!props.message.tool_name && props.message.tool_name.trim().length > 0;
+  const outputContent = props.message.content || "";
+  const rawResult = props.message.tool_metadata?.presentation?.resultMode === "raw";
 
   // <persisted-output> tag blocks are no longer resolved at parse time
   // (see src-tauri/src/providers/claude/mod.rs comment) so we resolve
   // them here on first render. Cache hits are synchronous; first-time
-  // reads briefly show the raw tag block, then swap in the file
+  // reads briefly show the tag block, then swap in the file
   // content once `loadPersistedOutput` completes.
   const [resolvedReplacements, setResolvedReplacements] = useState<Map<string, string>>(new Map());
   useEffect(() => {
-    const content = props.message.content || "";
-    const paths = extractPersistedOutputPaths(content);
+    if (rawResult) return;
+    const paths = extractPersistedOutputPaths(outputContent);
     if (paths.length === 0) return;
     let cancelled = false;
     void Promise.all(
@@ -115,12 +134,13 @@ function GenericToolMessage(props: ToolMessageProps) {
     return () => {
       cancelled = true;
     };
-  }, [props.message.content]);
+  }, [outputContent, rawResult]);
   const resolvedContent = useMemo(() => {
-    const raw = props.message.content || "";
+    if (rawResult) return outputContent;
     const replacements = resolvedReplacements;
-    return replacements.size === 0 ? raw : substitutePersistedOutputs(raw, replacements);
-  }, [props.message.content, resolvedReplacements]);
+    return replacements.size === 0 ? outputContent : substitutePersistedOutputs(outputContent, replacements);
+  }, [outputContent, rawResult, resolvedReplacements]);
+  const displayedContent = rawResult ? outputContent : (fullResult ?? resolvedContent);
 
   const name = () => props.message.tool_name || "";
   const metadata = () => props.message.tool_metadata;
@@ -136,17 +156,6 @@ function GenericToolMessage(props: ToolMessageProps) {
   const resultHasDiff = () => !!resultMetadata?.diff || !!resultMetadata?.patchDiff;
   const showInputDetail = () => !!formatted && !resultHasDiff();
   const isAgent = () => isAgentToolMessage(props.message);
-  /** Parsed tool_input/tool_output JSON, memoized so downstream extractors
-   *  reuse the same JSON.parse call. Many real tool payloads are plain text
-   *  or partial streamed values, so parse misses simply mean "no metadata". */
-  const toolInputObj = useMemo<Record<string, unknown> | undefined>(
-    () => parseToolJsonObject(props.message.tool_input),
-    [props.message.tool_input],
-  );
-  const toolOutputObj = useMemo<Record<string, unknown> | undefined>(
-    () => parseToolJsonObject(props.message.content),
-    [props.message.content],
-  );
   // Subagent extraction lives in lib/subagent.ts (pure, provider-specific);
   // these memos are thin wrappers gated on the Agent tool name.
   const agentNickname = useMemo(
@@ -205,22 +214,46 @@ function GenericToolMessage(props: ToolMessageProps) {
     }
   }
 
-  const suppressRawOutput = () => {
-    const policy = props.message.tool_metadata?.presentation?.rawOutputPolicy;
-    if (policy === "suppress_terminal") return !!resultMetadata;
-    if (policy === "suppress_patch_when_diff_present") {
-      return !!resultMetadata && resultHasDiff();
+  const explicitResultMode = props.message.tool_metadata?.presentation?.resultMode;
+  const resultMode =
+    explicitResultMode ??
+    (props.message.tool_metadata?.result_kind === "file_patch" && resultHasDiff() ? "diff" : "output");
+  const structuredImageSources = useMemo(
+    () => (resultMode === "output" ? (resultMetadata?.media ?? []) : []),
+    [resultMetadata, resultMode],
+  );
+  const hasOutput = () => displayedContent.trim().length > 0 || structuredImageSources.length > 0;
+  const formattedOutputContent = useMemo(() => {
+    if (resultMode !== "output") return displayedContent;
+    const trimmed = displayedContent.trim();
+    if (trimmed.length === 0 || trimmed.length > 256 * 1024 || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) {
+      return displayedContent;
     }
-    if (policy === "keep") return false;
-
-    const kind = props.message.tool_metadata?.result_kind;
-    return !!resultMetadata && (kind === "terminal_output" || (kind === "file_patch" && resultHasDiff()));
-  };
-  const showRawOutput = () => expanded && hasOutput() && !suppressRawOutput();
+    try {
+      const value: unknown = JSON.parse(trimmed);
+      return value !== null && typeof value === "object" ? JSON.stringify(value, null, 2) : displayedContent;
+    } catch {
+      return displayedContent;
+    }
+  }, [displayedContent, resultMode]);
+  const showOutput = () => expanded && hasOutput() && resultMode !== "diff";
   const outputSegments = useMemo(
-    () => (showRawOutput() ? parseContent(resolvedContent) : []),
+    () =>
+      showOutput()
+        ? resultMode === "raw"
+          ? [{ type: "text" as const, content: displayedContent }]
+          : parseContent(formattedOutputContent, structuredImageSources)
+        : [],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [expanded, props.message.content, props.message.tool_metadata, resultMetadata, resolvedContent],
+    [
+      expanded,
+      props.message.tool_metadata,
+      resultMetadata,
+      formattedOutputContent,
+      displayedContent,
+      resultMode,
+      structuredImageSources,
+    ],
   );
   const canExpand = hasInput() || hasOutput() || !!resultMetadata;
   const status = metadata()?.status?.trim() ?? "";
@@ -345,7 +378,7 @@ function GenericToolMessage(props: ToolMessageProps) {
                 <SessionLineDiffView oldText={resultMetadata.diff.old} newText={resultMetadata.diff.new} />
               )}
               {resultMetadata.patchDiff && <SessionDiffView lines={resultMetadata.patchDiff} />}
-              {persistedOutputPath() && (
+              {resultMode !== "raw" && persistedOutputPath() && (
                 <Button
                   variant="ghost"
                   size="xs"
@@ -361,14 +394,14 @@ function GenericToolMessage(props: ToolMessageProps) {
                 </Button>
               )}
               {fullResultError && <pre className="msg-tool-input">{fullResultError}</pre>}
-              {fullResult && <pre className="msg-tool-input">{fullResult}</pre>}
             </div>
           )}
           {!showInputDetail() && !resultHasDiff() && hasInput() && (
             <pre className="msg-tool-input">{props.message.tool_input!}</pre>
           )}
-          {showRawOutput() && (
-            <div className="msg-tool-output">
+          {showOutput() && (
+            <div className={`msg-tool-output${resultMode === "raw" ? " msg-tool-raw-output" : ""}`}>
+              {resultMode === "raw" && <div className="msg-tool-output-label">{t("tool.rawOutput")}</div>}
               {outputSegments.map((seg, i) => {
                 if (seg.type === "image") {
                   if (isLocalPath(seg.content)) {

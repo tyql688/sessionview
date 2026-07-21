@@ -1,4 +1,6 @@
 use super::{parse_session_file, parse_session_tail};
+use crate::models::ToolResultMode;
+use serde_json::Value;
 use std::fs;
 use tempfile::TempDir;
 
@@ -516,6 +518,33 @@ fn parse_session_file_handles_tool_reference_inside_tool_result_content() {
         tool_msg.content
     );
     assert!(tool_msg.content.contains("[Tool: TaskUpdate]"));
+}
+
+#[test]
+fn parse_session_file_preserves_unknown_tool_result_parts_as_raw() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("session.jsonl");
+    let assistant = r#"{"type":"assistant","uuid":"a1","timestamp":"2026-04-25T02:03:00Z","message":{"id":"msg-1","model":"claude-opus-4-7","role":"assistant","content":[{"type":"tool_use","id":"toolu_future","name":"Read","input":{"file_path":"future.json"}}]}}"#;
+    let tool_result = r#"{"type":"user","timestamp":"2026-04-25T02:03:01Z","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_future","content":[{"type":"future_content","payload":{"keep":true}}]}]},"toolUseResult":{}}"#;
+    fs::write(&file, format!("{assistant}\n{tool_result}\n")).unwrap();
+
+    let parsed = parse_session_file(&file).expect("parsed");
+    let tool_msg = parsed
+        .messages
+        .iter()
+        .find(|message| message.tool_name.as_deref() == Some("Read"))
+        .expect("tool message");
+    assert_eq!(
+        tool_msg
+            .tool_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.presentation.as_ref())
+            .map(|presentation| presentation.result_mode),
+        Some(ToolResultMode::Raw)
+    );
+    let raw: Value = serde_json::from_str(&tool_msg.content).expect("raw content array");
+    assert_eq!(raw[0]["type"], "future_content");
+    assert_eq!(raw[0]["payload"]["keep"], true);
 }
 
 #[test]

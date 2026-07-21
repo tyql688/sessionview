@@ -111,6 +111,7 @@ fn infer_tool_name_from_orphan_result(result: Option<&Value>, use_id: Option<&st
 
 fn standalone_tool_result_message(
     result_text: String,
+    is_raw: bool,
     result_item: &Value,
     top_level_result: Option<&Value>,
     use_id: Option<&str>,
@@ -128,7 +129,7 @@ fn standalone_tool_result_message(
     });
     enrich_tool_metadata(
         &mut metadata,
-        tool_result_facts(result_item, top_level_result),
+        tool_result_facts(result_item, top_level_result, is_raw),
     );
 
     Message {
@@ -144,6 +145,7 @@ pub(super) fn flush_pending_tool_results(state: &mut ParseState) {
     for (use_id, result) in pending {
         state.messages.push(standalone_tool_result_message(
             result.result_text,
+            result.is_raw,
             &result.result_item,
             result.top_level_result.as_ref(),
             Some(&use_id),
@@ -240,21 +242,21 @@ fn handle_tool_result(
             if result_item.get("type").and_then(|t| t.as_str()) != Some("tool_result") {
                 continue;
             }
-            let result_text = extract_tool_result_content(result_item);
-            if result_text.trim().is_empty() && top_level_result.is_none() {
+            let rendered = extract_tool_result_content(result_item);
+            if rendered.text.trim().is_empty() && top_level_result.is_none() {
                 continue;
             }
-            if !result_text.trim().is_empty() {
-                state.content_parts.push(result_text.clone());
+            if !rendered.text.trim().is_empty() {
+                state.content_parts.push(rendered.text.clone());
             }
             let use_id = result_item.get("tool_use_id").and_then(|i| i.as_str());
             if let Some(idx) = state.tool_use_id_map.index_of(use_id) {
                 // Merge result into the existing tool_use message
-                state.messages[idx].content = result_text;
+                state.messages[idx].content = rendered.text;
                 if let Some(metadata) = state.messages[idx].tool_metadata.as_mut() {
                     enrich_tool_metadata(
                         metadata,
-                        tool_result_facts(result_item, top_level_result),
+                        tool_result_facts(result_item, top_level_result, rendered.is_raw),
                     );
                 }
             } else if let Some(idx) = entry
@@ -269,11 +271,11 @@ fn handle_tool_result(
                     }
                 })
             {
-                state.messages[idx].content = result_text;
+                state.messages[idx].content = rendered.text;
                 if let Some(metadata) = state.messages[idx].tool_metadata.as_mut() {
                     enrich_tool_metadata(
                         metadata,
-                        tool_result_facts(result_item, top_level_result),
+                        tool_result_facts(result_item, top_level_result, rendered.is_raw),
                     );
                 }
             } else {
@@ -281,7 +283,8 @@ fn handle_tool_result(
                     state.pending_tool_results_by_use_id.insert(
                         use_id.to_string(),
                         PendingToolResult {
-                            result_text,
+                            result_text: rendered.text,
+                            is_raw: rendered.is_raw,
                             result_item: result_item.clone(),
                             top_level_result: top_level_result.cloned(),
                             timestamp: timestamp.clone(),
@@ -296,7 +299,8 @@ fn handle_tool_result(
 
                 // No matching tool_use found -- emit as standalone
                 state.messages.push(standalone_tool_result_message(
-                    result_text,
+                    rendered.text,
+                    rendered.is_raw,
                     result_item,
                     top_level_result,
                     None,
@@ -401,6 +405,7 @@ pub(super) fn handle_assistant_message(
                                     tool_result_facts(
                                         &pending.result_item,
                                         pending.top_level_result.as_ref(),
+                                        pending.is_raw,
                                     ),
                                 );
                             }

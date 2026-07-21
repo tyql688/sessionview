@@ -49,6 +49,38 @@ describe("parseContent", () => {
       { type: "text", content: "just stdout" },
     ]);
   });
+
+  it("hydrates bare image markers from typed structured output", () => {
+    expect(parseContent("captured\n[Image]", ["data:image/png;base64,AAAA"])).toEqual([
+      { type: "text", content: "captured\n" },
+      { type: "image", content: "data:image/png;base64,AAAA" },
+    ]);
+  });
+
+  it("does not duplicate a sourced marker when structured output carries the same media slot", () => {
+    expect(parseContent("[Image: source: /tmp/local.png]", ["blobref:image/png;abc"])).toEqual([
+      { type: "image", content: "/tmp/local.png" },
+    ]);
+  });
+
+  it("appends typed images when provider text has no placeholder", () => {
+    expect(parseContent("captured", ["https://example.com/shot.png"])).toEqual([
+      { type: "text", content: "captured" },
+      { type: "image", content: "https://example.com/shot.png" },
+    ]);
+  });
+
+  it("preserves code fences when parsing a terminal stream", () => {
+    const terminalOutput = "```json\n{\"keep\":true}\n```\n[Image]";
+    expect(
+      parseContent(terminalOutput, ["data:image/png;base64,AAAA"], {
+        parseCodeFences: false,
+      }),
+    ).toEqual([
+      { type: "text", content: "```json\n{\"keep\":true}\n```\n" },
+      { type: "image", content: "data:image/png;base64,AAAA" },
+    ]);
+  });
 });
 
 describe("sanitizeMessageForClipboard", () => {

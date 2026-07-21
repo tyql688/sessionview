@@ -1,4 +1,5 @@
 use super::{CodexProvider, parse_session_tail};
+use crate::models::ToolResultMode;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -286,6 +287,14 @@ fn parse_session_file_handles_custom_tool_call_exec_with_part_array_output() {
         .expect("exec must produce a tool message");
     let metadata = tool.tool_metadata.as_ref().expect("metadata");
     assert_eq!(metadata.canonical_name, "Bash");
+    let input_detail = metadata
+        .presentation
+        .as_ref()
+        .and_then(|presentation| presentation.input_detail.as_ref())
+        .expect("plain custom-tool input must remain presentable");
+    assert_eq!(input_detail.lines.len(), 1);
+    assert_eq!(input_detail.lines[0].label, "raw");
+    assert!(input_detail.lines[0].value.contains("tools.exec_command"));
     assert!(tool.content.contains("hi"));
 }
 
@@ -317,6 +326,72 @@ fn parse_session_file_keeps_image_parts_in_custom_tool_call_output() {
         tool.content.contains("[Image: source: /tmp/shot.png]"),
         "image parts must survive as markers, got {:?}",
         tool.content
+    );
+}
+
+#[test]
+fn parse_session_file_marks_unknown_custom_output_parts_as_raw() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("codex.jsonl");
+    fs::write(
+        &file,
+        concat!(
+            "{\"timestamp\":\"2026-07-20T03:24:05Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call\",\"call_id\":\"call_1\",\"name\":\"exec\",\"input\":\"future\"}}\n",
+            "{\"timestamp\":\"2026-07-20T03:24:06Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call_output\",\"call_id\":\"call_1\",\"output\":[{\"type\":\"future_content\",\"payload\":{\"keep\":true}}]}}\n"
+        ),
+    )
+    .unwrap();
+
+    let provider = CodexProvider {
+        home_dir: PathBuf::from("/tmp"),
+    };
+    let parsed = provider.parse_session_file(&file).expect("parsed session");
+    let tool = parsed
+        .messages
+        .iter()
+        .find(|message| message.role == crate::models::MessageRole::Tool)
+        .expect("tool message");
+    assert_eq!(
+        tool.tool_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.presentation.as_ref())
+            .map(|presentation| presentation.result_mode),
+        Some(ToolResultMode::Raw)
+    );
+    let raw: serde_json::Value = serde_json::from_str(&tool.content).expect("raw output array");
+    assert_eq!(raw[0]["type"], "future_content");
+    assert_eq!(raw[0]["payload"]["keep"], true);
+}
+
+#[test]
+fn parse_session_file_keeps_json_file_text_as_output() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("codex.jsonl");
+    fs::write(
+        &file,
+        concat!(
+            "{\"timestamp\":\"2026-07-20T03:24:05Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"result.json\\\"}\"}}\n",
+            "{\"timestamp\":\"2026-07-20T03:24:06Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"call_id\":\"call_1\",\"output\":\"{\\\"output\\\":\\\"file value\\\"}\"}}\n"
+        ),
+    )
+    .unwrap();
+
+    let provider = CodexProvider {
+        home_dir: PathBuf::from("/tmp"),
+    };
+    let parsed = provider.parse_session_file(&file).expect("parsed session");
+    let tool = parsed
+        .messages
+        .iter()
+        .find(|message| message.role == crate::models::MessageRole::Tool)
+        .expect("tool message");
+    assert_eq!(tool.content, r#"{"output":"file value"}"#);
+    assert_eq!(
+        tool.tool_metadata
+            .as_ref()
+            .and_then(|metadata| metadata.presentation.as_ref())
+            .map(|presentation| presentation.result_mode),
+        Some(ToolResultMode::Output)
     );
 }
 

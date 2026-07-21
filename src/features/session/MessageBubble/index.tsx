@@ -86,6 +86,36 @@ const SYSTEM_SUBTYPE_CONFIG: Record<
     labelKey: "system.scheduledTask",
     cls: "sys-info",
   },
+  task_status: {
+    icon: "\uD83D\uDCCB",
+    labelKey: "system.taskStatus",
+    cls: "sys-info",
+    collapsible: true,
+  },
+  task_status_error: {
+    icon: "\uD83D\uDCCB",
+    labelKey: "system.taskStatus",
+    cls: "sys-error",
+    collapsible: true,
+  },
+  subagent_task: {
+    icon: "\uD83E\uDD16",
+    labelKey: "system.subagentTask",
+    cls: "sys-info",
+    collapsible: true,
+  },
+  skill_activation: {
+    icon: "\u26A1",
+    labelKey: "system.skillActivation",
+    cls: "sys-info",
+    collapsible: true,
+  },
+  kimi_context: {
+    icon: "\u2699",
+    labelKey: "system.kimiContext",
+    cls: "sys-info",
+    collapsible: true,
+  },
   pr_link: { icon: "\uD83D\uDD17", labelKey: "system.prLink", cls: "sys-info" },
   agent_mail: {
     icon: "\u2709",
@@ -185,7 +215,7 @@ export function MessageBubble(props: { message: Message; provider?: Provider; pa
 
   const isSystemContent = (): boolean => {
     const msg = props.message;
-    if (msg.role === "tool") return false;
+    if (msg.role === "tool" || msg.role === "system") return false;
     if (!msg.content || msg.content.trim().length === 0) return false;
     const c = msg.content.trimStart();
     // Skip known system/template content markers

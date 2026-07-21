@@ -128,7 +128,7 @@ describe("tools/input", () => {
         category: "search",
         presentation: {
           icon: "🔎",
-          rawOutputPolicy: "keep",
+          resultMode: "output",
           inputDetail: {
             lines: [
               { label: "pattern", value: "fn main" },
@@ -158,7 +158,7 @@ describe("tools/input", () => {
         category: "file",
         presentation: {
           icon: "✏️",
-          rawOutputPolicy: "keep",
+          resultMode: "diff",
           inputDetail: {
             lines: [{ label: "file", value: "/tmp/project/main.rs" }],
             diff: { old: "old line", new: "new line" },
@@ -198,7 +198,7 @@ describe("tools/result", () => {
       status: "success",
       presentation: {
         icon: "💻",
-        rawOutputPolicy: "suppress_terminal",
+        resultMode: "terminal",
         resultDetail: {
           lines: [
             { label: "status", value: "success" },
@@ -225,7 +225,7 @@ describe("tools/result", () => {
       status: "success",
       presentation: {
         icon: "✏️",
-        rawOutputPolicy: "suppress_patch_when_diff_present",
+        resultMode: "diff",
         resultDetail: {
           lines: [{ label: "file", value: "/tmp/App.tsx" }],
           patchDiff: Array.from({ length: 220 }, (_, index) => ({

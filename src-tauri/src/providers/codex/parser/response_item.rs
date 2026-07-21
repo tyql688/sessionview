@@ -6,9 +6,9 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use crate::models::{Message, MessageRole, Provider};
-use crate::provider_utils::is_system_content;
+use crate::provider_utils::{RenderedToolOutput, is_system_content};
 use crate::tool_metadata::{
-    ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata,
+    ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata, set_tool_result_raw,
 };
 
 use super::super::tools::*;
@@ -181,12 +181,17 @@ impl CodexScanAccum {
                 });
             }
             "function_call_output" => {
-                let raw_output = match payload.get("output") {
+                let output_value = payload.get("output");
+                let raw_output = match output_value {
                     Some(Value::String(s)) => s.clone(),
-                    Some(other) => serde_json::to_string(other).unwrap_or_default(),
+                    Some(other) => other.to_string(),
                     None => String::new(),
                 };
-                let output = extract_tool_output(&raw_output);
+                let RenderedToolOutput {
+                    text: output,
+                    is_raw,
+                    ..
+                } = render_tool_output(output_value);
 
                 if !output.is_empty() {
                     self.content_parts.push(output.clone());
@@ -205,6 +210,9 @@ impl CodexScanAccum {
                     });
                     if let Some(result_value) = result_value {
                         enrich_existing_tool_message(message, result_value, is_error, None);
+                    }
+                    if let Some(metadata) = message.tool_metadata.as_mut() {
+                        set_tool_result_raw(metadata, is_raw);
                     }
                     return;
                 }
@@ -238,6 +246,7 @@ impl CodexScanAccum {
                             .map(|status| matches!(status, "failed" | "error")),
                         status: payload.get("status").and_then(|v| v.as_str()),
                         artifact_path: None,
+                        raw_output: None,
                     },
                 );
                 if !query.is_empty() {
@@ -391,14 +400,17 @@ impl CodexScanAccum {
                 });
             }
             "custom_tool_call_output" => {
-                // `output` is a plain string in older rollouts and an array
-                // of content parts in newer ones.
-                let raw_output = match payload.get("output") {
+                let output_value = payload.get("output");
+                let raw_output = match output_value {
                     Some(Value::String(text)) => text.clone(),
-                    Some(Value::Array(parts)) => extract_codex_array_content(parts),
-                    _ => String::new(),
+                    Some(value) => value.to_string(),
+                    None => String::new(),
                 };
-                let output = extract_tool_output(&raw_output);
+                let RenderedToolOutput {
+                    text: output,
+                    is_raw,
+                    ..
+                } = render_tool_output(output_value);
 
                 let call_id = payload.get("call_id").and_then(|v| v.as_str());
                 if let Some(message) = self.call_id_map.message_mut(call_id, &mut self.messages) {
@@ -412,6 +424,9 @@ impl CodexScanAccum {
                     });
                     if let Some(result_value) = result_value {
                         enrich_existing_tool_message(message, result_value, is_error, None);
+                    }
+                    if let Some(metadata) = message.tool_metadata.as_mut() {
+                        set_tool_result_raw(metadata, is_raw);
                     }
                     return;
                 }

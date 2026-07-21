@@ -217,6 +217,7 @@ impl CodexScanAccum {
                                 is_error: None,
                                 status: None,
                                 artifact_path: None,
+                                raw_output: None,
                             },
                         );
                     }
@@ -237,6 +238,7 @@ impl CodexScanAccum {
                         is_error: None,
                         status: None,
                         artifact_path: None,
+                        raw_output: None,
                     },
                 );
                 self.call_id_map.register(call_id, self.messages.len());
@@ -340,6 +342,7 @@ impl CodexScanAccum {
                         is_error,
                         status,
                         artifact_path: None,
+                        raw_output: None,
                     },
                 );
                 self.messages.push(Message {
