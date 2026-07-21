@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::models::Message;
 use crate::provider::UsageEvent;
-use crate::provider_utils::for_each_jsonl_record;
+use crate::provider::util::for_each_jsonl_record;
 
 /// Per-turn usage totals summed across models, for attaching to the turn's
 /// final assistant message (grok has no per-message usage — turn level is

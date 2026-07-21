@@ -4,6 +4,7 @@ mod catalog;
 mod state;
 mod tokens;
 mod traits;
+pub mod util;
 
 pub use catalog::*;
 pub use state::*;

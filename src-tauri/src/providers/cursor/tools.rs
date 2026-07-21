@@ -9,7 +9,7 @@
 
 use serde_json::Value;
 
-use crate::provider_utils::is_system_content;
+use crate::provider::util::is_system_content;
 
 // ---------------------------------------------------------------------------
 // Content extraction

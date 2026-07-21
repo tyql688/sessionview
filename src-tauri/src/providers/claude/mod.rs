@@ -98,7 +98,7 @@ impl ClaudeProvider {
                 } else if file_path.is_dir() {
                     let subagents_dir = file_path.join("subagents");
                     if subagents_dir.is_dir() {
-                        all_files.extend(crate::provider_utils::collect_subagent_jsonl_files(
+                        all_files.extend(crate::provider::util::collect_subagent_jsonl_files(
                             &subagents_dir,
                         ));
                     }

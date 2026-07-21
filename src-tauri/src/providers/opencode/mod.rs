@@ -1,6 +1,6 @@
 mod parser;
 
-use crate::provider_utils::epoch_ms_to_rfc3339;
+use crate::provider::util::epoch_ms_to_rfc3339;
 use parser::{build_assistant_messages, build_user_messages, extract_tokens};
 
 use std::collections::HashMap;
@@ -9,10 +9,10 @@ use std::path::{Path, PathBuf};
 use rusqlite::{Connection, params};
 
 use crate::models::{Message, Provider, SessionMeta};
+use crate::provider::util::session_title;
 use crate::provider::{
     LoadedSession, ParsedSession, ProviderError, ScanOutcome, SessionProvider, SourceState,
 };
-use crate::provider_utils::session_title;
 
 pub(crate) struct Descriptor;
 impl crate::provider::ProviderDescriptor for Descriptor {

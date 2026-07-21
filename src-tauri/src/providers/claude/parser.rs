@@ -10,7 +10,7 @@ use crate::services::tail_reader::open_tail_reader;
 
 use crate::models::{Message, Provider};
 use crate::provider::ParsedSession;
-use crate::provider_utils::{
+use crate::provider::util::{
     parse_rfc3339_timestamp, project_name_from_path, session_title, subagents_ancestor,
 };
 
@@ -35,7 +35,7 @@ struct ParseState {
     content_parts: Vec<String>,
     first_user_message: Option<String>,
     pending_user_message: Option<(String, Option<String>)>,
-    tool_use_id_map: crate::provider_utils::ToolCallPairer,
+    tool_use_id_map: crate::provider::util::ToolCallPairer,
     assistant_tool_indices_by_uuid: HashMap<String, Vec<usize>>,
     pending_tool_results_by_use_id: HashMap<String, PendingToolResult>,
     /// Count of per-line parse warnings: malformed JSONL lines or JSON fields
@@ -94,7 +94,7 @@ impl ScanAccum {
                 content_parts: Vec::new(),
                 first_user_message: None,
                 pending_user_message: None,
-                tool_use_id_map: crate::provider_utils::ToolCallPairer::default(),
+                tool_use_id_map: crate::provider::util::ToolCallPairer::default(),
                 assistant_tool_indices_by_uuid: HashMap::new(),
                 pending_tool_results_by_use_id: HashMap::new(),
                 parse_warning_count: 0,
@@ -130,7 +130,7 @@ enum ScanOutcome {
 /// can reuse the same dispatch logic.
 fn scan_jsonl_lines<R: BufRead>(reader: R, path: &Path, accum: &mut ScanAccum) -> ScanOutcome {
     let stats =
-        crate::provider_utils::for_each_jsonl_record(reader, path, |line_no, entry: Value| {
+        crate::provider::util::for_each_jsonl_record(reader, path, |line_no, entry: Value| {
             // Cooperative cancellation: bail out fast when the user navigated
             // away mid-load. Checked every 1024 lines so the polling cost is
             // negligible for normal-size sessions.

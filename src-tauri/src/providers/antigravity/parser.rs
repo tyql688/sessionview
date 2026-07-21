@@ -6,7 +6,7 @@ use std::path::Path;
 
 use crate::models::{Message, Provider, SessionMeta, token_totals_from_messages};
 use crate::provider::ParsedSession;
-use crate::provider_utils::{parse_rfc3339_timestamp, project_name_from_path, session_title};
+use crate::provider::util::{parse_rfc3339_timestamp, project_name_from_path, session_title};
 use crate::services::tail_reader::open_tail_reader;
 
 mod lenient_json;
@@ -155,7 +155,7 @@ fn scan_antigravity_lines<R: BufRead>(
     conversation_id: &str,
     accum: &mut AntigravityScanAccum,
 ) {
-    let stats = crate::provider_utils::for_each_jsonl_record(reader, path, |_, step: Step| {
+    let stats = crate::provider::util::for_each_jsonl_record(reader, path, |_, step: Step| {
         accum.process_step(&step, conversation_id);
         std::ops::ControlFlow::Continue(())
     });

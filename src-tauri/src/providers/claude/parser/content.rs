@@ -7,7 +7,7 @@ use std::hash::{Hash, Hasher};
 use serde_json::Value;
 
 use crate::models::TokenUsage;
-use crate::provider_utils::RenderedToolOutput;
+use crate::provider::util::RenderedToolOutput;
 use crate::tool_metadata::ToolResultFacts;
 
 use super::super::images::{count_image_markers, normalize_image_source_segments};
@@ -65,9 +65,9 @@ pub(super) fn dedup_hash_from_entry(entry: &Value) -> Option<String> {
 /// Extract token usage from a message's `usage` field.
 pub(super) fn extract_token_usage(message: &Value) -> Option<TokenUsage> {
     let value = message.get("usage")?;
-    let mut usage = crate::provider_utils::token_usage_from(
+    let mut usage = crate::provider::util::token_usage_from(
         value,
-        &crate::provider_utils::UsageKeys {
+        &crate::provider::util::UsageKeys {
             input: &["input_tokens"],
             output: &["output_tokens"],
             cache_read: &["cache_read_input_tokens"],

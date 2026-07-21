@@ -5,7 +5,7 @@
 use serde_json::Value;
 
 use crate::models::{Message, MessageKind, MessageRole, Provider, TokenUsage};
-use crate::provider_utils::is_system_content;
+use crate::provider::util::is_system_content;
 use crate::tool_metadata::{
     ToolCallFacts, build_tool_metadata, canonical_tool_name, enrich_tool_metadata,
 };

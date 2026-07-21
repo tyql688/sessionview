@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::provider_utils::{ContentPartsRender, RenderedToolOutput, render_content_parts};
+use crate::provider::util::{ContentPartsRender, RenderedToolOutput, render_content_parts};
 
 // Provider-agnostic marker helpers — see `services::image_markers`.
 pub(crate) use crate::services::image_markers::{

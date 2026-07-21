@@ -1,7 +1,7 @@
 use serde_json::{Map, Value, json};
 
 use super::ToolResultFacts;
-use crate::provider_utils::shorten_home_path;
+use crate::provider::util::shorten_home_path;
 
 pub(super) fn normalize_json_value(value: &Value) -> Value {
     match value {

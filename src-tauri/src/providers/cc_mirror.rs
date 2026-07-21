@@ -225,7 +225,7 @@ impl CcMirrorProvider {
                         let subagents_dir = file_path.join("subagents");
                         if subagents_dir.is_dir() {
                             for sub_path in
-                                crate::provider_utils::collect_subagent_jsonl_files(&subagents_dir)
+                                crate::provider::util::collect_subagent_jsonl_files(&subagents_dir)
                             {
                                 all_files.push((sub_path, variant.clone()));
                             }

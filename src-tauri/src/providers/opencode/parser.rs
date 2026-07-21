@@ -141,7 +141,7 @@ fn build_tool_message(part: &serde_json::Value, msg_id: &str, timestamp: Option<
         .and_then(|s| s.get("time"))
         .and_then(|t| t.get("start"))
         .and_then(|s| s.as_i64())
-        .and_then(crate::provider_utils::epoch_ms_to_rfc3339)
+        .and_then(crate::provider::util::epoch_ms_to_rfc3339)
         .or_else(|| timestamp.map(str::to_string));
 
     Message {
@@ -196,7 +196,7 @@ pub(super) fn build_assistant_messages(
                         .get("time")
                         .and_then(|t| t.get("start"))
                         .and_then(|s| s.as_i64())
-                        .and_then(crate::provider_utils::epoch_ms_to_rfc3339)
+                        .and_then(crate::provider::util::epoch_ms_to_rfc3339)
                         .or_else(|| timestamp.map(str::to_string));
                     messages.push(Message {
                         timestamp: reasoning_ts,

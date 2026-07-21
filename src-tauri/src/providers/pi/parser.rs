@@ -22,7 +22,7 @@ pub(crate) fn parse_session_file(path: &Path) -> Option<ParsedSession> {
     let usage_events = extract_usage_events(&entries, path, &mut parse_warning_count);
     let token_totals = token_totals_from_usage_events(&usage_events);
 
-    let created_at = match crate::provider_utils::parse_rfc3339_epoch_seconds(&header.timestamp) {
+    let created_at = match crate::provider::util::parse_rfc3339_epoch_seconds(&header.timestamp) {
         Some(ts) => ts,
         None => {
             log::warn!(
@@ -134,7 +134,7 @@ fn parse_entries(path: &Path) -> Option<(PiSessionHeader, Vec<PiEntry>, u32)> {
         }
     };
     let mut entry_values = Vec::new();
-    let stats = crate::provider_utils::for_each_jsonl_record_from(
+    let stats = crate::provider::util::for_each_jsonl_record_from(
         std::io::Cursor::new(entry_lines),
         path,
         2,
@@ -345,7 +345,7 @@ fn extract_title(entries: &[PiEntry], branch: &[String], header: &PiSessionHeade
         {
             let text = extract_content_text(&user.content);
             if !text.trim().is_empty() {
-                return crate::provider_utils::session_title(Some(&text));
+                return crate::provider::util::session_title(Some(&text));
             }
         }
     }
@@ -558,7 +558,7 @@ fn get_entry_parent_id(entry: &PiEntry) -> Option<String> {
 
 fn parse_millis_datetime(timestamp_millis: u64) -> Option<DateTime<Utc>> {
     let timestamp_millis = i64::try_from(timestamp_millis).ok()?;
-    crate::provider_utils::epoch_ms_to_datetime(timestamp_millis)
+    crate::provider::util::epoch_ms_to_datetime(timestamp_millis)
 }
 
 fn parse_millis_epoch_seconds(timestamp_millis: u64) -> Option<i64> {

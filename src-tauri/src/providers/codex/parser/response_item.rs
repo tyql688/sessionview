@@ -6,7 +6,7 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use crate::models::{Message, MessageRole, Provider};
-use crate::provider_utils::{RenderedToolOutput, is_system_content};
+use crate::provider::util::{RenderedToolOutput, is_system_content};
 use crate::tool_metadata::{
     ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata, set_tool_result_raw,
 };

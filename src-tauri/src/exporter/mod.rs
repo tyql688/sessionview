@@ -5,7 +5,7 @@ pub mod markdown;
 use std::path::Path;
 
 use crate::models::SessionDetail;
-use crate::provider_utils::shorten_home_path;
+use crate::provider::util::shorten_home_path;
 
 /// Replace home-directory paths with `~` for privacy in exports.
 ///

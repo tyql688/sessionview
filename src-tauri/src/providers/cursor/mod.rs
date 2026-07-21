@@ -27,8 +27,8 @@ use std::path::{Path, PathBuf};
 use rayon::prelude::*;
 
 use crate::models::{Provider, SessionMeta};
+use crate::provider::util::project_name_from_path;
 use crate::provider::{LoadedSession, ParsedSession, ProviderError, SessionProvider};
-use crate::provider_utils::project_name_from_path;
 
 pub(crate) struct Descriptor;
 impl crate::provider::ProviderDescriptor for Descriptor {
@@ -181,7 +181,7 @@ impl CursorProvider {
         let title = acp_meta
             .title
             .clone()
-            .unwrap_or_else(|| crate::provider_utils::session_title(None));
+            .unwrap_or_else(|| crate::provider::util::session_title(None));
 
         let file_size = std::fs::metadata(store_db)
             .ok()

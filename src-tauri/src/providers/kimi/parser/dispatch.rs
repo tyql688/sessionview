@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use crate::models::{Message, MessageRole, Provider, TokenUsage, ToolMetadata};
 use crate::provider::UsageEvent;
-use crate::provider_utils::ToolCallPairer;
+use crate::provider::util::ToolCallPairer;
 use crate::tool_metadata::{
     ToolCallFacts, ToolResultFacts, attach_call_metadata, build_tool_metadata, enrich_tool_metadata,
 };
@@ -586,7 +586,7 @@ pub(super) fn dispatch_line(accum: &mut ScanAccum, entry: &Value) {
                 return;
             }
             if text.trim_start().starts_with("<notification")
-                || crate::provider_utils::is_system_content(text.trim_start())
+                || crate::provider::util::is_system_content(text.trim_start())
             {
                 accum.push_system_context(format!("[kimi_context] steer\n{text}"), &text, ts);
             } else {
@@ -985,9 +985,9 @@ fn value_to_id_string(value: &Value) -> Option<String> {
 }
 
 fn parse_usage(value: &Value) -> Option<TokenUsage> {
-    let usage = crate::provider_utils::token_usage_from(
+    let usage = crate::provider::util::token_usage_from(
         value,
-        &crate::provider_utils::UsageKeys {
+        &crate::provider::util::UsageKeys {
             input: &["inputOther"],
             output: &["output"],
             cache_read: &["inputCacheRead"],

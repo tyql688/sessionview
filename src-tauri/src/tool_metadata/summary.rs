@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::provider_utils::shorten_home_path;
+use crate::provider::util::shorten_home_path;
 
 fn string_field<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
     keys.iter()

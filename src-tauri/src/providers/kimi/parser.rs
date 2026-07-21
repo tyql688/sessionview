@@ -34,8 +34,8 @@ use std::path::Path;
 use serde_json::Value;
 
 use crate::models::{Message, Provider, SessionMeta};
+use crate::provider::util::{NO_PROJECT, project_name_from_path, session_title};
 use crate::provider::{ParsedSession, token_totals_from_usage_events};
-use crate::provider_utils::{NO_PROJECT, project_name_from_path, session_title};
 use crate::services::tail_reader::open_tail_reader;
 
 use dispatch::{ScanAccum, dispatch_line};
@@ -53,11 +53,11 @@ pub use index::session_id_for_path;
 /// `metadata.created_at` is also epoch milliseconds. We treat both
 /// uniformly: convert to (epoch_seconds, rfc3339_string).
 fn time_ms_to_parts(ms: i64) -> Option<(i64, String)> {
-    crate::provider_utils::epoch_ms_to_rfc3339(ms).map(|rfc| (ms.div_euclid(1000), rfc))
+    crate::provider::util::epoch_ms_to_rfc3339(ms).map(|rfc| (ms.div_euclid(1000), rfc))
 }
 
 fn scan_lines<R: BufRead>(reader: R, path: &Path, accum: &mut ScanAccum) {
-    let stats = crate::provider_utils::for_each_jsonl_record(reader, path, |_, entry: Value| {
+    let stats = crate::provider::util::for_each_jsonl_record(reader, path, |_, entry: Value| {
         dispatch_line(accum, &entry);
         std::ops::ControlFlow::Continue(())
     });
@@ -182,11 +182,11 @@ pub(crate) fn parse_session(path: &Path, index: &SessionIndex) -> Option<ParsedS
     let state_created = state
         .created_at
         .as_deref()
-        .and_then(crate::provider_utils::parse_rfc3339_epoch_seconds);
+        .and_then(crate::provider::util::parse_rfc3339_epoch_seconds);
     let state_updated = state
         .updated_at
         .as_deref()
-        .and_then(crate::provider_utils::parse_rfc3339_epoch_seconds);
+        .and_then(crate::provider::util::parse_rfc3339_epoch_seconds);
 
     let Some(created_at) = accum.first_time_secs.or(state_created) else {
         log::warn!(

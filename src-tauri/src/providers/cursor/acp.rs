@@ -30,7 +30,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 
 use crate::models::{Message, MessageRole, Provider};
-use crate::provider_utils::ToolCallPairer;
+use crate::provider::util::ToolCallPairer;
 use crate::tool_metadata::{ToolCallFacts, build_tool_metadata, set_tool_result_raw};
 
 use super::store_db::{

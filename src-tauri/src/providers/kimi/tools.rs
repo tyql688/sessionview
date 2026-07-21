@@ -17,9 +17,9 @@
 
 use serde_json::Value;
 
-use crate::provider_utils::{ContentPartsRender, render_content_parts};
+use crate::provider::util::{ContentPartsRender, render_content_parts};
 
-pub(crate) use crate::provider_utils::RenderedToolOutput;
+pub(crate) use crate::provider::util::RenderedToolOutput;
 
 /// Strip the `<system>…</system>` wrappers legacy kimi-cli used to inject
 /// around tool results. Returns the original string when nothing matches.

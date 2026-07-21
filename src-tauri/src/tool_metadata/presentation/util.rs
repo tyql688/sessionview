@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::provider_utils::shorten_home_path;
+use crate::provider::util::shorten_home_path;
 use serde_json::Value;
 
 use crate::models::{ToolDetail, ToolDiffLine, ToolDiffLineType, ToolInlineDiff, ToolLine};

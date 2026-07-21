@@ -22,7 +22,7 @@ use serde_json::Value;
 
 use crate::models::{Message, MessageRole, Provider, SessionMeta};
 use crate::provider::ParsedSession;
-use crate::provider_utils::{project_name_from_path, session_title};
+use crate::provider::util::{project_name_from_path, session_title};
 use crate::tool_metadata::{ToolCallFacts, build_tool_metadata};
 
 use super::tools::{

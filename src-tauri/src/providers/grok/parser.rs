@@ -47,7 +47,7 @@ use serde_json::Value;
 
 use crate::models::{Message, MessageRole, Provider, SessionMeta, TokenUsage};
 use crate::provider::ParsedSession;
-use crate::provider_utils::{
+use crate::provider::util::{
     ToolCallPairer, for_each_jsonl_record, project_name_from_path, session_title,
 };
 use crate::tool_metadata::{
@@ -274,17 +274,17 @@ pub(crate) fn parse_session_file(chat_path: &Path) -> Option<ParsedSession> {
     let created_at = summary
         .as_ref()
         .and_then(|s| s.created_at.as_deref())
-        .map(|ts| crate::provider_utils::parse_rfc3339_timestamp(Some(ts)))
+        .map(|ts| crate::provider::util::parse_rfc3339_timestamp(Some(ts)))
         .unwrap_or(mtime_fallback);
     let updated_at = summary
         .as_ref()
         .and_then(|s| s.updated_at.as_deref())
-        .map(|ts| crate::provider_utils::parse_rfc3339_timestamp(Some(ts)))
+        .map(|ts| crate::provider::util::parse_rfc3339_timestamp(Some(ts)))
         .unwrap_or(mtime_fallback);
 
     let project_path = cwd.unwrap_or_else(|| {
         log::warn!("Grok session '{session_id}' has no resolvable cwd");
-        crate::provider_utils::NO_PROJECT.to_string()
+        crate::provider::util::NO_PROJECT.to_string()
     });
 
     let meta = SessionMeta {

@@ -9,10 +9,10 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::models::{Message, Provider, SessionMeta};
-use crate::provider::{ParsedSession, UsageEvent};
-use crate::provider_utils::{
+use crate::provider::util::{
     NO_PROJECT, is_system_content, parse_rfc3339_timestamp, project_name_from_path, session_title,
 };
+use crate::provider::{ParsedSession, UsageEvent};
 
 use super::CodexProvider;
 use super::tools::*;
@@ -56,7 +56,7 @@ pub(super) struct CodexScanAccum {
     cwd: Option<String>,
     /// call_id → message-index pairing for merging function_call_output
     /// into the matching function_call message.
-    pub(super) call_id_map: crate::provider_utils::ToolCallPairer,
+    pub(super) call_id_map: crate::provider::util::ToolCallPairer,
     model: Option<String>,
     model_provider: Option<String>,
     pub(super) thread_name: Option<String>,
@@ -94,7 +94,7 @@ impl CodexScanAccum {
             content_parts: Vec::new(),
             session_id: None,
             cwd: None,
-            call_id_map: crate::provider_utils::ToolCallPairer::default(),
+            call_id_map: crate::provider::util::ToolCallPairer::default(),
             model: None,
             model_provider: None,
             thread_name: None,
@@ -136,7 +136,7 @@ impl CodexScanAccum {
     /// `parse_session_tail` (mmap-seeked) — they share the same loop body.
     fn scan_lines<R: BufRead>(&mut self, reader: R, path: &Path) {
         let stats =
-            crate::provider_utils::for_each_jsonl_record(reader, path, |_, entry: CodexLine| {
+            crate::provider::util::for_each_jsonl_record(reader, path, |_, entry: CodexLine| {
                 self.scan_line(&entry, path);
                 ControlFlow::Continue(())
             });

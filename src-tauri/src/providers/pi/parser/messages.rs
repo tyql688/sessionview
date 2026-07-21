@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use serde_json::{Map, Value};
 
 use crate::models::{Message, MessageRole, Provider, TokenUsage};
-use crate::provider_utils::{RenderedToolOutput, ToolCallPairer};
+use crate::provider::util::{RenderedToolOutput, ToolCallPairer};
 use crate::tool_metadata::{
     ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata,
 };
