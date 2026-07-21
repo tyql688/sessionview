@@ -19,7 +19,7 @@ use serde_json::Value;
 
 use crate::provider::util::{ContentPartsRender, render_content_parts};
 
-pub(crate) use crate::provider::util::RenderedToolOutput;
+use crate::provider::util::RenderedToolOutput;
 
 /// Strip the `<system>…</system>` wrappers legacy kimi-cli used to inject
 /// around tool results. Returns the original string when nothing matches.
@@ -31,37 +31,30 @@ fn strip_system_wrapper(text: &str) -> &str {
     stripped.unwrap_or(text)
 }
 
+fn is_system_wrapped(text: &str) -> bool {
+    let trimmed = text.trim();
+    trimmed.starts_with("<system>") && trimmed.ends_with("</system>")
+}
+
+fn part_text(part: &Value) -> Option<&str> {
+    part.get("text")
+        .or_else(|| part.get("input_text"))
+        .or_else(|| part.get("output_text"))
+        .and_then(Value::as_str)
+}
+
 /// Render a Format A tool message's content into a single rendered
 /// string. Drops `<system>` decorations when there's also real content
 /// alongside them. Format A doesn't carry an explicit error flag.
 pub(crate) fn render_format_a_tool_output(parts: &[Value]) -> RenderedToolOutput {
     if render_content_parts(parts) == ContentPartsRender::Unsupported {
-        return RenderedToolOutput {
-            text: Value::Array(parts.to_vec()).to_string(),
-            is_error: None,
-            is_raw: true,
-        };
+        return RenderedToolOutput::raw(Value::Array(parts.to_vec()).to_string());
     }
 
-    let has_semantic_output = parts.iter().any(|part| {
-        let part_type = part
-            .get("type")
-            .and_then(Value::as_str)
-            .or_else(|| part.get("text").and_then(Value::as_str).map(|_| "text"))
-            .unwrap_or("");
-        if matches!(part_type, "text" | "input_text" | "output_text") {
-            return part
-                .get("text")
-                .or_else(|| part.get("input_text"))
-                .or_else(|| part.get("output_text"))
-                .and_then(Value::as_str)
-                .is_some_and(|text| {
-                    let trimmed = text.trim();
-                    !trimmed.is_empty()
-                        && !(trimmed.starts_with("<system>") && trimmed.ends_with("</system>"))
-                });
-        }
-        true
+    // `<system>` decorations only render when nothing else would.
+    let has_real_content = parts.iter().any(|part| match part_text(part) {
+        Some(text) => !text.trim().is_empty() && !is_system_wrapped(text),
+        None => true,
     });
     let normalized = parts
         .iter()
@@ -69,11 +62,10 @@ pub(crate) fn render_format_a_tool_output(parts: &[Value]) -> RenderedToolOutput
             let Some(text) = part.get("text").and_then(Value::as_str) else {
                 return Some(part.clone());
             };
-            let trimmed = text.trim();
-            if !(trimmed.starts_with("<system>") && trimmed.ends_with("</system>")) {
+            if !is_system_wrapped(text) {
                 return Some(part.clone());
             }
-            if has_semantic_output {
+            if has_real_content {
                 return None;
             }
             let mut part = part.clone();
@@ -81,15 +73,10 @@ pub(crate) fn render_format_a_tool_output(parts: &[Value]) -> RenderedToolOutput
             Some(part)
         })
         .collect::<Vec<_>>();
-    let rendered = match render_content_parts(&normalized) {
-        ContentPartsRender::Rendered(text) => text,
-        ContentPartsRender::Empty => String::new(),
+    match render_content_parts(&normalized) {
+        ContentPartsRender::Rendered(text) => RenderedToolOutput::rendered(text),
+        ContentPartsRender::Empty => RenderedToolOutput::rendered(String::new()),
         ContentPartsRender::Unsupported => unreachable!("content parts were validated above"),
-    };
-    RenderedToolOutput {
-        text: rendered,
-        is_error: None,
-        is_raw: false,
     }
 }
 

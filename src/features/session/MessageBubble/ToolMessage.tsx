@@ -62,7 +62,8 @@ export function ToolMessage(props: ToolMessageProps) {
   const metadata = props.message.tool_metadata;
   const resultMode = metadata?.presentation?.resultMode;
   // The backend owns the terminal-vs-generic decision via resultMode; the
-  // name check only covers messages indexed before presentation existed.
+  // name check only covers tool messages without metadata (orphan results
+  // carry no presentation to consult).
   const isTerminal =
     resultMode === "terminal" ||
     (resultMode === undefined && (metadata?.canonical_name ?? props.message.tool_name) === "Bash");

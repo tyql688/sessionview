@@ -8,11 +8,12 @@ use crate::services::tail_reader::open_tail_reader;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::models::{Message, Provider, SessionMeta};
+use crate::models::{Message, MessageRole, Provider, SessionMeta};
 use crate::provider::util::{
     NO_PROJECT, is_system_content, parse_rfc3339_timestamp, project_name_from_path, session_title,
 };
 use crate::provider::{ParsedSession, UsageEvent};
+use crate::tool_metadata::{ToolCallFacts, build_tool_metadata};
 
 use super::CodexProvider;
 use super::tools::*;
@@ -144,22 +145,21 @@ impl CodexScanAccum {
         input: Option<serde_json::Value>,
         timestamp: Option<String>,
     ) {
-        let metadata =
-            crate::tool_metadata::build_tool_metadata(crate::tool_metadata::ToolCallFacts {
-                provider: crate::models::Provider::Codex,
-                raw_name,
-                input: input.as_ref(),
-                call_id: Some(call_id),
-                assistant_id: None,
-            });
+        let metadata = build_tool_metadata(ToolCallFacts {
+            provider: Provider::Codex,
+            raw_name,
+            input: input.as_ref(),
+            call_id: Some(call_id),
+            assistant_id: None,
+        });
         let idx = self.messages.len();
         self.call_id_map.register(Some(call_id), idx);
-        self.messages.push(crate::models::Message {
+        self.messages.push(Message {
             timestamp,
             tool_name: Some(metadata.canonical_name.clone()),
             tool_input: input.map(|value| value.to_string()),
             tool_metadata: Some(metadata),
-            ..crate::models::Message::new(crate::models::MessageRole::Tool, String::new())
+            ..Message::new(MessageRole::Tool, String::new())
         });
     }
 

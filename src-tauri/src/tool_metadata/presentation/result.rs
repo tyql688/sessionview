@@ -11,40 +11,39 @@ pub(super) fn result_detail_for(metadata: &ToolMetadata) -> Option<ToolDetail> {
         .structured
         .as_ref()
         .and_then(|value| value.as_object());
-    let lines = Vec::new();
     let persisted_output_path = structured.and_then(persisted_output_path);
 
     let mut detail = match (metadata.canonical_name.as_str(), structured) {
-        ("Bash", Some(structured)) => bash_result_detail(lines, structured),
-        ("Edit" | "Write", Some(structured)) => edit_result_detail(lines, structured),
-        ("Agent", Some(structured)) => agent_result_detail(lines, structured),
+        ("Bash", Some(structured)) => bash_result_detail(structured),
+        ("Edit" | "Write", Some(structured)) => edit_result_detail(structured),
+        ("Agent", Some(structured)) => agent_result_detail(structured),
         (
             "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskOutput" | "TaskStop",
             Some(structured),
-        ) => task_result_detail(lines, metadata, structured),
-        ("ToolSearch", Some(structured)) => tool_search_result_detail(lines, structured),
-        ("WebSearch", Some(structured)) => web_search_result_detail(lines, structured),
-        ("WebFetch", Some(structured)) => web_fetch_result_detail(lines, structured),
-        ("ImageGeneration", Some(structured)) => image_result_detail(lines, structured),
-        ("DynamicTool", Some(structured)) => dynamic_result_detail(lines, structured),
+        ) => task_result_detail(metadata, structured),
+        ("ToolSearch", Some(structured)) => tool_search_result_detail(structured),
+        ("WebSearch", Some(structured)) => web_search_result_detail(structured),
+        ("WebFetch", Some(structured)) => web_fetch_result_detail(structured),
+        ("ImageGeneration", Some(structured)) => image_result_detail(structured),
+        ("DynamicTool", Some(structured)) => dynamic_result_detail(structured),
         (
             "JavaScript" | "ComputerUse" | "StructuredOutput" | "SendMessage" | "ReadMediaFile",
             Some(structured),
-        ) => output_result_detail(lines, structured),
+        ) => output_result_detail(structured),
         ("AskUserQuestion" | "RequestPermissions", Some(structured)) => {
-            question_result_detail(lines, structured)
+            question_result_detail(structured)
         }
         ("ScheduleWakeup" | "CronCreate" | "CronList" | "CronDelete", Some(structured)) => {
-            schedule_result_detail(lines, structured)
+            schedule_result_detail(structured)
         }
-        ("Skill", Some(structured)) => skill_result_detail(lines, structured),
-        ("Workflow", Some(structured)) => workflow_result_detail(lines, structured),
+        ("Skill", Some(structured)) => skill_result_detail(structured),
+        ("Workflow", Some(structured)) => workflow_result_detail(structured),
         ("CreateGoal" | "GetGoal" | "SetGoalBudget" | "UpdateGoal", Some(structured)) => {
-            goal_result_detail(lines, structured)
+            goal_result_detail(structured)
         }
-        (_, Some(_)) if metadata.category == "mcp" => detail(lines),
-        (_, Some(structured)) => default_result_detail(lines, metadata, structured),
-        (_, None) => detail(lines),
+        (_, Some(_)) if metadata.category == "mcp" => detail(Vec::new()),
+        (_, Some(structured)) => default_result_detail(metadata, structured),
+        (_, None) => detail(Vec::new()),
     };
 
     detail.persisted_output_path = persisted_output_path.map(str::to_string);
@@ -61,10 +60,8 @@ pub(super) fn result_detail_for(metadata: &ToolMetadata) -> Option<ToolDetail> {
     }
 }
 
-pub(super) fn bash_result_detail(
-    mut lines: Vec<ToolLine>,
-    structured: &serde_json::Map<String, Value>,
-) -> ToolDetail {
+pub(super) fn bash_result_detail(structured: &serde_json::Map<String, Value>) -> ToolDetail {
+    let mut lines: Vec<ToolLine> = Vec::new();
     append_present_fields(
         &mut lines,
         structured,
@@ -78,10 +75,8 @@ pub(super) fn bash_result_detail(
     detail(lines)
 }
 
-pub(super) fn edit_result_detail(
-    mut lines: Vec<ToolLine>,
-    structured: &serde_json::Map<String, Value>,
-) -> ToolDetail {
+pub(super) fn edit_result_detail(structured: &serde_json::Map<String, Value>) -> ToolDetail {
+    let mut lines: Vec<ToolLine> = Vec::new();
     if let Some(file) = pick_field(structured, &["filePath", "file_path", "path"]) {
         lines.push(line("file", file));
     }
@@ -123,10 +118,8 @@ pub(super) fn edit_result_detail(
     detail(lines)
 }
 
-pub(super) fn agent_result_detail(
-    mut lines: Vec<ToolLine>,
-    structured: &serde_json::Map<String, Value>,
-) -> ToolDetail {
+pub(super) fn agent_result_detail(structured: &serde_json::Map<String, Value>) -> ToolDetail {
+    let mut lines: Vec<ToolLine> = Vec::new();
     append_present_fields(
         &mut lines,
         structured,
@@ -166,10 +159,10 @@ pub(super) fn agent_result_detail(
 }
 
 pub(super) fn task_result_detail(
-    mut lines: Vec<ToolLine>,
     metadata: &ToolMetadata,
     structured: &serde_json::Map<String, Value>,
 ) -> ToolDetail {
+    let mut lines: Vec<ToolLine> = Vec::new();
     let task = structured.get("task").and_then(Value::as_object);
     if metadata.canonical_name == "TaskCreate" {
         if let Some(id) = task
@@ -228,10 +221,8 @@ pub(super) fn task_result_detail(
     detail(lines)
 }
 
-pub(super) fn tool_search_result_detail(
-    mut lines: Vec<ToolLine>,
-    structured: &serde_json::Map<String, Value>,
-) -> ToolDetail {
+pub(super) fn tool_search_result_detail(structured: &serde_json::Map<String, Value>) -> ToolDetail {
+    let mut lines: Vec<ToolLine> = Vec::new();
     append_present_fields(
         &mut lines,
         structured,
@@ -246,10 +237,8 @@ pub(super) fn tool_search_result_detail(
     detail(lines)
 }
 
-pub(super) fn web_search_result_detail(
-    mut lines: Vec<ToolLine>,
-    structured: &serde_json::Map<String, Value>,
-) -> ToolDetail {
+pub(super) fn web_search_result_detail(structured: &serde_json::Map<String, Value>) -> ToolDetail {
+    let mut lines: Vec<ToolLine> = Vec::new();
     append_present_fields(
         &mut lines,
         structured,
@@ -265,10 +254,8 @@ pub(super) fn web_search_result_detail(
     detail(lines)
 }
 
-pub(super) fn web_fetch_result_detail(
-    mut lines: Vec<ToolLine>,
-    structured: &serde_json::Map<String, Value>,
-) -> ToolDetail {
+pub(super) fn web_fetch_result_detail(structured: &serde_json::Map<String, Value>) -> ToolDetail {
+    let mut lines: Vec<ToolLine> = Vec::new();
     append_present_fields(
         &mut lines,
         structured,
@@ -283,10 +270,8 @@ pub(super) fn web_fetch_result_detail(
     detail(lines)
 }
 
-pub(super) fn image_result_detail(
-    mut lines: Vec<ToolLine>,
-    structured: &serde_json::Map<String, Value>,
-) -> ToolDetail {
+pub(super) fn image_result_detail(structured: &serde_json::Map<String, Value>) -> ToolDetail {
+    let mut lines: Vec<ToolLine> = Vec::new();
     append_present_fields(
         &mut lines,
         structured,
@@ -298,10 +283,8 @@ pub(super) fn image_result_detail(
     detail(lines)
 }
 
-pub(super) fn dynamic_result_detail(
-    mut lines: Vec<ToolLine>,
-    structured: &serde_json::Map<String, Value>,
-) -> ToolDetail {
+pub(super) fn dynamic_result_detail(structured: &serde_json::Map<String, Value>) -> ToolDetail {
+    let mut lines: Vec<ToolLine> = Vec::new();
     append_present_fields(
         &mut lines,
         structured,
@@ -314,10 +297,8 @@ pub(super) fn dynamic_result_detail(
     detail(lines)
 }
 
-pub(super) fn output_result_detail(
-    mut lines: Vec<ToolLine>,
-    structured: &serde_json::Map<String, Value>,
-) -> ToolDetail {
+pub(super) fn output_result_detail(structured: &serde_json::Map<String, Value>) -> ToolDetail {
+    let mut lines: Vec<ToolLine> = Vec::new();
     append_present_fields(
         &mut lines,
         structured,
@@ -329,10 +310,8 @@ pub(super) fn output_result_detail(
     detail(lines)
 }
 
-pub(super) fn question_result_detail(
-    mut lines: Vec<ToolLine>,
-    structured: &serde_json::Map<String, Value>,
-) -> ToolDetail {
+pub(super) fn question_result_detail(structured: &serde_json::Map<String, Value>) -> ToolDetail {
+    let mut lines: Vec<ToolLine> = Vec::new();
     if let Some(questions) = structured.get("questions").and_then(Value::as_array) {
         lines.push(line("questions", questions.len().to_string()));
     }
@@ -340,10 +319,8 @@ pub(super) fn question_result_detail(
     detail(lines)
 }
 
-pub(super) fn schedule_result_detail(
-    mut lines: Vec<ToolLine>,
-    structured: &serde_json::Map<String, Value>,
-) -> ToolDetail {
+pub(super) fn schedule_result_detail(structured: &serde_json::Map<String, Value>) -> ToolDetail {
+    let mut lines: Vec<ToolLine> = Vec::new();
     append_present_fields(
         &mut lines,
         structured,
@@ -356,10 +333,8 @@ pub(super) fn schedule_result_detail(
     detail(lines)
 }
 
-pub(super) fn skill_result_detail(
-    mut lines: Vec<ToolLine>,
-    structured: &serde_json::Map<String, Value>,
-) -> ToolDetail {
+pub(super) fn skill_result_detail(structured: &serde_json::Map<String, Value>) -> ToolDetail {
+    let mut lines: Vec<ToolLine> = Vec::new();
     append_present_fields(
         &mut lines,
         structured,
@@ -371,10 +346,8 @@ pub(super) fn skill_result_detail(
     detail(lines)
 }
 
-pub(super) fn workflow_result_detail(
-    mut lines: Vec<ToolLine>,
-    structured: &serde_json::Map<String, Value>,
-) -> ToolDetail {
+pub(super) fn workflow_result_detail(structured: &serde_json::Map<String, Value>) -> ToolDetail {
+    let mut lines: Vec<ToolLine> = Vec::new();
     append_present_fields(
         &mut lines,
         structured,
@@ -391,10 +364,8 @@ pub(super) fn workflow_result_detail(
     detail(lines)
 }
 
-pub(super) fn goal_result_detail(
-    mut lines: Vec<ToolLine>,
-    structured: &serde_json::Map<String, Value>,
-) -> ToolDetail {
+pub(super) fn goal_result_detail(structured: &serde_json::Map<String, Value>) -> ToolDetail {
+    let mut lines: Vec<ToolLine> = Vec::new();
     append_present_fields(
         &mut lines,
         structured,
@@ -410,10 +381,10 @@ pub(super) fn goal_result_detail(
 }
 
 pub(super) fn default_result_detail(
-    mut lines: Vec<ToolLine>,
     metadata: &ToolMetadata,
     structured: &serde_json::Map<String, Value>,
 ) -> ToolDetail {
+    let mut lines: Vec<ToolLine> = Vec::new();
     if metadata.category == "task" {
         if let Some(task) = structured.get("task").and_then(Value::as_object) {
             append_present_fields(
