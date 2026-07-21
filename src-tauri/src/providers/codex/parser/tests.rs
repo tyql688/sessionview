@@ -235,15 +235,19 @@ fn parse_session_file_counts_malformed_lines_without_aborting() {
 }
 
 #[test]
-fn parse_session_file_counts_unmatched_tool_results_without_fabricating_messages() {
+fn parse_session_file_materializes_event_only_tool_calls() {
+    // Connector MCP calls, desktop patch applies, and some exec streams
+    // have no response_item pair — the end event is the only on-disk
+    // record, so it must become a tool message instead of a warning.
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("codex.jsonl");
     fs::write(
         &file,
         concat!(
             "{\"timestamp\":\"2026-04-10T10:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"keep me\"}}\n",
-            "{\"timestamp\":\"2026-04-10T10:00:01Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"exec_command_end\",\"call_id\":\"exec_missing\"}}\n",
-            "{\"timestamp\":\"2026-04-10T10:00:02Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"patch_apply_end\",\"call_id\":\"patch_missing\"}}\n"
+            "{\"timestamp\":\"2026-04-10T10:00:01Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"exec_command_end\",\"call_id\":\"exec_missing\",\"command\":\"echo hi\",\"stdout\":\"hi\",\"status\":\"completed\"}}\n",
+            "{\"timestamp\":\"2026-04-10T10:00:02Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"patch_apply_end\",\"call_id\":\"patch_missing\",\"stdout\":\"Success. Updated the following files:\\nM a.txt\\n\",\"success\":true,\"changes\":{\"a.txt\":{\"type\":\"update\",\"unified_diff\":\"-old\\n+new\\n\"}}}}\n",
+            "{\"timestamp\":\"2026-04-10T10:00:03Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"mcp_tool_call_end\",\"call_id\":\"mcp_missing\",\"invocation\":{\"server\":\"codex_apps\",\"tool\":\"github.search\",\"arguments\":{\"query\":\"x\"}},\"result\":{\"Ok\":{\"content\":[{\"type\":\"text\",\"text\":\"Action completed.\"}]}}}}\n"
         ),
     )
     .unwrap();
@@ -253,13 +257,27 @@ fn parse_session_file_counts_unmatched_tool_results_without_fabricating_messages
     };
     let parsed = provider.parse_session_file(&file).expect("parsed session");
 
-    assert_eq!(parsed.parse_warning_count, 2);
-    assert!(
-        !parsed
-            .messages
-            .iter()
-            .any(|message| message.role == crate::models::MessageRole::Tool)
+    assert_eq!(parsed.parse_warning_count, 0);
+    let tools: Vec<_> = parsed
+        .messages
+        .iter()
+        .filter(|message| message.role == crate::models::MessageRole::Tool)
+        .collect();
+    assert_eq!(tools.len(), 3);
+    assert_eq!(
+        tools[0]
+            .tool_metadata
+            .as_ref()
+            .map(|metadata| metadata.canonical_name.as_str()),
+        Some("Bash")
     );
+    assert!(tools[1].content.contains("Success. Updated"));
+    let mcp = tools[2].tool_metadata.as_ref().expect("mcp metadata");
+    assert_eq!(
+        mcp.mcp.as_ref().map(|mcp| mcp.tool.as_str()),
+        Some("github.search")
+    );
+    assert_eq!(tools[2].content, "Action completed.");
 }
 
 #[test]

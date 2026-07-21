@@ -61,6 +61,13 @@ pub(super) struct CodexScanAccum {
     model_provider: Option<String>,
     pub(super) thread_name: Option<String>,
     pub(super) current_model: Option<String>,
+    /// Every distinct model named by this file (turn_context or resolved
+    /// token_count). Lets `scan_lines` backfill usage events that arrived
+    /// before the file's first turn_context when the answer is unambiguous.
+    pub(super) models_seen: std::collections::BTreeSet<String>,
+    /// token_count events with real totals but no resolvable model yet:
+    /// (timestamp, input, cached, output).
+    pub(super) pending_unresolved_usage: Vec<(String, u64, u64, u64)>,
     pub(super) previous_token_totals: Option<CodexRawUsageCounts>,
     /// Codex re-emits some token_count events verbatim. Events identical in
     /// (timestamp, model, input, cached, output, reasoning, total) are counted
@@ -99,6 +106,8 @@ impl CodexScanAccum {
             model_provider: None,
             thread_name: None,
             current_model: None,
+            models_seen: std::collections::BTreeSet::new(),
+            pending_unresolved_usage: Vec::new(),
             previous_token_totals: None,
             seen_token_events: std::collections::HashSet::new(),
             cc_version: None,
@@ -113,6 +122,35 @@ impl CodexScanAccum {
             unresolved_usage_event_count: 0,
             parse_warning_count: 0,
         }
+    }
+
+    /// Materialize a tool call whose only on-disk record is a lifecycle
+    /// event (no response_item pair): build the tool message and register
+    /// its call_id so the caller's enrichment path finds it.
+    pub(super) fn push_event_only_tool_call(
+        &mut self,
+        raw_name: &str,
+        call_id: &str,
+        input: Option<serde_json::Value>,
+        timestamp: Option<String>,
+    ) {
+        let metadata =
+            crate::tool_metadata::build_tool_metadata(crate::tool_metadata::ToolCallFacts {
+                provider: crate::models::Provider::Codex,
+                raw_name,
+                input: input.as_ref(),
+                call_id: Some(call_id),
+                assistant_id: None,
+            });
+        let idx = self.messages.len();
+        self.call_id_map.register(Some(call_id), idx);
+        self.messages.push(crate::models::Message {
+            timestamp,
+            tool_name: Some(metadata.canonical_name.clone()),
+            tool_input: input.map(|value| value.to_string()),
+            tool_metadata: Some(metadata),
+            ..crate::models::Message::new(crate::models::MessageRole::Tool, String::new())
+        });
     }
 
     pub(super) fn record_unmatched_tool_event(
@@ -146,6 +184,42 @@ impl CodexScanAccum {
                 "skipped {unmatched_tool_events} unmatched Codex tool result event(s) in '{}'",
                 path.display()
             );
+        }
+        // Usage that arrived before the file's first turn_context: when the
+        // whole file names exactly one model, that model is the answer;
+        // ambiguity (or no model at all) stays a counted warning.
+        let pending = std::mem::take(&mut self.pending_unresolved_usage);
+        if !pending.is_empty() {
+            if self.models_seen.len() == 1 {
+                let model = self.models_seen.iter().next().cloned().unwrap_or_default();
+                for (timestamp, input, cached, output) in pending {
+                    let key = (
+                        timestamp.clone(),
+                        model.clone(),
+                        input,
+                        cached,
+                        output,
+                        0u64,
+                        0u64,
+                    );
+                    if !self.seen_token_events.insert(key) {
+                        continue;
+                    }
+                    self.usage_events.push(UsageEvent {
+                        timestamp,
+                        model: model.clone(),
+                        input_tokens: input.saturating_sub(cached.min(input)),
+                        output_tokens: output,
+                        cache_read_input_tokens: cached.min(input),
+                        cache_creation_input_tokens: 0,
+                        usage_hash: None,
+                    });
+                }
+            } else {
+                self.unresolved_usage_event_count = self
+                    .unresolved_usage_event_count
+                    .saturating_add(u32::try_from(pending.len()).unwrap_or(u32::MAX));
+            }
         }
         let unresolved_usage_events = std::mem::take(&mut self.unresolved_usage_event_count);
         if unresolved_usage_events > 0 {
@@ -183,6 +257,24 @@ impl CodexScanAccum {
         // `newly spawned agent` cue still present in their function-call
         // output.
         if self.skipping_fork_context {
+            // The forked parent context is not this session's transcript,
+            // but its turn_context still names the model that every later
+            // token_count needs for cost attribution — harvest it without
+            // emitting messages.
+            if entry.line_type == "turn_context" {
+                if let Some(model) = payload
+                    .get("model")
+                    .and_then(|v| v.as_str())
+                    .filter(|model| !model.is_empty())
+                {
+                    self.current_model = Some(model.to_string());
+                    self.models_seen.insert(model.to_string());
+                    if self.model.is_none() {
+                        self.model = Some(model.to_string());
+                    }
+                }
+                return;
+            }
             if entry.line_type == "event_msg"
                 && payload.get("type").and_then(|v| v.as_str()) == Some("task_started")
             {
@@ -333,6 +425,7 @@ impl CodexScanAccum {
             && !m.is_empty()
         {
             self.current_model = Some(m.to_string());
+            self.models_seen.insert(m.to_string());
             if self.model.is_none() {
                 self.model = Some(m.to_string());
             }
@@ -405,6 +498,8 @@ impl CodexProvider {
             model_provider,
             thread_name,
             current_model: _,
+            models_seen: _,
+            pending_unresolved_usage: _,
             previous_token_totals: _,
             seen_token_events: _,
             cc_version,

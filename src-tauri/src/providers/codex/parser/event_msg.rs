@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::models::{Message, MessageRole, Provider};
 use crate::provider::UsageEvent;
+use crate::provider::util::{ContentPartsRender, render_content_parts};
 use crate::tool_metadata::{
     ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata,
 };
@@ -148,18 +149,31 @@ impl CodexScanAccum {
                     // tokens with no provenance while daily totals undercount.
                     let Some(resolved_model) = resolved_model else {
                         if any_nonzero {
-                            if self.unresolved_usage_event_count == 0 {
+                            if self.pending_unresolved_usage.is_empty() {
                                 log::debug!(
                                     "first Codex token_count event without a resolvable model is at {:?} in '{}'",
                                     entry.timestamp,
                                     path.display()
                                 );
                             }
-                            self.unresolved_usage_event_count =
-                                self.unresolved_usage_event_count.saturating_add(1);
+                            // Defer instead of dropping: scan_lines backfills
+                            // these once the file's model is known.
+                            match entry.timestamp.as_ref() {
+                                Some(ts) => self.pending_unresolved_usage.push((
+                                    ts.clone(),
+                                    input,
+                                    cached,
+                                    output,
+                                )),
+                                None => {
+                                    self.unresolved_usage_event_count =
+                                        self.unresolved_usage_event_count.saturating_add(1);
+                                }
+                            }
                         }
                         return;
                     };
+                    self.models_seen.insert(resolved_model.clone());
                     // Codex re-emits some token_count events verbatim. Count an
                     // event identical in (timestamp, model, input, cached,
                     // output, reasoning, total) only once.
@@ -357,11 +371,31 @@ impl CodexScanAccum {
                 let Some(call_id) = payload.get("call_id").and_then(|v| v.as_str()) else {
                     return;
                 };
+                if self
+                    .call_id_map
+                    .message_mut(Some(call_id), &mut self.messages)
+                    .is_none()
+                {
+                    // Some exec streams carry no response_item pair — this
+                    // event is the only record, so materialize the call.
+                    let mut input = serde_json::Map::new();
+                    if let Some(command) = payload.get("command") {
+                        input.insert("command".to_string(), command.clone());
+                    }
+                    if let Some(cwd) = payload.get("cwd") {
+                        input.insert("cwd".to_string(), cwd.clone());
+                    }
+                    self.push_event_only_tool_call(
+                        "exec_command",
+                        call_id,
+                        (!input.is_empty()).then_some(Value::Object(input)),
+                        entry.timestamp.clone(),
+                    );
+                }
                 let Some(message) = self
                     .call_id_map
                     .message_mut(Some(call_id), &mut self.messages)
                 else {
-                    self.record_unmatched_tool_event("exec_command", call_id, path);
                     return;
                 };
 
@@ -394,11 +428,36 @@ impl CodexScanAccum {
                 let Some(call_id) = payload.get("call_id").and_then(|v| v.as_str()) else {
                     return;
                 };
+                if self
+                    .call_id_map
+                    .message_mut(Some(call_id), &mut self.messages)
+                    .is_none()
+                {
+                    // Connector calls (Codex app integrations) never get a
+                    // response_item pair — this event is the only record.
+                    let invocation = payload.get("invocation");
+                    let raw_name = match (
+                        invocation
+                            .and_then(|i| i.get("server"))
+                            .and_then(Value::as_str),
+                        invocation
+                            .and_then(|i| i.get("tool"))
+                            .and_then(Value::as_str),
+                    ) {
+                        (Some(server), Some(tool)) => format!("mcp__{server}__{tool}"),
+                        _ => "mcp_tool_call".to_string(),
+                    };
+                    self.push_event_only_tool_call(
+                        &raw_name,
+                        call_id,
+                        invocation.and_then(|i| i.get("arguments")).cloned(),
+                        entry.timestamp.clone(),
+                    );
+                }
                 let Some(message) = self
                     .call_id_map
                     .message_mut(Some(call_id), &mut self.messages)
                 else {
-                    self.record_unmatched_tool_event("MCP tool", call_id, path);
                     return;
                 };
 
@@ -407,17 +466,38 @@ impl CodexScanAccum {
                     .get("success")
                     .and_then(|v| v.as_bool())
                     .map(|success| !success);
+                if message.content.is_empty()
+                    && let Some(parts) = payload
+                        .pointer("/result/Ok/content")
+                        .and_then(Value::as_array)
+                    && let ContentPartsRender::Rendered(text) = render_content_parts(parts)
+                {
+                    message.content = text;
+                }
                 enrich_existing_tool_message(message, result_value, is_error, None);
             }
             "patch_apply_end" => {
                 let Some(call_id) = payload.get("call_id").and_then(|v| v.as_str()) else {
                     return;
                 };
+                if self
+                    .call_id_map
+                    .message_mut(Some(call_id), &mut self.messages)
+                    .is_none()
+                {
+                    // Desktop-originated patch applies have no response_item
+                    // pair — this event is the only record of the edit.
+                    self.push_event_only_tool_call(
+                        "apply_patch",
+                        call_id,
+                        None,
+                        entry.timestamp.clone(),
+                    );
+                }
                 let Some(message) = self
                     .call_id_map
                     .message_mut(Some(call_id), &mut self.messages)
                 else {
-                    self.record_unmatched_tool_event("apply_patch", call_id, path);
                     return;
                 };
 
@@ -485,7 +565,10 @@ impl CodexScanAccum {
                     .call_id_map
                     .message_mut(Some(call_id), &mut self.messages)
                 else {
-                    self.record_unmatched_tool_event("subagent", call_id, path);
+                    // Activity pings for agents spawned from a sibling
+                    // thread: the spawn call lives in that thread's file and
+                    // the ping carries no content of its own.
+                    log::debug!("Codex sub_agent_activity for foreign call_id {call_id}");
                     return;
                 };
                 let kind = payload.get("kind").and_then(|v| v.as_str());
