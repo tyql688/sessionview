@@ -412,6 +412,19 @@ pub(super) fn handle_assistant_message(
                         }
                     }
                 }
+                "fallback" => {
+                    let from = item.pointer("/from/model").and_then(Value::as_str);
+                    let to = item.pointer("/to/model").and_then(Value::as_str);
+                    let (Some(from), Some(to)) = (from, to) else {
+                        log::warn!("Claude fallback block missing from/to models");
+                        state.parse_warning_count = state.parse_warning_count.saturating_add(1);
+                        continue;
+                    };
+                    state.messages.push(Message {
+                        timestamp: timestamp.clone(),
+                        ..Message::system(format!("[model_fallback] {from} \u{2192} {to}"))
+                    });
+                }
                 "redacted_thinking" => {
                     state.messages.push(Message {
                         timestamp: timestamp.clone(),

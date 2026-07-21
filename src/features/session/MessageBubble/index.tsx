@@ -116,6 +116,11 @@ const SYSTEM_SUBTYPE_CONFIG: Record<
     cls: "sys-info",
     collapsible: true,
   },
+  model_fallback: {
+    icon: "\uD83D\uDD00",
+    labelKey: "system.modelFallback",
+    cls: "sys-info",
+  },
   pr_link: { icon: "\uD83D\uDD17", labelKey: "system.prLink", cls: "sys-info" },
   agent_mail: {
     icon: "\u2709",

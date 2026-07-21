@@ -108,12 +108,20 @@ impl HistoryBuilder {
             "tool_call_update" => self.apply_tool_update(update),
             "turn_completed" => self.attach_turn_usage(update),
             // ACP / runtime bookkeeping updates with no transcript content.
+            // Task and subagent lifecycle events duplicate what the tool
+            // call stream already shows; retry states are transient.
             "plan"
             | "available_commands_update"
             | "current_mode_update"
             | "hook_execution"
             | "auto_compact_started"
-            | "auto_compact_completed" => {}
+            | "auto_compact_completed"
+            | "compaction_checkpoint"
+            | "retry_state"
+            | "task_backgrounded"
+            | "task_completed"
+            | "subagent_spawned"
+            | "subagent_finished" => {}
             unknown => {
                 log::warn!("skipping unknown Grok session update '{unknown}'");
                 self.warnings = self.warnings.saturating_add(1);

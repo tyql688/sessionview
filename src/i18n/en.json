@@ -283,6 +283,7 @@
     "subagentTask": "Subagent task",
     "skillActivation": "Skill activation",
     "kimiContext": "Kimi context",
+    "modelFallback": "Model fallback",
     "prLink": "PR",
     "error": "Error",
     "turnAborted": "Aborted",

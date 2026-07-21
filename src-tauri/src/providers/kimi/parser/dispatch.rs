@@ -599,16 +599,40 @@ pub(super) fn dispatch_line(accum: &mut ScanAccum, entry: &Value) {
             }
         }
 
+        // Compaction rewrote the context; the summary is what the model
+        // sees afterwards, so it belongs in the transcript.
+        "context.apply_compaction" => {
+            let ts = accum.note_time(line_time_ms);
+            let Some(summary) = entry
+                .get("summary")
+                .and_then(Value::as_str)
+                .filter(|summary| !summary.is_empty())
+            else {
+                log::warn!("Kimi context.apply_compaction without summary");
+                accum.note_warning();
+                return;
+            };
+            accum.push_system_context(format!("[context_compacted]\n{summary}"), summary, ts);
+        }
+
         // ---- Events that produce no visible transcript content ----
         "tools.set_active_tools"
         | "tools.update_store"
         | "plan_mode.enter"
         | "plan_mode.cancel"
+        | "plan_mode.exit"
         | "permission.set_mode"
         | "permission.record_approval_result"
         | "llm.request"
         | "llm.tools_snapshot"
-        | "goal.update" => {
+        | "goal.create"
+        | "goal.update"
+        | "goal.clear"
+        | "full_compaction.begin"
+        | "full_compaction.complete"
+        | "full_compaction.cancel"
+        | "swarm_mode.enter"
+        | "swarm_mode.exit" => {
             // These are UI/state bookkeeping events; they don't carry
             // messages we want in the transcript. Soak up the time so
             // first/last timestamps still span the whole file.
