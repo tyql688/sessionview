@@ -505,7 +505,7 @@ export function SessionView(props: { session: SessionRef; active: boolean }) {
           SESSION-WIDE numbers from the outline parse; until they arrive the
           buttons show without numbers (the loaded window's counts grow as
           pages land, which reads as the numbers inflating while scrolling). */}
-      <div className="flex items-center gap-1 border-b border-border-subtle px-5 py-1.5">
+      <div className="session-filter-bar flex items-center gap-1 border-b border-border-subtle px-5 py-1.5">
         <button
           type="button"
           className={`session-focus-toggle${focusMode ? " active" : ""}`}

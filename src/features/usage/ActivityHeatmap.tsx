@@ -1,7 +1,8 @@
-import { type CSSProperties, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { CircleDollarSign, Hash } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { useIsCompact } from "@/stores/viewport";
 import { useI18n } from "@/i18n/index";
 import type { HeatmapCell, HeatmapGrid, HeatmapMetric } from "@/features/usage/heatmap";
 import { fmtCost, fmtTokens } from "@/features/usage/formatters";
@@ -80,6 +81,15 @@ export function ActivityHeatmap(props: ActivityHeatmapProps) {
   const flatCells = props.grid.weeks.flatMap((week) => week.cells);
   const weekCount = props.grid.weeks.length;
 
+  // Compact layouts scroll the grid horizontally (see mobile.css); land on
+  // the newest weeks, which are what the reader came for.
+  const isCompact = useIsCompact();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (isCompact && el) el.scrollLeft = el.scrollWidth;
+  }, [isCompact, weekCount]);
+
   return (
     <section className="usage-card usage-heatmap-card">
       <div className="usage-heatmap-topbar">
@@ -152,7 +162,7 @@ export function ActivityHeatmap(props: ActivityHeatmapProps) {
       </div>
 
       {weekCount > 0 && (
-        <div className="usage-heatmap-scroll">
+        <div className="usage-heatmap-scroll" ref={scrollRef}>
           <fieldset
             className={`usage-heatmap-graph${props.loading ? " is-loading" : ""}`}
             aria-label={headline}
