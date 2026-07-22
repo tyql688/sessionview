@@ -18,7 +18,7 @@ use super::content::{
     extract_message_content, extract_token_usage, extract_tool_result_content,
     is_tool_result_message, tool_result_facts, unique_hash_from_entry,
 };
-use super::text_clean::{LocalCommandText, format_local_command_text};
+use super::text_clean::{LocalCommandText, extract_teammate_mail, format_local_command_text};
 use super::{ParseState, PendingToolResult, ScanAccum};
 
 pub(super) fn preserves_pending_user_message(line_type: &str) -> bool {
@@ -182,6 +182,27 @@ pub(super) fn handle_user_message(
 
     let text = extract_message_content(msg);
     if text.trim().is_empty() {
+        return;
+    }
+    // Compaction summaries arrive as user-role lines flagged `isCompactSummary`
+    // — harness output, not typed input. Route them to the same collapsed
+    // [context_compacted] row as Codex/Grok/Pi compaction markers.
+    if entry
+        .get("isCompactSummary")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        flush_pending(state);
+        append_system_message(state, format!("[context_compacted]\n{text}"), timestamp);
+        return;
+    }
+    // Teammate mail from another Claude session is likewise harness-injected
+    // as a user turn; surface each block as an [agent_mail] system row.
+    if let Some(mails) = extract_teammate_mail(&text) {
+        flush_pending(state);
+        for mail in mails {
+            append_system_message(state, mail, timestamp.clone());
+        }
         return;
     }
     if let Some(command) = format_local_command_text(&text) {

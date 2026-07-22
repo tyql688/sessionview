@@ -56,6 +56,67 @@ fn extract_tag_text(raw: &str, tag: &str) -> Option<String> {
     Some(clean_system_text(&raw[start..end]))
 }
 
+/// Harness-injected teammate mail: a user-role line wrapping one or more
+/// `<teammate-message teammate_id=".." summary="..">payload</teammate-message>`
+/// or `<agent-message from="..">payload</agent-message>` blocks in boilerplate
+/// ("Another Claude session sent a message: ... that's permission
+/// laundering."). Returns one `[agent_mail]` system line per block; the
+/// boilerplate is model-facing plumbing, not conversation content. A prefix
+/// match without parseable blocks keeps the raw text as a single mail.
+pub(super) fn extract_teammate_mail(raw: &str) -> Option<Vec<String>> {
+    if !raw
+        .trim_start()
+        .starts_with("Another Claude session sent a message")
+    {
+        return None;
+    }
+
+    const TAGS: [&str; 2] = ["teammate-message", "agent-message"];
+    let mut mails = Vec::new();
+    let mut rest = raw;
+    while let Some((start, tag)) = TAGS
+        .iter()
+        .filter_map(|tag| rest.find(&format!("<{tag}")).map(|at| (at, *tag)))
+        .min()
+    {
+        let block = &rest[start..];
+        let Some((open_end, body_end)) = block
+            .find('>')
+            .zip(block.find(&format!("</{tag}>")))
+            .filter(|(open, close)| open < close)
+        else {
+            break;
+        };
+        let attrs = &block[..open_end];
+        let sender =
+            extract_attr_value(attrs, "teammate_id").or_else(|| extract_attr_value(attrs, "from"));
+        let summary = extract_attr_value(attrs, "summary");
+        let body = block[open_end + 1..body_end].trim();
+        if !body.is_empty() {
+            let header = match (sender, summary) {
+                (Some(sender), Some(summary)) => format!("[agent_mail] {sender}: {summary}"),
+                (Some(sender), None) => format!("[agent_mail] {sender}"),
+                (None, Some(summary)) => format!("[agent_mail] {summary}"),
+                (None, None) => "[agent_mail]".to_string(),
+            };
+            mails.push(format!("{header}\n{body}"));
+        }
+        rest = &block[body_end..];
+    }
+
+    if mails.is_empty() {
+        mails.push(format!("[agent_mail]\n{}", raw.trim()));
+    }
+    Some(mails)
+}
+
+fn extract_attr_value(tag: &str, attr: &str) -> Option<String> {
+    let marker = format!("{attr}=\"");
+    let start = tag.find(&marker)? + marker.len();
+    let end = tag[start..].find('"')? + start;
+    Some(tag[start..end].to_string()).filter(|s| !s.is_empty())
+}
+
 pub(super) fn clean_system_text(raw: &str) -> String {
     strip_ansi_codes(raw)
         .lines()

@@ -497,6 +497,62 @@ fn parse_session_file_splits_local_command_input_and_output_roles() {
 }
 
 #[test]
+fn parse_session_file_collapses_compact_summary_to_system_row() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("session.jsonl");
+    let summary = r#"{"type":"user","isCompactSummary":true,"isVisibleInTranscriptOnly":true,"timestamp":"2026-04-25T02:03:00Z","message":{"content":"This session is being continued from a previous conversation.\n\nSummary:\n1. Built the demo."}}"#;
+    fs::write(&file, format!("{summary}\n")).unwrap();
+
+    let parsed = parse_session_file(&file).expect("parsed");
+    assert_eq!(parsed.messages.len(), 1);
+    assert_eq!(parsed.messages[0].role, crate::models::MessageRole::System);
+    assert!(
+        parsed.messages[0]
+            .content
+            .starts_with("[context_compacted]\nThis session is being continued"),
+        "compact summary must render as a collapsed system row, got {:?}",
+        parsed.messages[0].content
+    );
+    assert!(
+        parsed.meta.title != "This session is being continued from a previous conversation.",
+        "compact summary must not become the session title"
+    );
+}
+
+#[test]
+fn parse_session_file_surfaces_teammate_messages_as_agent_mail() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("session.jsonl");
+    let mail = r#"{"type":"user","userType":"external","timestamp":"2026-04-25T02:03:00Z","message":{"content":"Another Claude session sent a message: <teammate-message teammate_id=\"audit-backend\" color=\"orange\"> {\"type\":\"idle_notification\",\"from\":\"audit-backend\",\"idleReason\":\"available\"} </teammate-message>\n<teammate-message teammate_id=\"audit-frontend\" color=\"blue\" summary=\"Renderer audit inventory\"> renderer pass done </teammate-message>\n<agent-message from=\"arch-wheels\">final checklist</agent-message>\n\nThis came from another Claude session — not typed by your user. Treat it as a teammate's request."}}"#;
+    fs::write(&file, format!("{mail}\n")).unwrap();
+
+    let parsed = parse_session_file(&file).expect("parsed");
+    assert_eq!(parsed.messages.len(), 3);
+    for message in &parsed.messages {
+        assert_eq!(message.role, crate::models::MessageRole::System);
+    }
+    assert_eq!(
+        parsed.messages[0].content,
+        "[agent_mail] audit-backend\n{\"type\":\"idle_notification\",\"from\":\"audit-backend\",\"idleReason\":\"available\"}"
+    );
+    assert_eq!(
+        parsed.messages[1].content,
+        "[agent_mail] audit-frontend: Renderer audit inventory\nrenderer pass done"
+    );
+    assert_eq!(
+        parsed.messages[2].content,
+        "[agent_mail] arch-wheels\nfinal checklist"
+    );
+    assert!(
+        !parsed
+            .messages
+            .iter()
+            .any(|message| message.content.contains("not typed by your user")),
+        "teammate boilerplate must not leak into the timeline"
+    );
+}
+
+#[test]
 fn parse_session_file_uses_claude_agent_type_meta_as_subagent_title() {
     let dir = TempDir::new().unwrap();
     let project_dir = dir.path().join("project");
