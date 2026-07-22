@@ -1,6 +1,6 @@
 {
   "name": "sessionview",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "description": "Browse local AI coding sessions (Claude Code, Codex, Cursor, \u2026) from a browser \u2014 headless SessionView server",
   "license": "MIT",
   "repository": {
@@ -26,10 +26,10 @@
     "node": ">=18.17.0"
   },
   "optionalDependencies": {
-    "@echo0321/sessionview-darwin-arm64": "0.7.4",
-    "@echo0321/sessionview-darwin-x64": "0.7.4",
-    "@echo0321/sessionview-linux-x64": "0.7.4",
-    "@echo0321/sessionview-linux-arm64": "0.7.4",
-    "@echo0321/sessionview-win32-x64": "0.7.4"
+    "@echo0321/sessionview-darwin-arm64": "0.7.5",
+    "@echo0321/sessionview-darwin-x64": "0.7.5",
+    "@echo0321/sessionview-linux-x64": "0.7.5",
+    "@echo0321/sessionview-linux-arm64": "0.7.5",
+    "@echo0321/sessionview-win32-x64": "0.7.5"
   }
 }
