@@ -1,4 +1,4 @@
-import { type DragEvent as ReactDragEvent, Fragment, useEffect, useRef, useState } from "react";
+import { type DragEvent as ReactDragEvent, Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { SessionMeta, SessionRef, TreeNode } from "@/lib/types";
 import { getChildSessionCounts, invokeWithFallback, listRecentSessions } from "@/lib/tauri";
 import { isPathBlocked } from "@/stores/settings";
@@ -10,9 +10,11 @@ import {
   focusGroup,
   setGroupFlexBasis,
   createGroupFromDrop,
+  mergeAllGroups,
 } from "@/features/editor/editorGroups";
 import { EditorArea } from "@/features/editor/EditorArea";
 import { SplitHandle } from "@/features/editor/SplitHandle";
+import { useIsCompact } from "@/stores/viewport";
 
 export function EditorGroupsContainer(props: {
   onTabSelect: (groupId: string, tabId: string) => void;
@@ -27,7 +29,18 @@ export function EditorGroupsContainer(props: {
 }) {
   const groups = useGroups();
   const activeGroupId = useActiveGroupId();
+  const isCompact = useIsCompact();
   const [dropActive, setDropActive] = useState(false);
+
+  // Compact layout has no room for split view — collapse splits into a single
+  // group whenever the viewport crosses into compact OR a split appears while
+  // compact (any path that slips past the disabled split entry points).
+  // Layout effect: the merge must land before paint, or two half-width panes
+  // flash for a frame.
+  const groupCount = groups.length;
+  useLayoutEffect(() => {
+    if (isCompact && groupCount > 1) mergeAllGroups();
+  }, [isCompact, groupCount]);
   const [recentVersion, setRecentVersion] = useState(0);
   const [recentSessions, setRecentSessions] = useState<SessionMeta[] | undefined>(undefined);
   const [recentSessionsLoading, setRecentSessionsLoading] = useState(true);
@@ -155,13 +168,15 @@ export function EditorGroupsContainer(props: {
   return (
     <div
       className="editor-groups-container"
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-      onDragLeave={handleDragLeave}
+      onDragOver={isCompact ? undefined : handleDragOver}
+      onDrop={isCompact ? undefined : handleDrop}
+      onDragLeave={isCompact ? undefined : handleDragLeave}
     >
       {groups.map((group, idx) => (
         <Fragment key={group.id}>
-          {idx > 0 && <SplitHandle onResize={(dx) => handleResize(idx - 1, dx)} onDoubleClick={equalizeWidths} />}
+          {idx > 0 && !isCompact && (
+            <SplitHandle onResize={(dx) => handleResize(idx - 1, dx)} onDoubleClick={equalizeWidths} />
+          )}
           <EditorArea
             groupId={group.id}
             tabs={group.tabs}
@@ -185,7 +200,7 @@ export function EditorGroupsContainer(props: {
           />
         </Fragment>
       ))}
-      <div className={`editor-groups-drop-right${dropActive ? " active" : ""}`} />
+      {!isCompact && <div className={`editor-groups-drop-right${dropActive ? " active" : ""}`} />}
     </div>
   );
 }

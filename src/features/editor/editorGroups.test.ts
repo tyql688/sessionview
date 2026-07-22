@@ -14,6 +14,7 @@ import {
   moveTabToGroup,
   createGroupFromDrop,
   focusAdjacentGroup,
+  mergeAllGroups,
   _reset,
 } from "@/features/editor/editorGroups";
 
@@ -337,6 +338,32 @@ describe("editorGroups store", () => {
       const g2Id = groups()[1].id;
       moveTabToGroup("s2", g2Id);
       expect(groups()[0].previewTabId).toBeNull();
+    });
+  });
+
+  describe("mergeAllGroups", () => {
+    it("collapses split groups into one, keeping tabs and focus", () => {
+      openSession(makeSession("s1"));
+      openSession(makeSession("s2"));
+      openSession(makeSession("s3"));
+      splitToRight("s3");
+      expect(groups()).toHaveLength(2);
+      expect(activeGroupId()).toBe(groups()[1].id);
+
+      mergeAllGroups();
+
+      expect(groups()).toHaveLength(1);
+      expect(groups()[0].tabs.map((t) => t.id)).toEqual(["s1", "s2", "s3"]);
+      expect(groups()[0].activeTabId).toBe("s3");
+      expect(groups()[0].flexBasis).toBe(100);
+      expect(activeGroupId()).toBe(groups()[0].id);
+    });
+
+    it("is a no-op with a single group", () => {
+      openSession(makeSession("s1"));
+      const before = groups();
+      mergeAllGroups();
+      expect(groups()).toBe(before);
     });
   });
 });

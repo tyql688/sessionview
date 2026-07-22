@@ -1,0 +1,199 @@
+/* Compact (phone) layout.
+ *
+ * Activated by stores/viewport.ts, which mirrors `(max-width: 768px)` onto a
+ * `data-compact` attribute on <html> so these rules stay in lockstep with the
+ * JSX branches keyed off the same store. Pointer-only tweaks use plain media
+ * queries. Loaded last from styles/index.css so overrides win by order.
+ */
+
+html[data-compact] .app-layout {
+  /* 100vh overshoots under mobile browser toolbars; dvh tracks them. */
+  height: 100dvh;
+}
+
+html[data-compact] .main-layout {
+  padding: 0;
+  gap: 0;
+}
+
+/* The status bar's density has no phone equivalent; the bottom nav owns that
+ * edge of the screen. */
+html[data-compact] .statusbar {
+  display: none;
+}
+
+/* Bottom navigation — the ActivityBar's horizontal variant. */
+.activity-bar.horizontal {
+  width: 100%;
+  flex-direction: row;
+  align-items: center;
+  /* One centered cluster — settings sits with the rest, not exiled to the
+   * far edge like the desktop rail's bottom slot. */
+  justify-content: center;
+  gap: 2px;
+  padding: 2px 8px calc(2px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--border-color);
+}
+
+.activity-bar.horizontal .activity-bar-top,
+.activity-bar.horizontal .activity-bar-bottom {
+  flex-direction: row;
+  gap: 2px;
+  padding-bottom: 0;
+}
+
+.activity-bar.horizontal .activity-bar-spacer {
+  display: none;
+}
+
+.activity-bar.horizontal .activity-btn {
+  width: 44px;
+  height: 44px;
+}
+
+/* Single-pane panels stretch to the full viewport width. (The explorer's
+ * inline resize width is cleared by the component when compact kicks in.) */
+html[data-compact] .explorer,
+html[data-compact] .favorites-view,
+html[data-compact] .blocked-view {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  flex: 1;
+  resize: none;
+}
+
+html[data-compact] .explorer-resize-handle {
+  display: none;
+}
+
+/* Editor groups are forced to a single group in compact mode (EditorArea
+ * also skips its inline split-view flex-basis there). */
+html[data-compact] .editor-area {
+  flex: 1 1 auto;
+}
+
+/* Touch targets. */
+html[data-compact] .tree-node {
+  height: 34px;
+}
+
+html[data-compact] .tab {
+  height: 34px;
+}
+
+/* Settings: the inner sidebar+content split has no room at phone widths —
+ * the section nav becomes a horizontally scrollable tab row above
+ * full-width content. */
+html[data-compact] .settings-panel {
+  flex-direction: column;
+}
+
+html[data-compact] .settings-sidebar {
+  display: flex;
+  /* The nav is a vertical ToggleGroup on desktop; lay it out as a row here. */
+  flex-direction: row;
+  align-items: center;
+  width: 100%;
+  flex-shrink: 0;
+  overflow-x: auto;
+  padding: 6px 8px;
+  border-right: none;
+  border-bottom: 0.5px solid var(--border);
+}
+
+html[data-compact] .settings-nav-item {
+  width: auto;
+  flex-shrink: 0;
+  margin: 0 2px;
+  text-align: center;
+  border-radius: 6px;
+}
+
+html[data-compact] .settings-content {
+  padding: 16px;
+}
+
+/* Session header: at phone widths the action buttons must not squeeze the
+ * title into a vertical sliver — wrap them onto their own row. */
+html[data-compact] .session-header {
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  gap: 6px 12px;
+}
+
+html[data-compact] .session-breadcrumb {
+  flex: 1 1 100%;
+}
+
+/* The session meta strip wraps to four-plus rows at phone widths and eats
+ * half the screen; collapse it to one swipeable line instead. */
+html[data-compact] .session-info {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 6px 12px;
+  gap: 10px;
+}
+
+html[data-compact] .session-info > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Role filter chips scroll rather than crushing the focus toggle into a
+ * vertical sliver. */
+html[data-compact] .session-filter-bar {
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+html[data-compact] .session-filter-bar > * {
+  flex-shrink: 0;
+}
+
+/* Per-message model/token line: wrap instead of folding the model name. */
+html[data-compact] .msg-token-row {
+  flex-wrap: wrap;
+  row-gap: 2px;
+  padding-left: 12px;
+}
+
+html[data-compact] .msg-model-label {
+  white-space: nowrap;
+}
+
+/* The right-anchored fixed-width dropdown would overflow a phone screen. */
+html[data-compact] .search-dropdown {
+  width: min(360px, calc(100vw - 24px));
+}
+
+/* Activity calendar: the fluid 53-column grid collapses to ~3px cells at
+ * phone widths. Do what GitHub's own mobile layout does instead — keep a
+ * readable minimum cell size and scroll horizontally, with the weekday axis
+ * pinned (the component scrolls to the newest week on mount). */
+html[data-compact] .usage-heatmap-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+html[data-compact] .usage-heatmap-graph {
+  /* ~10px cell + 3px gap per week column, plus the weekday-label column. */
+  min-width: calc(var(--weeks) * 13px + 40px);
+}
+
+html[data-compact] .usage-heatmap-weekdays {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg-editor);
+}
+
+/* No hover on touch: tab close buttons must be visible without it. */
+@media (pointer: coarse) {
+  .tab .tab-close {
+    opacity: 1;
+  }
+}

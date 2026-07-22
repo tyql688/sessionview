@@ -60,8 +60,15 @@ function SettingsIcon() {
   );
 }
 
-export function ActivityBar(props: { activeView: string; onViewChange: (v: string) => void }) {
+export function ActivityBar(props: {
+  activeView: string;
+  onViewChange: (v: string) => void;
+  /** "horizontal" renders the compact bottom-navigation variant. */
+  orientation?: "vertical" | "horizontal";
+}) {
   const { t } = useI18n();
+  const horizontal = props.orientation === "horizontal";
+  const tooltipSide = horizontal ? ("top" as const) : ("right" as const);
   const items: ActivityItem[] = [
     { id: "explorer", label: t("explorer.title"), icon: HomeIcon },
     { id: "favorites", label: t("favorites.title"), icon: StarIcon },
@@ -80,7 +87,7 @@ export function ActivityBar(props: { activeView: string; onViewChange: (v: strin
 
   return (
     <TooltipProvider>
-      <div className="activity-bar">
+      <div className={`activity-bar${horizontal ? " horizontal" : ""}`}>
         <div className="activity-bar-top">
           {topItems.map((item) => {
             const Icon = item.icon;
@@ -98,7 +105,7 @@ export function ActivityBar(props: { activeView: string; onViewChange: (v: strin
                 >
                   <Icon />
                 </TooltipTrigger>
-                <TooltipContent side="right">{item.label}</TooltipContent>
+                <TooltipContent side={tooltipSide}>{item.label}</TooltipContent>
               </Tooltip>
             );
           })}
@@ -121,7 +128,7 @@ export function ActivityBar(props: { activeView: string; onViewChange: (v: strin
                 >
                   <Icon />
                 </TooltipTrigger>
-                <TooltipContent side="right">{item.label}</TooltipContent>
+                <TooltipContent side={tooltipSide}>{item.label}</TooltipContent>
               </Tooltip>
             );
           })}

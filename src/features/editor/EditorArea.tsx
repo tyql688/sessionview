@@ -6,6 +6,7 @@ import { useGroups } from "@/features/editor/editorGroups";
 import { formatTimestamp } from "@/lib/formatters";
 import { TabBar } from "@/features/editor/TabBar";
 import { SessionView } from "@/features/session";
+import { useIsCompact } from "@/stores/viewport";
 import { ProviderIcon } from "@/components/icons";
 import { formatShortcut } from "@/lib/platform";
 
@@ -30,6 +31,7 @@ export function EditorArea(props: {
   recentSessionsError: string | null;
   childCounts: Record<string, number>;
 }) {
+  const isCompact = useIsCompact();
   const { t, locale } = useI18n();
   const groups = useGroups();
   const [activatedTabIds, setActivatedTabIds] = useState<Set<string>>(new Set());
@@ -58,7 +60,9 @@ export function EditorArea(props: {
   return (
     <div
       className={`editor-area${props.isFocused ? " focused" : ""}`}
-      style={{ flexBasis: `${props.flexBasis}%` }}
+      // Compact mode is always a single full-width group; the split-view
+      // percentage would fight the stylesheet's flexible sizing there.
+      style={isCompact ? undefined : { flexBasis: `${props.flexBasis}%` }}
       onClick={() => props.onFocus()}
     >
       {props.tabs.length > 0 ? (

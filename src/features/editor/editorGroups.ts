@@ -325,6 +325,27 @@ function createGroupFromDrop(sessionId: string): void {
   removeGroupIfEmpty(sourceGroup.id);
 }
 
+/**
+ * Collapse every group into the first one, keeping tab order and the focused
+ * tab. Compact (phone) layouts force a single group — split view has no room
+ * to exist there.
+ */
+function mergeAllGroups() {
+  const gs = getGroups();
+  if (gs.length <= 1) return;
+  const allTabs = gs.flatMap((g) => g.tabs);
+  const focusedTab = activeGroup()?.activeTabId ?? null;
+  const merged: EditorGroup = {
+    ...gs[0],
+    tabs: allTabs,
+    activeTabId: focusedTab ?? (allTabs.length > 0 ? allTabs[allTabs.length - 1].id : null),
+    previewTabId: null,
+    flexBasis: 100,
+  };
+  setGroups([merged]);
+  setActiveGroupId(merged.id);
+}
+
 function focusGroup(groupId: string) {
   if (getGroups().some((g) => g.id === groupId)) {
     setActiveGroupId(groupId);
@@ -398,6 +419,7 @@ export {
   splitToRight,
   moveTabToGroup,
   createGroupFromDrop,
+  mergeAllGroups,
   focusGroup,
   focusAdjacentGroup,
   setActiveTabInGroup,

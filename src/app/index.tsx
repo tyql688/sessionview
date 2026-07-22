@@ -42,6 +42,7 @@ import {
 } from "@/lib/tauri";
 import { isMac, isWindows } from "@/lib/platform";
 import { isTauriRuntime } from "@/lib/runtime";
+import { useIsCompact } from "@/stores/viewport";
 import { useAutoIndexInterval, useDisabledProviders } from "@/stores/settings";
 import { loadProviderSnapshots } from "@/stores/providerSnapshots";
 import { toast, toastError, toastInfo } from "@/stores/toast";
@@ -66,7 +67,7 @@ import {
   focusAdjacentGroup,
   syncAllTabTitles,
 } from "@/features/editor/editorGroups";
-import type { TreeNode, Provider } from "@/lib/types";
+import type { TreeNode, Provider, SessionRef } from "@/lib/types";
 import { useI18n } from "@/i18n";
 import { createKeyboardHandler } from "@/app/KeyboardShortcuts";
 import { createSyncManager } from "@/app/SyncManager";
@@ -131,6 +132,12 @@ export default function App() {
   const disabledProviders = useDisabledProviders();
   const autoIndexInterval = useAutoIndexInterval();
   const activeGrp = useActiveGroup();
+  const isCompact = useIsCompact();
+  // Compact layout is a single-pane stack: within the explorer view the user
+  // is either on the session list ("nav") or reading a session ("content").
+  // Opening a session flips to content; the bottom-nav explorer button flips
+  // back. Desktop ignores this entirely.
+  const [compactPane, setCompactPane] = useState<"nav" | "content">("nav");
 
   // The sync manager owns long-lived timers/queues; create it once so its
   // internal state survives re-renders.
@@ -411,6 +418,29 @@ export default function App() {
     activeView !== "usage" &&
     activeView !== "folderAnalytics";
 
+  // Compact single-pane stack: the session list and the session content never
+  // share the screen. With no open tabs there is nothing to read, so the list
+  // wins regardless of the pane flag.
+  const compactOnList = compactPane === "nav" || (activeGrp?.tabs.length ?? 0) === 0;
+  const showTree = isCompact ? activeView === "explorer" && compactOnList : showExplorerTree;
+  const showEditor = isCompact ? activeView === "explorer" && !compactOnList : showExplorer;
+
+  // In compact mode the session content only renders inside the explorer
+  // view, so opening from favorites/search must also switch there.
+  const showOpenedSession = () => {
+    if (!isCompact) return;
+    setActiveView("explorer");
+    setCompactPane("content");
+  };
+  const handleOpenSession = (s: SessionRef) => {
+    openSession(s);
+    showOpenedSession();
+  };
+  const handlePreviewSession = (s: SessionRef) => {
+    openPreview(s);
+    showOpenedSession();
+  };
+
   return (
     <ErrorBoundary
       fallback={(err) => (
@@ -469,30 +499,32 @@ export default function App() {
           />
         )}
         <div className="main-layout">
-          <ActivityBar
-            activeView={activeView}
-            onViewChange={(v) => {
-              setActiveView(v);
-              if (v === "explorer") setSidebarCollapsed(false);
-            }}
-          />
-          {showExplorerTree && (
+          {!isCompact && (
+            <ActivityBar
+              activeView={activeView}
+              onViewChange={(v) => {
+                setActiveView(v);
+                if (v === "explorer") setSidebarCollapsed(false);
+              }}
+            />
+          )}
+          {showTree && (
             <Explorer
               tree={filteredTree}
               isLoading={isLoading}
               activeSessionId={activeGrp?.activeTabId ?? null}
-              onOpenSession={openSession}
-              onPreviewSession={openPreview}
+              onOpenSession={handleOpenSession}
+              onPreviewSession={handlePreviewSession}
               onRefreshTree={sync.refreshTree}
               onRefreshProvider={(provider) => {
                 void sync.syncProviders([provider]).then(() => void loadProviderSnapshots(true));
               }}
-              onCollapse={() => setSidebarCollapsed(true)}
+              onCollapse={isCompact ? undefined : () => setSidebarCollapsed(true)}
             />
           )}
           <Suspense fallback={null}>
             {activeView === "settings" && <SettingsPanel />}
-            {activeView === "favorites" && <FavoritesView onOpenSession={openSession} />}
+            {activeView === "favorites" && <FavoritesView onOpenSession={handleOpenSession} />}
             {activeView === "blocked" && <BlockedView onRefreshTree={sync.refreshTree} />}
             {activeView === "usage" && (
               <div
@@ -517,7 +549,7 @@ export default function App() {
               </div>
             )}
           </Suspense>
-          {showExplorer && (
+          {showEditor && (
             <EditorGroupsContainer
               onTabSelect={(groupId, tabId) => {
                 focusGroup(groupId);
@@ -530,10 +562,22 @@ export default function App() {
               onSplitToRight={splitToRight}
               onPinTab={pinTab}
               tree={filteredTree}
-              onOpenSession={openSession}
+              onOpenSession={handleOpenSession}
             />
           )}
         </div>
+        {isCompact && (
+          <ActivityBar
+            orientation="horizontal"
+            activeView={activeView}
+            onViewChange={(v) => {
+              // Tapping the explorer item always returns to the session list;
+              // the open tabs stay put for when a session is tapped again.
+              if (v === "explorer") setCompactPane("nav");
+              setActiveView(v);
+            }}
+          />
+        )}
         <StatusBar
           sessionCount={sessionCount}
           providerCount={filteredTree.length}
@@ -549,7 +593,7 @@ export default function App() {
           show={showSearchOverlay}
           onClose={() => setShowSearchOverlay(false)}
           onOpenSession={(s) => {
-            openSession(s);
+            handleOpenSession(s);
             setShowSearchOverlay(false);
           }}
         />

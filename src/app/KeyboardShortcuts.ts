@@ -1,5 +1,6 @@
 import type { SessionRef } from "@/lib/types";
 import { dispatchSessionCommand, SESSION_COMMAND_EVENTS } from "@/lib/session-command-events";
+import { isCompactViewport } from "@/stores/viewport";
 
 export interface KeyboardDeps {
   activeTabId: () => string | null;
@@ -101,9 +102,12 @@ export function createKeyboardHandler(deps: KeyboardDeps): (e: KeyboardEvent) =>
       return;
     }
 
-    // Cmd+\ : Split editor — move active tab to right group
+    // Cmd+\ : Split editor — move active tab to right group.
+    // Compact layouts force a single group, so splitting is a no-op there
+    // (hardware keyboards exist on tablets and narrow desktop windows).
     if (mod && e.key === "\\") {
       e.preventDefault();
+      if (isCompactViewport()) return;
       const id = deps.activeTabId();
       if (id) deps.splitToRight(id);
       return;
