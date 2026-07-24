@@ -467,7 +467,28 @@ pub(super) fn structured_media(structured: &serde_json::Map<String, Value>) -> V
             return sources;
         }
     }
+    // Grok image_gen (and similar) store a bare filesystem path on the
+    // result object rather than an image content block.
+    for key in ["path", "savedPath", "saved_path"] {
+        if let Some(path) = structured.get(key).and_then(Value::as_str) {
+            let trimmed = path.trim();
+            if !trimmed.is_empty() && looks_like_image_path(trimmed) {
+                return vec![trimmed.to_string()];
+            }
+        }
+    }
     Vec::new()
+}
+
+fn looks_like_image_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with(".png")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".gif")
+        || lower.ends_with(".webp")
+        || lower.ends_with(".bmp")
+        || lower.ends_with(".svg")
 }
 
 fn image_source(part: &Value) -> Option<String> {

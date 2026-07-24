@@ -239,18 +239,35 @@ pub(super) fn tool_search_result_detail(structured: &serde_json::Map<String, Val
 
 pub(super) fn web_search_result_detail(structured: &serde_json::Map<String, Value>) -> ToolDetail {
     let mut lines: Vec<ToolLine> = Vec::new();
+    // Only metadata here (count / duration). URL lists live in the message
+    // body so they are not printed twice (resultDetail + output).
     append_present_fields(
         &mut lines,
         structured,
         &[
-            ("query", &["query"][..]),
-            ("searches", &["searchCount"][..]),
+            ("results", &["resultCount", "searchCount"][..]),
             ("duration", &["durationSeconds"][..]),
         ],
     );
-    if let Some(results) = structured.get("results").and_then(Value::as_array) {
-        lines.push(line("results", results.len().to_string()));
+    if !lines.iter().any(|l| l.label == "results") {
+        let count = structured
+            .get("results")
+            .and_then(Value::as_array)
+            .map(|a| a.len() as u64)
+            .or_else(|| {
+                structured
+                    .get("action")
+                    .and_then(Value::as_object)
+                    .and_then(|action| action.get("sources"))
+                    .and_then(Value::as_array)
+                    .map(|a| a.len() as u64)
+            });
+        if let Some(count) = count {
+            lines.push(line("results", count.to_string()));
+        }
     }
+    // Only show query here when the result refined it (and input didn't).
+    append_present_fields(&mut lines, structured, &[("query", &["query"][..])]);
     detail(lines)
 }
 
@@ -276,7 +293,8 @@ pub(super) fn image_result_detail(structured: &serde_json::Map<String, Value>) -
         &mut lines,
         structured,
         &[
-            ("savedPath", &["savedPath", "saved_path"][..]),
+            ("savedPath", &["savedPath", "saved_path", "path"][..]),
+            ("filename", &["filename"][..]),
             ("revisedPrompt", &["revisedPrompt", "revised_prompt"][..]),
         ],
     );
