@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.7.6] - Unreleased
+
+### Added
+
+- Grok Build sessions surface the newer on-disk data: backend web/X
+  searches render as tool calls (web search lists its sources; X search
+  shows an honest empty result since Grok never persists X hits), image
+  generation results preview inline, plan / goal / recap updates appear
+  as timeline notes, forked subagent sessions link to their parent, and
+  sessions pick up their git branch and active agent name.
+- Session cost prefers the provider's own reported USD (Grok, Pi) over
+  the models.dev estimate, Grok reasoning tokens count toward output
+  totals, and served model ids like `grok-4.5-build` resolve pricing
+  through their base model without rewriting what's stored.
+
+### Fixed
+
+- Grok tool results carry real error status from the update stream, and
+  successful edits render as diffs even when the transcript only stores
+  a bare success string.
+
 ## [0.7.5] - 2026-07-22
 
 ### Added
