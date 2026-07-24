@@ -2097,6 +2097,11 @@ fn grok_scans_fixture_session_with_summary_metadata() {
     assert_eq!(session.meta.project_path, "/tmp/demo-project");
     assert_eq!(session.meta.project_name, "demo-project");
     assert_eq!(session.meta.model.as_deref(), Some("grok-4.5"));
+    assert_eq!(session.meta.git_branch.as_deref(), Some("main"));
+    assert_eq!(
+        session.meta.variant_name.as_deref(),
+        Some("grok-build-plan")
+    );
     assert!(!session.meta.is_sidechain);
     assert!(session.meta.created_at > 0);
     assert!(session.meta.updated_at >= session.meta.created_at);
@@ -2168,14 +2173,15 @@ fn grok_usage_events_from_turn_completed_model_usage() {
     let event = &session.usage_events[0];
     assert_eq!(event.model, "grok-4.5");
     assert_eq!(event.input_tokens, 13312 - 11264);
-    assert_eq!(event.output_tokens, 106);
+    // outputTokens (106) + reasoningTokens (72) folded into output.
+    assert_eq!(event.output_tokens, 106 + 72);
     assert_eq!(event.cache_read_input_tokens, 11264);
 
     let provider = grok_fixture_provider();
     let rows = provider.compute_token_stats(&session, None, None);
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].input_tokens, 13312 - 11264);
-    assert_eq!(rows[0].output_tokens, 106);
+    assert_eq!(rows[0].output_tokens, 106 + 72);
     assert_eq!(rows[0].cache_read_tokens, 11264);
     assert_eq!(rows[0].turn_count, 1);
 }
@@ -2188,7 +2194,7 @@ fn grok_load_messages_totals_come_from_usage_events() {
         .load_messages(GROK_BASIC_ID, &session.meta.source_path)
         .expect("grok fixture must load messages");
     assert_eq!(loaded.token_totals.input_tokens, 13312 - 11264);
-    assert_eq!(loaded.token_totals.output_tokens, 106);
+    assert_eq!(loaded.token_totals.output_tokens, 106 + 72);
     assert_eq!(loaded.token_totals.cache_read_tokens, 11264);
 }
 
@@ -2253,7 +2259,17 @@ fn grok_subagent_child_links_to_parent_and_uses_description_title() {
 #[test]
 fn grok_parent_surfaces_child_session_ids_and_agent_id_metadata() {
     let parent = parse_grok_fixture_session(GROK_BASIC_ID);
-    assert_eq!(parent.child_session_ids, vec![GROK_CHILD_ID.to_string()]);
+    assert!(
+        parent
+            .child_session_ids
+            .iter()
+            .any(|id| id == GROK_CHILD_ID),
+        "parent must list the regular subagent child"
+    );
+    assert!(
+        parent.child_session_ids.iter().any(|id| id == GROK_FORK_ID),
+        "parent must also list the forked child"
+    );
 
     let spawn = parent
         .messages
@@ -2286,8 +2302,9 @@ fn grok_turn_usage_attached_to_final_assistant_message() {
         .as_ref()
         .expect("turn totals must attach to the turn's final assistant message");
     // inputTokens includes cachedReadTokens — stored disjoint.
+    // outputTokens folds in reasoningTokens (72).
     assert_eq!(usage.input_tokens, 13312 - 11264);
-    assert_eq!(usage.output_tokens, 106);
+    assert_eq!(usage.output_tokens, 106 + 72);
     assert_eq!(usage.cache_read_input_tokens, 11264);
     assert_eq!(usage.cache_creation_input_tokens, 0);
     // Turn-end timestamp lands on the message that had none.
@@ -2471,7 +2488,8 @@ fn grok_compacted_session_reconstructs_history_from_updates() {
         .expect("reconstructed greeting");
     let usage = greeting.token_usage.as_ref().expect("turn usage attached");
     assert_eq!(usage.input_tokens, 1000 - 800);
-    assert_eq!(usage.output_tokens, 20);
+    // outputTokens (20) + reasoningTokens (5)
+    assert_eq!(usage.output_tokens, 20 + 5);
     assert_eq!(usage.cache_read_input_tokens, 800);
 
     // All three turns land in usage_events for the stats layer.
@@ -2506,4 +2524,170 @@ fn grok_session_parses_without_summary_json() {
     assert_eq!(meta.project_path, "/tmp/demo-project");
     assert_eq!(meta.title, "restored prompt");
     assert!(meta.created_at > 0);
+}
+
+const GROK_FORK_ID: &str = "01900000-0000-7000-8000-000000000004";
+
+#[test]
+fn grok_backend_tool_calls_and_image_gen_are_parsed() {
+    let session = parse_grok_fixture_session(GROK_BASIC_ID);
+
+    let web = session
+        .messages
+        .iter()
+        .find(|m| {
+            m.role == MessageRole::Tool
+                && m.tool_metadata
+                    .as_ref()
+                    .is_some_and(|md| md.raw_name == "web_search" || md.raw_name == "WebSearch")
+        })
+        .expect("backend web_search must surface as a tool message");
+    assert_eq!(
+        web.tool_name.as_deref(),
+        Some("WebSearch"),
+        "web_search must canonicalize to WebSearch"
+    );
+    // Web search with sources: numbered URL body; query stays on the input side.
+    assert!(
+        web.content.contains("1. https://example.com/a")
+            && web.content.contains("2. https://example.com/b"),
+        "web search body should list numbered source URLs, got: {}",
+        web.content
+    );
+    let web_meta = web.tool_metadata.as_ref().expect("web metadata");
+    let web_structured = web_meta.structured.as_ref().expect("web search structured");
+    assert_eq!(
+        web_structured.get("resultCount").and_then(|v| v.as_u64()),
+        Some(2)
+    );
+    // Query must not be re-emitted on the result side when it matches input.
+    assert!(
+        web_structured.get("query").is_none(),
+        "duplicate query on result side: {web_structured}"
+    );
+    let result_detail = web_meta
+        .presentation
+        .as_ref()
+        .and_then(|p| p.result_detail.as_ref())
+        .expect("web search result detail");
+    // Count only — full URL list is the body (avoid SOURCES + body double-list).
+    assert!(
+        result_detail
+            .lines
+            .iter()
+            .any(|l| l.label == "results" && l.value == "2"),
+        "result detail should show hit count, got: {:?}",
+        result_detail.lines
+    );
+    assert!(
+        !result_detail.lines.iter().any(|l| l.label == "sources"),
+        "result detail must not re-list source URLs: {:?}",
+        result_detail.lines
+    );
+
+    let x_search = session
+        .messages
+        .iter()
+        .find(|m| {
+            m.tool_metadata
+                .as_ref()
+                .is_some_and(|md| md.raw_name == "x_semantic_search")
+        })
+        .expect("backend x_semantic_search must surface");
+    assert_eq!(x_search.tool_name.as_deref(), Some("WebSearch"));
+    // X-search rawOutput is call-echo only — no body dump, no structured echo.
+    assert!(
+        x_search.content.is_empty(),
+        "x search must not dump call echo as content, got: {}",
+        x_search.content
+    );
+    let x_structured = x_search
+        .tool_metadata
+        .as_ref()
+        .and_then(|m| m.structured.as_ref());
+    assert!(
+        x_structured.is_none()
+            || x_structured
+                .and_then(|s| s.as_object())
+                .is_some_and(|o| o.is_empty()),
+        "x search structured must not re-list call args: {x_structured:?}"
+    );
+    // Call args still available via tool_input / summary.
+    assert!(
+        x_search
+            .tool_input
+            .as_deref()
+            .is_some_and(|s| s.contains("query")),
+        "x search tool_input must keep the query"
+    );
+
+    let image = session
+        .messages
+        .iter()
+        .find(|m| m.tool_name.as_deref() == Some("ImageGeneration"))
+        .expect("image_gen must canonicalize to ImageGeneration");
+    let image_meta = image.tool_metadata.as_ref().expect("image metadata");
+    assert_eq!(image_meta.result_kind.as_deref(), Some("image"));
+    let path = image_meta
+        .structured
+        .as_ref()
+        .and_then(|s| s.get("path").or_else(|| s.get("savedPath")))
+        .and_then(|v| v.as_str())
+        .expect("image path in structured");
+    assert!(path.ends_with("images/1.jpg"), "got path {path}");
+    let media_from_detail = image_meta
+        .presentation
+        .as_ref()
+        .and_then(|p| p.result_detail.as_ref())
+        .map(|d| d.media.len())
+        .unwrap_or(0);
+    assert!(
+        media_from_detail >= 1 || path.contains("images/"),
+        "image result should expose media or a path"
+    );
+
+    let failed = session
+        .messages
+        .iter()
+        .find(|m| m.tool_name.as_deref() == Some("WebFetch") && m.content.contains("SSRF blocked"))
+        .expect("failed web_fetch present");
+    let failed_status = failed
+        .tool_metadata
+        .as_ref()
+        .and_then(|m| m.status.as_deref());
+    assert!(
+        matches!(failed_status, Some("failed" | "error")),
+        "failed tool must surface error status, got {failed_status:?}"
+    );
+
+    assert!(
+        session
+            .messages
+            .iter()
+            .any(|m| m.role == MessageRole::System && m.content.starts_with("[Plan]")),
+        "plan update must surface as a system note"
+    );
+    assert!(
+        session
+            .messages
+            .iter()
+            .any(|m| m.role == MessageRole::System && m.content.starts_with("[Goal:")),
+        "goal_updated must surface as a system note"
+    );
+}
+
+#[test]
+fn grok_subagent_fork_links_parent_and_uses_description_title() {
+    let fork = parse_grok_fixture_session(GROK_FORK_ID);
+    assert!(fork.meta.is_sidechain);
+    assert_eq!(fork.meta.parent_id.as_deref(), Some(GROK_BASIC_ID));
+    assert_eq!(fork.meta.title, "goal plan writer");
+    assert_eq!(fork.meta.git_branch.as_deref(), Some("feature/demo"));
+    assert_eq!(fork.meta.variant_name.as_deref(), Some("general-purpose"));
+
+    let parent = parse_grok_fixture_session(GROK_BASIC_ID);
+    assert!(
+        parent.child_session_ids.iter().any(|id| id == GROK_FORK_ID),
+        "parent must list the forked child"
+    );
 }

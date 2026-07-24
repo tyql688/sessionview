@@ -1,0 +1,24 @@
+{
+  "info": {
+    "id": "01900000-0000-7000-8000-000000000004",
+    "cwd": "/tmp/demo-project"
+  },
+  "session_summary": "Forked goal writer",
+  "created_at": "2026-07-01T09:00:00.000000Z",
+  "updated_at": "2026-07-01T09:01:00.000000Z",
+  "num_messages": 4,
+  "num_chat_messages": 2,
+  "current_model_id": "grok-4.5",
+  "chat_format_version": 1,
+  "session_kind": "subagent_fork",
+  "parent_session_id": "01900000-0000-7000-8000-000000000001",
+  "forked_at": "2026-07-01T09:00:00.000000Z",
+  "fork_context_source": "forked_verbatim",
+  "head_branch": "feature/demo",
+  "generated_title": "Forked goal writer title",
+  "agent_name": "general-purpose",
+  "sandbox_profile": "off",
+  "reasoning_effort": "high",
+  "grok_home": "/tmp/fake-home/.grok",
+  "last_active_at": "2026-07-01T09:01:00.000000Z"
+}

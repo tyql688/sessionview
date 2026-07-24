@@ -352,6 +352,7 @@ impl ScanAccum {
             cache_read_input_tokens: u64::from(usage.cache_read_input_tokens),
             cache_creation_input_tokens: u64::from(usage.cache_creation_input_tokens),
             usage_hash: None,
+            cost_usd: None,
         };
         if let Some(index) = self.current_turn_usage_event_idx.take() {
             if !finish_turn {

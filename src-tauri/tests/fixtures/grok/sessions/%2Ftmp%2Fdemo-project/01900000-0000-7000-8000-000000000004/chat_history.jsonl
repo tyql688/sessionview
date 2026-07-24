@@ -1,0 +1,2 @@
+{"type":"user","content":[{"type":"text","text":"<user_query>\nwrite the plan\n</user_query>"}],"prompt_index":0}
+{"type":"assistant","content":"Here is the plan.","model_id":"grok-4.5"}

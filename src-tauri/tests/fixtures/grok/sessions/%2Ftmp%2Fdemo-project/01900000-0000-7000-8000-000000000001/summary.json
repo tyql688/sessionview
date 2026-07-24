@@ -15,5 +15,6 @@
   "generated_title": "Demo project check",
   "agent_name": "grok-build-plan",
   "sandbox_profile": "off",
-  "reasoning_effort": "high"
+  "reasoning_effort": "high",
+  "head_branch": "main"
 }

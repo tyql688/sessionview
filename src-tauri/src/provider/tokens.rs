@@ -33,6 +33,10 @@ pub struct UsageEvent {
     pub cache_read_input_tokens: u64,
     pub cache_creation_input_tokens: u64,
     pub usage_hash: Option<String>,
+    /// Provider-reported cost in USD when the wire format carries one
+    /// (e.g. Grok `costUsdTicks`). When set, stats aggregation prefers it
+    /// over the local pricing table.
+    pub cost_usd: Option<f64>,
 }
 
 pub fn token_totals_from_usage_events(events: &[UsageEvent]) -> TokenTotals {
@@ -88,7 +92,10 @@ pub fn compute_token_stats_from_usage_events(
         entry.output_tokens += event.output_tokens;
         entry.cache_read_tokens += event.cache_read_input_tokens;
         entry.cache_write_tokens += event.cache_creation_input_tokens;
-        entry.cost_usd += pricing::estimate_cost_with_catalog(
+        // Prefer provider-reported USD (Grok costUsdTicks, Pi usage.cost, …);
+        // otherwise estimate from the pricing catalog (models.dev).
+        entry.cost_usd += pricing::resolve_cost_usd(
+            event.cost_usd,
             pricing_catalog,
             &entry.model,
             event.input_tokens,
@@ -180,7 +187,11 @@ pub fn default_compute_token_stats_from_messages(
         entry.output_tokens += usage.output_tokens as u64;
         entry.cache_read_tokens += usage.cache_read_input_tokens as u64;
         entry.cache_write_tokens += usage.cache_creation_input_tokens as u64;
-        entry.cost_usd += pricing::estimate_cost_with_catalog(
+        // Message-attached usage has no wire cost field today (Claude/Cursor/…);
+        // resolve_cost_usd falls through to the catalog estimate. When a
+        // provider later attaches cost on TokenUsage, plumb it here the same way.
+        entry.cost_usd += pricing::resolve_cost_usd(
+            None,
             pricing_catalog,
             &entry.model,
             usage.input_tokens as u64,

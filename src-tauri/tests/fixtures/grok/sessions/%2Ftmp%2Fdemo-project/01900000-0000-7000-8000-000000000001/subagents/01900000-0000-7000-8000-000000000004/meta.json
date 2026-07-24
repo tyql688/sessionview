@@ -1,0 +1,8 @@
+{
+  "subagent_id": "01900000-0000-7000-8000-000000000004",
+  "parent_session_id": "01900000-0000-7000-8000-000000000001",
+  "child_session_id": "01900000-0000-7000-8000-000000000004",
+  "subagent_type": "general-purpose",
+  "description": "goal plan writer",
+  "status": "completed"
+}

@@ -109,8 +109,13 @@ impl HistoryBuilder {
             "turn_completed" => self.attach_turn_usage(update),
             // ACP / runtime bookkeeping updates with no transcript content.
             // Task and subagent lifecycle events duplicate what the tool
-            // call stream already shows; retry states are transient.
+            // call stream already shows; retry states are transient; session
+            // notes (plan / goal / recap / image_compressed) are surfaced
+            // once by the shared updates scan as system messages.
             "plan"
+            | "goal_updated"
+            | "session_recap"
+            | "image_compressed"
             | "available_commands_update"
             | "current_mode_update"
             | "hook_execution"
@@ -221,24 +226,27 @@ impl HistoryBuilder {
         let Some(usage) = update.get("usage") else {
             return;
         };
-        let (input, output, cache_read) = (
-            usage
-                .get("inputTokens")
-                .and_then(Value::as_u64)
-                .unwrap_or(0),
-            usage
-                .get("outputTokens")
-                .and_then(Value::as_u64)
-                .unwrap_or(0),
-            usage
-                .get("cachedReadTokens")
-                .and_then(Value::as_u64)
-                .unwrap_or(0),
-        );
+        let input = usage
+            .get("inputTokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let output = usage
+            .get("outputTokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let reasoning = usage
+            .get("reasoningTokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let cache_read = usage
+            .get("cachedReadTokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
         if let Some(message) = self.messages.get_mut(idx) {
             message.token_usage = Some(TokenUsage {
                 input_tokens: input.saturating_sub(cache_read) as u32,
-                output_tokens: output as u32,
+                // Fold reasoning into output — no dedicated field on TokenUsage.
+                output_tokens: output.saturating_add(reasoning) as u32,
                 cache_creation_input_tokens: 0,
                 cache_read_input_tokens: cache_read as u32,
             });

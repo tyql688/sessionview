@@ -416,6 +416,9 @@ fn extract_usage_events(
                 cache_read_input_tokens: usage.cache_read,
                 cache_creation_input_tokens: usage.cache_write,
                 usage_hash: None,
+                // Pi attaches a provider-computed USD breakdown on usage.cost;
+                // prefer `total` when present (including explicit 0.0).
+                cost_usd: usage.cost.as_ref().map(|c| c.total),
             })
         })
         .collect()

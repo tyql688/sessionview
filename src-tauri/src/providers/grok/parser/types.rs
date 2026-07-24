@@ -16,9 +16,18 @@ pub(super) struct GrokSummary {
     pub(super) updated_at: Option<String>,
     #[serde(default)]
     pub(super) current_model_id: Option<String>,
-    /// `"subagent"` on child sessions spawned via `spawn_subagent`.
+    /// `"subagent"` or `"subagent_fork"` on child sessions.
     #[serde(default)]
     pub(super) session_kind: Option<String>,
+    /// Git branch recorded when the session was created / last refreshed.
+    #[serde(default)]
+    pub(super) head_branch: Option<String>,
+    /// Active agent / persona name (e.g. `general-purpose`, `grok-build-plan`).
+    #[serde(default)]
+    pub(super) agent_name: Option<String>,
+    /// Direct parent id for forks (also recoverable via subagents/*/meta.json).
+    #[serde(default)]
+    pub(super) parent_session_id: Option<String>,
 }
 
 /// Parent-side subagent link: `<parent-dir>/subagents/<child-id>/meta.json`.
@@ -67,8 +76,36 @@ pub(super) enum GrokChatEntry {
         #[serde(default)]
         content: String,
     },
+    /// Built-in server-side tools (web_search / x_search) that do not go
+    /// through the regular `assistant.tool_calls` + `tool_result` pair.
+    BackendToolCall {
+        kind: GrokBackendToolKind,
+    },
     #[serde(other)]
     Unknown,
+}
+
+/// Payload of a `backend_tool_call` chat entry.
+#[derive(Debug, Deserialize)]
+pub(super) struct GrokBackendToolKind {
+    #[serde(default)]
+    pub(super) tool_type: Option<String>,
+    #[serde(default)]
+    pub(super) call_id: Option<String>,
+    /// JSON-encoded argument string, same shape as assistant tool_calls.
+    #[serde(default)]
+    pub(super) input: Option<String>,
+    #[serde(default)]
+    pub(super) name: Option<String>,
+    /// Stable id that matches `updates.jsonl` `toolCallId`.
+    #[serde(default)]
+    pub(super) id: Option<String>,
+    /// Web-search embeds the completed action (query + sources) on the
+    /// chat_history entry itself — not only in updates.jsonl.
+    #[serde(default)]
+    pub(super) action: Option<Value>,
+    #[serde(default)]
+    pub(super) status: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

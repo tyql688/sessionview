@@ -223,6 +223,7 @@ impl CodexScanAccum {
                         cache_read_input_tokens: cached.min(input),
                         cache_creation_input_tokens: 0,
                         usage_hash: None,
+                        cost_usd: None,
                     });
                 }
             } else {

@@ -1,3 +1,15 @@
+//! Session cost resolution.
+//!
+//! Order of preference for every provider:
+//! 1. **Wire cost** reported on the session (Grok `costUsdTicks`, Pi
+//!    `usage.cost.total`, …) when present.
+//! 2. **Catalog estimate** from models.dev (or the cached catalog) using
+//!    token counts × unit rates. Lookup may strip served-model suffixes
+//!    (e.g. `grok-4.5-build` → `grok-4.5`) without rewriting stored ids.
+//!
+//! Storage and UI keep the original model string; only the pricing lookup
+//! is allowed to alias.
+
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
@@ -225,9 +237,15 @@ fn strip_trailing_version_segment(model: &str) -> Option<String> {
 }
 
 /// Known model variant suffixes, stripped only as a last resort when no
-/// other match succeeds (e.g. "gpt-5.4-fast" → "gpt-5.4").
+/// other match succeeds (e.g. "gpt-5.4-fast" → "gpt-5.4",
+/// "grok-4.5-build" → "grok-4.5").
+///
+/// Order matters for multi-segment tails: longer suffixes first.
 const VARIANT_SUFFIXES: &[&str] = &[
     "-fast", "-mini", "-turbo", "-pro", "-lite", "-plus", "-preview", "-latest",
+    // Grok Build API returns served-model ids like `grok-4.5-build` while
+    // models.dev / catalog keys are the user-selected `grok-4.5`.
+    "-build",
 ];
 
 fn strip_variant_suffix(model: &str) -> Option<String> {
@@ -354,6 +372,26 @@ pub fn estimate_cost_with_catalog(
         )
 }
 
+/// Prefer a provider-reported USD cost when present; otherwise estimate from
+/// the models.dev (or cached) pricing catalog.
+///
+/// Wire cost is authoritative even when zero (the provider said the turn was
+/// free / unbilled). Only `None` falls through to token-based estimation.
+pub fn resolve_cost_usd(
+    wire_cost_usd: Option<f64>,
+    catalog: Option<&PricingCatalog>,
+    model: &str,
+    input: u64,
+    output: u64,
+    cache_read: u64,
+    cache_write: u64,
+) -> f64 {
+    if let Some(cost) = wire_cost_usd {
+        return cost;
+    }
+    estimate_cost_with_catalog(catalog, model, input, output, cache_read, cache_write)
+}
+
 fn component_cost(
     tokens: u64,
     base_price: f64,
@@ -394,6 +432,35 @@ mod tests {
         assert_close(pricing.output, 15.0e-6);
         assert_close(pricing.cache_read, 0.25e-6);
         assert_eq!(pricing.threshold_tokens, None);
+    }
+
+    #[test]
+    fn lookup_pricing_strips_build_suffix_for_grok_served_ids() {
+        let catalog = parse_catalog(
+            r#"{"grok-4.5":{"input_cost_per_token":2e-6,"output_cost_per_token":6e-6,"cache_read_input_token_cost":3e-7}}"#,
+        )
+        .expect("catalog");
+        let pricing = super::lookup_pricing(Some(&catalog), "grok-4.5-build").expect("pricing");
+        assert_close(pricing.input, 2e-6);
+        assert_close(pricing.output, 6e-6);
+        // Exact catalog id still wins.
+        let exact = super::lookup_pricing(Some(&catalog), "grok-4.5").expect("exact");
+        assert_close(exact.input, 2e-6);
+    }
+
+    #[test]
+    fn resolve_cost_usd_prefers_wire_over_catalog() {
+        let catalog =
+            parse_catalog(r#"{"m":{"input_cost_per_token":1.0,"output_cost_per_token":1.0}}"#)
+                .expect("catalog");
+        // Catalog would estimate 200 if used (100+100 tokens * $1/token).
+        let wire = super::resolve_cost_usd(Some(0.42), Some(&catalog), "m", 100, 100, 0, 0);
+        assert_close(wire, 0.42);
+        let estimated = super::resolve_cost_usd(None, Some(&catalog), "m", 100, 100, 0, 0);
+        assert_close(estimated, 200.0);
+        // Explicit zero is still wire-authoritative.
+        let free = super::resolve_cost_usd(Some(0.0), Some(&catalog), "m", 100, 100, 0, 0);
+        assert_close(free, 0.0);
     }
 
     #[test]

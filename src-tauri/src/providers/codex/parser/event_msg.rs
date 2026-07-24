@@ -119,6 +119,7 @@ impl CodexScanAccum {
                     // files; batch-scoped dedup would only make
                     // incremental rescans nondeterministic.
                     usage_hash: None,
+                    cost_usd: None,
                 });
             }
             let Some(usage) = codex_token_usage_from_counts(usage_counts) else {
