@@ -66,6 +66,14 @@ describe("TitleBar", () => {
     expect(props.onMinimize).toHaveBeenCalledTimes(1);
   });
 
+  it("labels every window control", () => {
+    const { getByRole } = renderTitleBar();
+
+    expect(getByRole("button", { name: "Minimize window" })).toBeInTheDocument();
+    expect(getByRole("button", { name: "Maximize window" })).toBeInTheDocument();
+    expect(getByRole("button", { name: "Close window" })).toBeInTheDocument();
+  });
+
   it("hides window controls when disabled", () => {
     const { container } = renderTitleBar({ showWindowControls: false });
 

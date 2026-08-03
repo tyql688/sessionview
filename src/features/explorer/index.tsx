@@ -6,6 +6,7 @@ import type React from "react";
 import type { SessionRef, TreeNode } from "@/lib/types";
 import {
   getResumeCommand,
+  isFavorite,
   resumeSession,
   exportSessionsBatch,
   toggleFavorite,
@@ -37,6 +38,7 @@ import {
 } from "@/features/explorer/selection";
 import { toast, toastError } from "@/stores/toast";
 import { errorMessage } from "@/lib/errors";
+import { preferredScrollBehavior } from "@/lib/motion";
 import {
   filterBlockedFolders,
   filterOrphanSubagents,
@@ -65,17 +67,18 @@ function ExplorerSkeleton() {
   );
 }
 
-export function Explorer(props: {
+interface ExplorerProps {
   tree: TreeNode[];
   activeSessionId: string | null;
-  onOpenSession: (s: SessionRef) => void;
-  onPreviewSession: (s: SessionRef) => void;
-  onExportSession?: (id: string) => void;
+  onOpenSession: (session: SessionRef) => void;
+  onPreviewSession: (session: SessionRef) => void;
   onRefreshTree?: () => void;
   onRefreshProvider?: (provider: SessionRef["provider"]) => void;
   onCollapse?: () => void;
   isLoading?: boolean;
-}) {
+}
+
+export function Explorer(props: ExplorerProps) {
   const { t } = useI18n();
   const showOrphans = useShowOrphans();
   const grouping = useExplorerGrouping();
@@ -119,6 +122,18 @@ export function Explorer(props: {
     return map;
   }, [props.tree]);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+  const visibleTreeIds = useMemo(() => {
+    const ids = new Set<string>();
+    const pending = [...displayTree];
+    while (pending.length > 0) {
+      const node = pending.pop();
+      if (!node) continue;
+      ids.add(node.id);
+      if (expandedIds.has(node.id)) pending.push(...node.children);
+    }
+    return ids;
+  }, [displayTree, expandedIds]);
   const [initialized, setInitialized] = useState(false);
 
   // Context menu positions — each stores {x,y} or null
@@ -127,6 +142,7 @@ export function Explorer(props: {
     node: TreeNode;
     projectLabel: string;
     resumeCommand: string | null;
+    favorite: boolean | null;
   } | null>(null);
   const [nodeMenu, setNodeMenu] = useState<{
     pos: { x: number; y: number };
@@ -148,6 +164,14 @@ export function Explorer(props: {
       setInitialized(true);
     }
   }, [props.tree, initialized]);
+
+  useEffect(() => {
+    setFocusedNodeId((current) => {
+      if (current && visibleTreeIds.has(current)) return current;
+      if (props.activeSessionId && visibleTreeIds.has(props.activeSessionId)) return props.activeSessionId;
+      return displayTree[0]?.id ?? null;
+    });
+  }, [displayTree, props.activeSessionId, visibleTreeIds]);
 
   // Reveal active session on demand: expand ancestors and scroll into view.
   function revealActiveSession() {
@@ -174,7 +198,7 @@ export function Explorer(props: {
     });
     requestAnimationFrame(() => {
       const el = document.querySelector(`[data-session-id="${sessionId}"]`);
-      el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      el?.scrollIntoView({ block: "nearest", behavior: preferredScrollBehavior() });
     });
   }
 
@@ -234,11 +258,13 @@ export function Explorer(props: {
       );
       resumeCommandCache.set(node.id, resumeCommand);
     }
+    const favorite = await invokeWithFallback(isFavorite(node.id), null, `check favorite state for session ${node.id}`);
     setSessionMenu({
       pos: { x: e.clientX, y: e.clientY },
       node,
       projectLabel: parentProjectLabel,
       resumeCommand,
+      favorite,
     });
   }
 
@@ -261,14 +287,14 @@ export function Explorer(props: {
   }
 
   async function exportSelectedBatch() {
-    const sel = useSelectionStore.getState().selectedIds;
-    if (sel.size === 0) return;
+    const sessionIds = [...useSelectionStore.getState().selectedIds];
+    if (sessionIds.length === 0) return;
     try {
       if (!isTauriRuntime) {
         // Browser shell: stream the zip as a download instead of writing to
         // a native-save-dialog path.
-        await downloadSessionsBatchExport([...sel], "json");
-        toast(t("toast.copied"));
+        await downloadSessionsBatchExport(sessionIds, "json");
+        toast(t("toast.sessionsExported").replace("{count}", String(sessionIds.length)));
         return;
       }
       const outputPath = await save({
@@ -277,8 +303,8 @@ export function Explorer(props: {
       });
       if (!outputPath) return;
 
-      await exportSessionsBatch([...sel], "json", outputPath);
-      toast(t("toast.copied"));
+      await exportSessionsBatch(sessionIds, "json", outputPath);
+      toast(t("toast.sessionsExported").replace("{count}", String(sessionIds.length)));
     } catch (e) {
       toastError(errorMessage(e));
     }
@@ -293,12 +319,12 @@ export function Explorer(props: {
       node: m.node,
       sessionProjectPath: findSessionProjectPath(m.node.id),
       resumeCommand: m.resumeCommand,
+      favorite: m.favorite,
       t,
       terminalApp,
       resumeSession,
       toggleFavorite,
       setRenameTarget,
-      onExportSession: props.onExportSession,
     });
   }
 
@@ -353,27 +379,36 @@ export function Explorer(props: {
   }
 
   // Drag-to-resize handle
-  const explorerRef = useRef<HTMLDivElement>(null);
+  const explorerRef = useRef<HTMLElement>(null);
+  const resizeHandleRef = useRef<HTMLHRElement>(null);
   const isCompact = useIsCompact();
+  const clampExplorerWidth = (width: number) => Math.max(220, Math.min(width, window.innerWidth * 0.5));
+  const applyExplorerWidth = (width?: number) => {
+    const explorer = explorerRef.current;
+    if (!explorer) return;
+    if (width === undefined) explorer.style.removeProperty("width");
+    else explorer.style.width = `${width}px`;
+    resizeHandleRef.current?.setAttribute("aria-valuenow", String(Math.round(width ?? 280)));
+  };
 
-  // A desktop resize drag leaves an inline width behind; compact mode needs
-  // the stylesheet's full-width sizing to win.
   useEffect(() => {
-    if (isCompact) explorerRef.current?.style.removeProperty("width");
+    if (isCompact) {
+      explorerRef.current?.style.removeProperty("width");
+      resizeHandleRef.current?.setAttribute("aria-valuenow", "280");
+    }
   }, [isCompact]);
 
-  function onResizeStart(e: React.MouseEvent) {
-    e.preventDefault();
-    const el = explorerRef.current;
-    if (!el) return;
-    const startX = e.clientX;
-    const startW = el.offsetWidth;
-    const handle = e.currentTarget as HTMLElement;
+  function onResizeStart(event: React.MouseEvent) {
+    event.preventDefault();
+    const explorer = explorerRef.current;
+    if (!explorer) return;
+    const startX = event.clientX;
+    const startWidth = explorer.offsetWidth;
+    const handle = event.currentTarget as HTMLElement;
     handle.classList.add("active");
 
-    function onMove(ev: MouseEvent) {
-      const w = Math.max(160, Math.min(startW + ev.clientX - startX, window.innerWidth * 0.5));
-      el!.style.width = `${w}px`;
+    function onMove(moveEvent: MouseEvent) {
+      applyExplorerWidth(clampExplorerWidth(startWidth + moveEvent.clientX - startX));
     }
     function onUp() {
       handle.classList.remove("active");
@@ -384,9 +419,37 @@ export function Explorer(props: {
     document.addEventListener("mouseup", onUp);
   }
 
+  function onResizeKeyDown(event: React.KeyboardEvent<HTMLHRElement>) {
+    if (event.key === "Enter") {
+      applyExplorerWidth();
+      event.preventDefault();
+      return;
+    }
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    const step = event.shiftKey ? 32 : 8;
+    const current = explorerRef.current?.offsetWidth ?? 280;
+    applyExplorerWidth(clampExplorerWidth(current + (event.key === "ArrowLeft" ? -step : step)));
+    event.preventDefault();
+  }
+
   return (
-    <div className="explorer" ref={explorerRef}>
-      <div className="explorer-resize-handle" onMouseDown={onResizeStart} />
+    <aside className="explorer" ref={explorerRef} aria-label={t("explorer.title")}>
+      <hr
+        ref={resizeHandleRef}
+        className="explorer-resize-handle"
+        aria-label={t("explorer.resize")}
+        aria-orientation="vertical"
+        aria-valuemin={220}
+        aria-valuemax={Math.max(220, Math.round(window.innerWidth * 0.5))}
+        aria-valuenow={280}
+        tabIndex={0}
+        onFocus={(event) => {
+          event.currentTarget.setAttribute("aria-valuemax", String(Math.max(220, Math.round(window.innerWidth * 0.5))));
+        }}
+        onKeyDown={onResizeKeyDown}
+        onMouseDown={onResizeStart}
+        onDoubleClick={() => applyExplorerWidth()}
+      />
       <div className="explorer-header">
         <span>{t("explorer.title")}</span>
         {selCount > 0 && (
@@ -409,6 +472,7 @@ export function Explorer(props: {
               value="provider"
               className="size-6 p-0 text-muted-foreground data-pressed:bg-brand-soft data-pressed:text-brand"
               title={t("explorer.groupByProvider")}
+              aria-label={t("explorer.groupByProvider")}
             >
               <Layers className="size-3" aria-hidden="true" />
             </ToggleGroupItem>
@@ -416,12 +480,19 @@ export function Explorer(props: {
               value="directory"
               className="size-6 p-0 text-muted-foreground data-pressed:bg-brand-soft data-pressed:text-brand"
               title={t("explorer.groupByDirectory")}
+              aria-label={t("explorer.groupByDirectory")}
             >
               <Folder className="size-3" aria-hidden="true" />
             </ToggleGroupItem>
           </ToggleGroup>
           {props.activeSessionId && (
-            <Button variant="ghost" size="icon-xs" title={t("explorer.locateSession")} onClick={revealActiveSession}>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              title={t("explorer.locateSession")}
+              aria-label={t("explorer.locateSession")}
+              onClick={revealActiveSession}
+            >
               <Crosshair className="size-3.5" aria-hidden="true" />
             </Button>
           )}
@@ -430,6 +501,7 @@ export function Explorer(props: {
               variant="ghost"
               size="icon-xs"
               title={t("explorer.hideExplorer")}
+              aria-label={t("explorer.hideExplorer")}
               onClick={() => props.onCollapse?.()}
             >
               <PanelLeftClose className="size-3.5" aria-hidden="true" />
@@ -437,7 +509,7 @@ export function Explorer(props: {
           )}
         </span>
       </div>
-      <div className="explorer-tree">
+      <div className="explorer-tree" role="tree" aria-label={t("explorer.sessionsTree")} aria-multiselectable="true">
         {props.isLoading && props.tree.length === 0 && <ExplorerSkeleton />}
         {displayTree.map((node) => (
           <TreeNodeComponent
@@ -445,6 +517,8 @@ export function Explorer(props: {
             node={node}
             depth={0}
             activeSessionId={props.activeSessionId}
+            focusedNodeId={focusedNodeId}
+            onNodeFocus={setFocusedNodeId}
             isNodeExpanded={isNodeExpanded}
             toggleExpanded={toggleExpanded}
             onSessionContextMenu={handleSessionContextMenu}
@@ -478,6 +552,6 @@ export function Explorer(props: {
         }}
         onCancel={() => setRenameTarget(null)}
       />
-    </div>
+    </aside>
   );
 }

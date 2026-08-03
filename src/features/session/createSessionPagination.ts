@@ -4,7 +4,12 @@ import { flushSync } from "react-dom";
 import { cancelSessionLoad, getSessionMessagesWindow, isLoadCanceledError } from "@/lib/tauri";
 import type { Message, SessionMeta, TokenTotals } from "@/lib/types";
 import { findFirstMatchingEntryIndex } from "@/features/session/search-utils";
-import { overscrolledBottom, overscrolledTop, settleFrames } from "@/features/session/timelineGeometry";
+import {
+  overscrolledBottom,
+  overscrolledTop,
+  rowAtEntryIndex,
+  settleFrames,
+} from "@/features/session/timelineGeometry";
 import type { ProcessedEntry } from "@/features/session/hooks";
 
 /** Backend page sizes: how many messages the initial open fetches and how
@@ -154,6 +159,10 @@ export function useSessionPagination(opts: CreateSessionPaginationOptions): Crea
   // a navigation jump replaces the window wholesale, so finishing the landing
   // would waste main-thread time and (worse) hold the fetch lock against it.
   const applyGenerationRef = useRef(0);
+  // The latest navigation owns both its replacement window and final
+  // alignment. Without this guard, a slower earlier jump can snap back after
+  // a later click has already landed.
+  const navigationGenerationRef = useRef(0);
 
   /** Prepend an older page. History lands at the DOM end — outside the
    * bottom-anchored scroll coordinate space — so the viewport never moves and
@@ -286,12 +295,16 @@ export function useSessionPagination(opts: CreateSessionPaginationOptions): Crea
    * must not page in everything in between — re-centering costs the same IPC as
    * opening the session, and discarded rows reload on demand if scrolled back. */
   const recenterWindowAround = useCallback(
-    async (messageIndex: number): Promise<boolean> => {
+    async (messageIndex: number, navigationGeneration: number): Promise<boolean> => {
       // Navigation wins over prefetch: abort any chunked landing in progress
       // and wait for it to release the fetch lock instead of dropping the jump.
       applyGenerationRef.current += 1;
-      await settleFrames(() => !windowFetchInFlightRef.current, 1, 2000);
-      if (windowFetchInFlightRef.current) return false;
+      await settleFrames(
+        () => navigationGenerationRef.current !== navigationGeneration || !windowFetchInFlightRef.current,
+        1,
+        2000,
+      );
+      if (navigationGenerationRef.current !== navigationGeneration || windowFetchInFlightRef.current) return false;
       const request = beginWindowRequest("recenter");
       windowFetchInFlightRef.current = true;
       try {
@@ -304,7 +317,9 @@ export function useSessionPagination(opts: CreateSessionPaginationOptions): Crea
           Math.min(messageIndex - Math.floor(INITIAL_TAIL / 2), totalMessagesRef.current - INITIAL_TAIL),
         );
         const window = await getSessionMessagesWindow(request.sessionId, start, INITIAL_TAIL, request.requestId);
-        if (request.sessionId !== sessionIdRef.current) return false;
+        if (request.sessionId !== sessionIdRef.current || navigationGenerationRef.current !== navigationGeneration) {
+          return false;
+        }
         // flushSync so the entry lookup below sees the new window.
         flushSync(() => {
           const current = optsRef.current;
@@ -331,6 +346,7 @@ export function useSessionPagination(opts: CreateSessionPaginationOptions): Crea
       if (messageIndex < 0 || messageIndex >= totalMessagesRef.current) {
         return false;
       }
+      const revealGeneration = ++navigationGenerationRef.current;
       positionedRef.current = true;
 
       const start = windowStartRef.current;
@@ -340,8 +356,8 @@ export function useSessionPagination(opts: CreateSessionPaginationOptions): Crea
       // the loaded bottom, and a truncated tail makes that clamp land mid-air.
       const nearTruncatedEnd = end < totalMessagesRef.current && messageIndex >= end - Math.floor(INITIAL_TAIL / 4);
       if (messageIndex < start || messageIndex >= end || nearTruncatedEnd) {
-        const recentered = await recenterWindowAround(messageIndex);
-        if (!recentered) return false;
+        const recentered = await recenterWindowAround(messageIndex, revealGeneration);
+        if (!recentered || navigationGenerationRef.current !== revealGeneration) return false;
       }
 
       const entries = filteredEntriesRef.current;
@@ -358,8 +374,41 @@ export function useSessionPagination(opts: CreateSessionPaginationOptions): Crea
         });
       }
       if (entryIndex < 0) return false;
-      optsRef.current.scrollToItem(entryIndex, "start");
-      return true;
+
+      const row = scrollElementRef.current ? rowAtEntryIndex(scrollElementRef.current, entryIndex) : null;
+      if (!row) return false;
+
+      // content-visibility initially lays out a newly revealed window from its
+      // intrinsic size estimates. Real heights arrive in waves: each alignment
+      // can paint another band of rows and move the target thousands of pixels
+      // while scrollTop stays fixed. Re-align until one pass survives a short
+      // quiet period. ponytail: five bounded passes cover a wholly new 300-row
+      // page; raise the cap only if runtime evidence shows residual drift.
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        row.scrollIntoView({ block: "start" });
+        const settleStartedAt = performance.now();
+        let previousTop = row.getBoundingClientRect().top;
+        await settleFrames(
+          () => {
+            if (navigationGenerationRef.current !== revealGeneration || !row.isConnected) return true;
+            const top = row.getBoundingClientRect().top;
+            const stable = Math.abs(top - previousTop) < 1;
+            previousTop = top;
+            return performance.now() - settleStartedAt >= 80 && stable;
+          },
+          3,
+          500,
+        );
+
+        const root = scrollElementRef.current;
+        if (navigationGenerationRef.current !== revealGeneration || !row.isConnected || !root?.contains(row)) {
+          return false;
+        }
+        // The scroller's 18px top padding is the smallest possible offset for
+        // the oldest row, so anything within 24px is correctly aligned.
+        if (Math.abs(row.getBoundingClientRect().top - root.getBoundingClientRect().top) <= 24) return true;
+      }
+      return false;
     },
     [recenterWindowAround],
   );
@@ -452,12 +501,14 @@ export function useSessionPagination(opts: CreateSessionPaginationOptions): Crea
    * turn's FIRST message to the viewport top (the generic reveal) would strand
    * the actual newest messages below the fold. */
   const revealNewest = useCallback(async (): Promise<boolean> => {
+    const navigationGeneration = ++navigationGenerationRef.current;
     positionedRef.current = true;
     const total = totalMessagesRef.current;
     if (total > 0 && windowStartRef.current + loadedCountRef.current < total) {
-      const recentered = await recenterWindowAround(total - 1);
+      const recentered = await recenterWindowAround(total - 1, navigationGeneration);
       if (!recentered) return false;
     }
+    if (navigationGenerationRef.current !== navigationGeneration) return false;
     optsRef.current.scrollToBottom();
     return true;
   }, [recenterWindowAround]);

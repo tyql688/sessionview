@@ -410,28 +410,40 @@ fn parse_session_file_does_not_store_unresolved_parent_session_path() {
 }
 
 #[test]
-fn extract_messages_uses_pi_compaction_context_order() {
-    let entries: Vec<PiEntry> = [
-        r#"{"type":"message","id":"old-user","parentId":null,"timestamp":"2026-06-10T07:00:00.000Z","message":{"role":"user","content":"old prompt","timestamp":1781074800000}}"#,
-        r#"{"type":"message","id":"old-assistant","parentId":"old-user","timestamp":"2026-06-10T07:00:01.000Z","message":{"role":"assistant","content":[{"type":"text","text":"old answer"}],"provider":"pi-test","model":"mimo-test","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2},"stopReason":"stop","timestamp":1781074801000}}"#,
-        r#"{"type":"message","id":"kept-user","parentId":"old-assistant","timestamp":"2026-06-10T07:00:02.000Z","message":{"role":"user","content":"kept prompt","timestamp":1781074802000}}"#,
-        r#"{"type":"compaction","id":"compact-1","parentId":"kept-user","timestamp":"2026-06-10T07:00:03.000Z","summary":"checkpoint","firstKeptEntryId":"kept-user","tokensBefore":100}"#,
-        r#"{"type":"message","id":"after-user","parentId":"compact-1","timestamp":"2026-06-10T07:00:04.000Z","message":{"role":"user","content":"after compaction","timestamp":1781074804000}}"#,
-    ]
-    .into_iter()
-    .map(|json| serde_json::from_str(json).unwrap())
-    .collect();
+fn parse_session_file_preserves_full_active_branch_across_compaction() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("session.jsonl");
+    std::fs::write(
+        &path,
+        [
+            r#"{"type":"session","version":3,"id":"session-1","timestamp":"2026-06-10T07:00:00.000Z","cwd":"/tmp/project"}"#,
+            r#"{"type":"message","id":"old-user","parentId":null,"timestamp":"2026-06-10T07:00:00.000Z","message":{"role":"user","content":"old prompt","timestamp":1781074800000}}"#,
+            r#"{"type":"message","id":"old-assistant","parentId":"old-user","timestamp":"2026-06-10T07:00:01.000Z","message":{"role":"assistant","content":[{"type":"text","text":"old answer"}],"provider":"pi-test","model":"mimo-test","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2},"stopReason":"stop","timestamp":1781074801000}}"#,
+            r#"{"type":"message","id":"kept-user","parentId":"old-assistant","timestamp":"2026-06-10T07:00:02.000Z","message":{"role":"user","content":"kept prompt","timestamp":1781074802000}}"#,
+            r#"{"type":"compaction","id":"compact-1","parentId":"kept-user","timestamp":"2026-06-10T07:00:03.000Z","summary":"checkpoint","firstKeptEntryId":"kept-user","tokensBefore":100}"#,
+            r#"{"type":"message","id":"after-user","parentId":"compact-1","timestamp":"2026-06-10T07:00:04.000Z","message":{"role":"user","content":"after compaction","timestamp":1781074804000}}"#,
+        ]
+        .join("\n"),
+    )
+    .unwrap();
 
-    let active_branch = build_active_branch(&entries);
-    let context_branch = build_context_branch(&entries, &active_branch, Path::new("session.jsonl"));
-    let messages = extract_messages(&entries, &context_branch);
+    let session = parse_session_file(&path).unwrap();
+    let contents: Vec<&str> = session
+        .messages
+        .iter()
+        .map(|message| message.content.as_str())
+        .collect();
 
-    assert_eq!(context_branch, ["compact-1", "kept-user", "after-user"]);
-    assert_eq!(messages.len(), 3);
-    assert_eq!(messages[0].role, MessageRole::System);
-    assert_eq!(messages[0].content, "[Compaction] checkpoint");
-    assert_eq!(messages[1].content, "kept prompt");
-    assert_eq!(messages[2].content, "after compaction");
+    assert_eq!(
+        contents,
+        [
+            "old prompt",
+            "old answer",
+            "kept prompt",
+            "[Compaction] checkpoint",
+            "after compaction",
+        ]
+    );
 }
 
 #[test]
@@ -454,11 +466,11 @@ fn parse_session_file_migrates_legacy_v1_linear_entries() {
 
     assert_eq!(session.meta.id, "legacy-session");
     assert_eq!(session.messages.len(), 3);
+    assert_eq!(session.messages[0].content, "old prompt");
     assert_eq!(
-        session.messages[0].content,
+        session.messages[1].content,
         "[Compaction] legacy checkpoint"
     );
-    assert_eq!(session.messages[1].content, "old prompt");
     assert_eq!(session.messages[2].content, "after legacy compaction");
 }
 

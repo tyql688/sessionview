@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { SessionMeta, SessionRef } from "@/lib/types";
 import { useI18n } from "@/i18n/index";
@@ -87,9 +88,13 @@ export function EditorArea(props: {
               return (
                 <div
                   key={session.id}
+                  id={`tabpanel-${props.groupId}-${session.id}`}
                   className="editor-tab-pane"
+                  role="tabpanel"
+                  aria-labelledby={`tab-${props.groupId}-${session.id}`}
+                  hidden={!isActive}
                   style={{
-                    display: isActive ? "flex" : "none",
+                    display: isActive ? "flex" : undefined,
                     flex: "1",
                     flexDirection: "column",
                     minHeight: "0",
@@ -114,9 +119,7 @@ export function EditorArea(props: {
         groups.length === 1 && (
           <div className="editor-empty">
             <div className="editor-empty-icon">
-              <svg width="48" height="48" fill="none" stroke="currentColor" strokeWidth="1" viewBox="0 0 24 24">
-                <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-              </svg>
+              <MessageSquare size={48} strokeWidth={1} aria-hidden="true" />
             </div>
             {props.recentSessions && props.recentSessions.length > 0 && (
               <div className="editor-empty-recent">

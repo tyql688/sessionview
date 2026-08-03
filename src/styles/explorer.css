@@ -19,16 +19,31 @@
   position: absolute;
   top: 0;
   right: -2px;
-  width: 5px;
+  width: 8px;
   height: 100%;
+  margin: 0;
+  border: 0;
+  padding: 0;
   cursor: col-resize;
   z-index: 10;
 }
 
+.explorer-resize-handle::before {
+  position: absolute;
+  inset: 0 0 0 -8px;
+  content: "";
+}
+
 .explorer-resize-handle:hover,
-.explorer-resize-handle.active {
+.explorer-resize-handle.active,
+.explorer-resize-handle:focus-visible {
   background: var(--accent);
   opacity: 0.4;
+}
+
+.explorer-resize-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .explorer-header {
@@ -126,7 +141,15 @@
 /* Explorer Tree */
 .tree-node-wrapper {
   display: flex;
+  min-width: 0;
   flex-direction: column;
+}
+
+.tree-node-group {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
 }
 
 .tree-node {

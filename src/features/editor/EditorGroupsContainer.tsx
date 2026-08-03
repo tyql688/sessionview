@@ -15,6 +15,7 @@ import {
 import { EditorArea } from "@/features/editor/EditorArea";
 import { SplitHandle } from "@/features/editor/SplitHandle";
 import { useIsCompact } from "@/stores/viewport";
+import { useI18n } from "@/i18n/index";
 
 export function EditorGroupsContainer(props: {
   onTabSelect: (groupId: string, tabId: string) => void;
@@ -27,6 +28,7 @@ export function EditorGroupsContainer(props: {
   tree: TreeNode[];
   onOpenSession: (session: SessionRef) => void;
 }) {
+  const { t } = useI18n();
   const groups = useGroups();
   const activeGroupId = useActiveGroupId();
   const isCompact = useIsCompact();
@@ -175,7 +177,12 @@ export function EditorGroupsContainer(props: {
       {groups.map((group, idx) => (
         <Fragment key={group.id}>
           {idx > 0 && !isCompact && (
-            <SplitHandle onResize={(dx) => handleResize(idx - 1, dx)} onDoubleClick={equalizeWidths} />
+            <SplitHandle
+              label={t("editor.resizePanels")}
+              valueNow={groups[idx - 1]?.flexBasis ?? 50}
+              onResize={(deltaX) => handleResize(idx - 1, deltaX)}
+              onDoubleClick={equalizeWidths}
+            />
           )}
           <EditorArea
             groupId={group.id}

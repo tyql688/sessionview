@@ -65,6 +65,7 @@ let openWindowMessages = MESSAGES;
 let openWindowStart = 0;
 let totalMessages = MESSAGES.length;
 let messagesWindowMessages = MESSAGES;
+let messagesWindowDelay = 0;
 let outlineEntries: Array<Record<string, unknown>> = [];
 const openWindowCalls: Array<Record<string, unknown> | undefined> = [];
 const messagesWindowCalls: Array<Record<string, unknown> | undefined> = [];
@@ -126,6 +127,7 @@ vi.mock("@tauri-apps/api/core", () => ({
         return META;
       case "get_session_messages_window":
         messagesWindowCalls.push(args);
+        if (messagesWindowDelay > 0) await new Promise((resolve) => setTimeout(resolve, messagesWindowDelay));
         return {
           total: totalMessages,
           start: typeof args?.offset === "number" ? (args.offset as number) : 0,
@@ -200,9 +202,7 @@ beforeAll(() => {
     configurable: true,
     get() {
       if (!this.classList?.contains("session-messages")) return 0;
-      const inner = this.querySelector(".session-messages-inner") as HTMLElement | null;
-      const height = inner ? Number.parseInt(inner.style.height, 10) : 0;
-      return Number.isFinite(height) ? height : 0;
+      return this.querySelectorAll(".session-entry").length * 100;
     },
   });
   // happy-dom's scrollTo doesn't notify; the timeline relies on the scroll
@@ -232,6 +232,7 @@ beforeEach(async () => {
   openWindowStart = 0;
   totalMessages = MESSAGES.length;
   messagesWindowMessages = MESSAGES;
+  messagesWindowDelay = 0;
   outlineEntries = [];
   openWindowCalls.length = 0;
   messagesWindowCalls.length = 0;
@@ -506,18 +507,28 @@ describe("SessionView smoke", () => {
     );
   });
 
-  it("re-centers the window on a far minimap jump instead of loading the gap", async () => {
-    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
-    // Open a 900-message session at its newest tail, then jump to the first
-    // turn via the minimap. The jump must fetch a small window around the
-    // target — NOT the hundreds of messages in between.
+  it("re-centers and re-aligns a far minimap jump after row layout settles", async () => {
+    let targetScrolls = 0;
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function () {
+      if (this.getAttribute("data-entry-key")?.startsWith("msg-450-")) targetScrolls += 1;
+    });
+    const nativeRect = Element.prototype.getBoundingClientRect;
+    const targetGeometry = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function () {
+      if (!this.getAttribute("data-entry-key")?.startsWith("msg-450-")) return nativeRect.call(this);
+      const top = targetScrolls < 2 ? 100 : 0;
+      return { x: 0, y: top, width: 0, height: 0, top, right: 0, bottom: top, left: 0, toJSON: () => ({}) };
+    });
+    // Open a 900-message session at its newest tail, then jump to a turn in
+    // the middle. The jump must fetch a small window around the target — NOT
+    // the hundreds of messages in between — and align again after the newly
+    // revealed content-visibility rows replace their estimated heights.
     const all = Array.from({ length: 900 }, (_, index) => messageAt(index));
     openWindowMessages = all.slice(600);
     openWindowStart = 600;
     totalMessages = 900;
-    messagesWindowMessages = all.slice(0, 300);
+    messagesWindowMessages = all.slice(300, 600);
     outlineEntries = [
-      { ordinal: 0, message_index: 0, user_text: "first turn", reply_text: "" },
+      { ordinal: 0, message_index: 450, user_text: "middle turn", reply_text: "" },
       {
         ordinal: 1,
         message_index: 700,
@@ -542,23 +553,65 @@ describe("SessionView smoke", () => {
     );
 
     await waitFor(() => expect(document.body.textContent).toContain("message 899"), { timeout: 5000 });
-    const firstTick = await waitFor(() => getByLabelText("first turn"), { timeout: 5000 });
+    const middleTick = await waitFor(() => getByLabelText("middle turn"), { timeout: 5000 });
 
-    fireEvent.click(firstTick);
+    fireEvent.click(middleTick);
 
     await waitFor(() =>
       expect(messagesWindowCalls).toContainEqual(
-        expect.objectContaining({ offset: 0, limit: 300 }),
+        expect.objectContaining({ offset: 300, limit: 300 }),
       ),
     );
     // No bulk fetch of the gap between the tail and the target.
     for (const call of messagesWindowCalls) {
       expect(call?.limit).toBeLessThanOrEqual(600);
     }
-    const firstMessage = await findByText("message 0");
-    const firstRow = firstMessage.closest(".session-entry");
-    expect(firstRow).not.toBeNull();
-    expect(scrollIntoView.mock.instances).toContain(firstRow);
+    const targetMessage = await findByText("message 450");
+    const targetRow = targetMessage.closest(".session-entry");
+    expect(targetRow).not.toBeNull();
+    await waitFor(() => {
+      expect(scrollIntoView.mock.instances.filter((instance) => instance === targetRow)).toHaveLength(2);
+    });
+    targetGeometry.mockRestore();
     scrollIntoView.mockRestore();
+  }, 10_000);
+
+  it("keeps the latest minimap click when an earlier re-center returns later", async () => {
+    const all = Array.from({ length: 900 }, (_, index) => messageAt(index));
+    openWindowMessages = all.slice(600);
+    openWindowStart = 600;
+    totalMessages = 900;
+    messagesWindowMessages = all.slice(300, 600);
+    messagesWindowDelay = 100;
+    outlineEntries = [
+      { ordinal: 0, message_index: 450, user_text: "middle turn", reply_text: "" },
+      { ordinal: 1, message_index: 700, user_text: "latest turn", reply_text: "" },
+    ];
+
+    const { findByText, getByLabelText, queryByText } = render(
+      <SessionView
+        session={{
+          id: META.id,
+          provider: "claude",
+          title: META.title,
+          project_name: "smoke",
+          is_sidechain: false,
+          source_path: META.source_path,
+          project_path: META.project_path,
+        }}
+        active={true}
+      />,
+    );
+
+    await findByText("message 899");
+    fireEvent.click(getByLabelText("middle turn"));
+    await waitFor(() =>
+      expect(messagesWindowCalls).toContainEqual(expect.objectContaining({ offset: 300, limit: 300 })),
+    );
+    fireEvent.click(getByLabelText("latest turn"));
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(queryByText("message 700")).toBeInTheDocument();
+    expect(queryByText("message 450")).not.toBeInTheDocument();
   }, 10_000);
 });

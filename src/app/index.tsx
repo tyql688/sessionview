@@ -432,6 +432,11 @@ export default function App() {
     setActiveView("explorer");
     setCompactPane("content");
   };
+  const openExplorerView = () => {
+    setActiveView("explorer");
+    setSidebarCollapsed(false);
+    if (isCompact) setCompactPane("nav");
+  };
   const handleOpenSession = (s: SessionRef) => {
     openSession(s);
     showOpenedSession();
@@ -461,25 +466,16 @@ export default function App() {
         >
           <h2>{t("error.title")}</h2>
           <p style={{ color: "var(--text-secondary)", maxWidth: "500px" }}>{err?.message || t("error.message")}</p>
-          <Button
-            variant="outline"
-            className="active:translate-y-0"
-            onClick={() => window.location.reload()}
-            style={{
-              padding: "8px 16px",
-              borderRadius: "6px",
-              border: "1px solid var(--border-color)",
-              background: "var(--bg-secondary)",
-              color: "var(--text-primary)",
-              cursor: "pointer",
-            }}
-          >
+          <Button variant="outline" className="active:translate-y-0" onClick={() => window.location.reload()}>
             {t("error.reload")}
           </Button>
         </div>
       )}
     >
       <div className="app-layout">
+        <a className="skip-link" href="#main-content">
+          {t("common.skipToContent")}
+        </a>
         {isTauriRuntime && (
           <TitleBar
             showWindowControls={showWindowControls}
@@ -508,63 +504,69 @@ export default function App() {
               }}
             />
           )}
-          {showTree && (
-            <Explorer
-              tree={filteredTree}
-              isLoading={isLoading}
-              activeSessionId={activeGrp?.activeTabId ?? null}
-              onOpenSession={handleOpenSession}
-              onPreviewSession={handlePreviewSession}
-              onRefreshTree={sync.refreshTree}
-              onRefreshProvider={(provider) => {
-                void sync.syncProviders([provider]).then(() => void loadProviderSnapshots(true));
-              }}
-              onCollapse={isCompact ? undefined : () => setSidebarCollapsed(true)}
-            />
-          )}
-          <Suspense fallback={null}>
-            {activeView === "settings" && <SettingsPanel />}
-            {activeView === "favorites" && <FavoritesView onOpenSession={handleOpenSession} />}
-            {activeView === "blocked" && <BlockedView onRefreshTree={sync.refreshTree} />}
-            {activeView === "usage" && (
-              <div
-                style={{
-                  display: "flex",
-                  flex: "1",
-                  minWidth: "0",
+          <main id="main-content" className="main-content" tabIndex={-1}>
+            {showTree && (
+              <Explorer
+                tree={filteredTree}
+                isLoading={isLoading}
+                activeSessionId={activeGrp?.activeTabId ?? null}
+                onOpenSession={handleOpenSession}
+                onPreviewSession={handlePreviewSession}
+                onRefreshTree={sync.refreshTree}
+                onRefreshProvider={(provider) => {
+                  void sync.syncProviders([provider]).then(() => void loadProviderSnapshots(true));
                 }}
-              >
-                <UsagePanel />
-              </div>
+                onCollapse={isCompact ? undefined : () => setSidebarCollapsed(true)}
+              />
             )}
-            {activeView === "folderAnalytics" && (
-              <div
-                style={{
-                  display: "flex",
-                  flex: "1",
-                  minWidth: "0",
+            <Suspense fallback={null}>
+              {activeView === "settings" && <SettingsPanel />}
+              {activeView === "favorites" && (
+                <FavoritesView onOpenSession={handleOpenSession} onOpenExplorer={openExplorerView} />
+              )}
+              {activeView === "blocked" && (
+                <BlockedView onRefreshTree={sync.refreshTree} onOpenExplorer={openExplorerView} />
+              )}
+              {activeView === "usage" && (
+                <div
+                  style={{
+                    display: "flex",
+                    flex: "1",
+                    minWidth: "0",
+                  }}
+                >
+                  <UsagePanel />
+                </div>
+              )}
+              {activeView === "folderAnalytics" && (
+                <div
+                  style={{
+                    display: "flex",
+                    flex: "1",
+                    minWidth: "0",
+                  }}
+                >
+                  <FolderAnalyticsPanel />
+                </div>
+              )}
+            </Suspense>
+            {showEditor && (
+              <EditorGroupsContainer
+                onTabSelect={(groupId, tabId) => {
+                  focusGroup(groupId);
+                  setActiveTabInGroup(groupId, tabId);
                 }}
-              >
-                <FolderAnalyticsPanel />
-              </div>
+                onTabClose={closeTab}
+                onCloseAllTabs={closeAllTabs}
+                onCloseOtherTabs={closeOtherTabs}
+                onCloseTabsToRight={closeTabsToRight}
+                onSplitToRight={splitToRight}
+                onPinTab={pinTab}
+                tree={filteredTree}
+                onOpenSession={handleOpenSession}
+              />
             )}
-          </Suspense>
-          {showEditor && (
-            <EditorGroupsContainer
-              onTabSelect={(groupId, tabId) => {
-                focusGroup(groupId);
-                setActiveTabInGroup(groupId, tabId);
-              }}
-              onTabClose={closeTab}
-              onCloseAllTabs={closeAllTabs}
-              onCloseOtherTabs={closeOtherTabs}
-              onCloseTabsToRight={closeTabsToRight}
-              onSplitToRight={splitToRight}
-              onPinTab={pinTab}
-              tree={filteredTree}
-              onOpenSession={handleOpenSession}
-            />
-          )}
+          </main>
         </div>
         {isCompact && (
           <ActivityBar

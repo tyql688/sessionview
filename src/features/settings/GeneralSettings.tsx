@@ -113,7 +113,11 @@ export function GeneralSettings() {
           <div className="settings-label">{t("settings.showOrphans")}</div>
           <div className="settings-desc">{t("settings.showOrphansDesc")}</div>
         </div>
-        <Switch checked={showOrphans} onCheckedChange={(checked) => setShowOrphans(checked)} />
+        <Switch
+          checked={showOrphans}
+          aria-label={t("settings.showOrphans")}
+          onCheckedChange={(checked) => setShowOrphans(checked)}
+        />
       </div>
 
       <div className="settings-row">
@@ -121,7 +125,11 @@ export function GeneralSettings() {
           <div className="settings-label">{t("settings.focusMode")}</div>
           <div className="settings-desc">{t("settings.focusModeDesc")}</div>
         </div>
-        <Switch checked={focusMode} onCheckedChange={(checked) => setFocusMode(checked)} />
+        <Switch
+          checked={focusMode}
+          aria-label={t("settings.focusMode")}
+          onCheckedChange={(checked) => setFocusMode(checked)}
+        />
       </div>
     </div>
   );

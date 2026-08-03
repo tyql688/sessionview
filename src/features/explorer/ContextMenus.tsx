@@ -10,17 +10,17 @@ export interface SessionMenuContext {
   node: TreeNode;
   sessionProjectPath: string;
   resumeCommand: string | null;
+  favorite: boolean | null;
   t: (key: string) => string;
   terminalApp: string;
   resumeSession: (id: string, terminal: string) => Promise<void>;
   toggleFavorite: (id: string) => Promise<boolean>;
   setRenameTarget: (target: { id: string; label: string }) => void;
-  onExportSession?: (id: string) => void;
 }
 
 export function buildSessionMenuItems(ctx: SessionMenuContext): MenuItemDef[] {
   const { node, sessionProjectPath, t } = ctx;
-  const items: MenuItemDef[] = [
+  return [
     {
       label: t("contextMenu.copySessionId"),
       onClick: () => {
@@ -68,7 +68,10 @@ export function buildSessionMenuItems(ctx: SessionMenuContext): MenuItemDef[] {
     },
     { label: "", separator: true, onClick: () => {} },
     {
-      label: t("contextMenu.toggleFavorite"),
+      label:
+        ctx.favorite === null
+          ? t("contextMenu.toggleFavorite")
+          : t(ctx.favorite ? "session.favoriteRemove" : "session.favoriteAdd"),
       onClick: async () => {
         try {
           const newState = await ctx.toggleFavorite(node.id);
@@ -86,16 +89,6 @@ export function buildSessionMenuItems(ctx: SessionMenuContext): MenuItemDef[] {
       },
     },
   ];
-  if (ctx.onExportSession) {
-    items.push(
-      { label: "", separator: true, onClick: () => {} },
-      {
-        label: t("contextMenu.export"),
-        onClick: () => ctx.onExportSession?.(node.id),
-      },
-    );
-  }
-  return items;
 }
 
 export interface SelectionMenuContext {

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Star } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { listFavorites } from "@/lib/tauri";
 import type { SessionMeta, SessionRef, TreeNode } from "@/lib/types";
 import { useI18n } from "@/i18n/index";
@@ -8,17 +10,38 @@ import { errorMessage } from "@/lib/errors";
 import { useFavoriteVersion } from "@/features/favorites/favorites";
 import { TreeNodeComponent } from "@/features/explorer/TreeNode";
 
-export function FavoritesView(props: { onOpenSession: (s: SessionRef) => void }) {
+interface FavoritesViewProps {
+  onOpenSession: (session: SessionRef) => void;
+  onOpenExplorer: () => void;
+}
+
+export function FavoritesView(props: FavoritesViewProps) {
   const { t } = useI18n();
   const [favorites, setFavorites] = useState<SessionMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
   const initializedRef = useRef(false);
   const favoriteVersion = useFavoriteVersion();
 
   const noProjectLabel = t("explorer.noProject");
 
   const tree = useMemo(() => buildFavoritesTree(favorites, noProjectLabel), [favorites, noProjectLabel]);
+  const visibleTreeIds = useMemo(() => {
+    const ids = new Set<string>();
+    const pending = [...tree];
+    while (pending.length > 0) {
+      const node = pending.pop();
+      if (!node) continue;
+      ids.add(node.id);
+      if (expandedIds.has(node.id)) pending.push(...node.children);
+    }
+    return ids;
+  }, [expandedIds, tree]);
+
+  useEffect(() => {
+    setFocusedNodeId((current) => (current && visibleTreeIds.has(current) ? current : (tree[0]?.id ?? null)));
+  }, [tree, visibleTreeIds]);
 
   function autoExpand(nodes: TreeNode[]) {
     const ids = new Set<string>();
@@ -99,21 +122,24 @@ export function FavoritesView(props: { onOpenSession: (s: SessionRef) => void })
       )}
       {!loading && favorites.length === 0 && (
         <div className="empty-state">
-          <svg width="32" height="32" fill="none" stroke="var(--text-tertiary)" strokeWidth="1.5" viewBox="0 0 24 24">
-            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-          </svg>
+          <Star size={32} strokeWidth={1.5} color="var(--text-tertiary)" aria-hidden="true" />
           <p className="empty-state-text">{t("favorites.empty")}</p>
           <p className="empty-state-hint">{t("favorites.emptyHint")}</p>
+          <Button variant="outline" size="sm" onClick={props.onOpenExplorer}>
+            {t("favorites.browseSessions")}
+          </Button>
         </div>
       )}
       {!loading && favorites.length > 0 && (
-        <div className="explorer-tree">
+        <div className="explorer-tree" role="tree" aria-label={t("favorites.sessionsTree")}>
           {tree.map((node) => (
             <TreeNodeComponent
               key={node.id}
               node={node}
               depth={0}
               activeSessionId={null}
+              focusedNodeId={focusedNodeId}
+              onNodeFocus={setFocusedNodeId}
               isNodeExpanded={isNodeExpanded}
               toggleExpanded={toggleExpanded}
               onSessionContextMenu={(e, n, _p) => handleContextMenu(e, n)}

@@ -6,7 +6,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ChevronsRight } from "lucide-react";
-import { type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type { SessionRef, Provider } from "@/lib/types";
 import { useI18n } from "@/i18n/index";
 import { ContextMenu, type MenuItemDef } from "@/components/ContextMenu";
@@ -25,7 +31,7 @@ function providerColor(provider: Provider): string {
   return `var(--${provider})`;
 }
 
-export function TabBar(props: {
+interface TabBarProps {
   groupId: string;
   tabs: SessionRef[];
   activeTabId: string | null;
@@ -37,7 +43,9 @@ export function TabBar(props: {
   onCloseTabsToRight: (fromId: string) => void;
   onSplitToRight: (sessionId: string) => void;
   onPinTab: (sessionId: string) => void;
-}) {
+}
+
+export function TabBar(props: TabBarProps) {
   const { t } = useI18n();
   const isCoarse = useIsCoarse();
   const isCompact = useIsCompact();
@@ -106,6 +114,38 @@ export function TabBar(props: {
     setMenuState({ pos: { x: e.clientX, y: e.clientY }, tabId });
   }
 
+  function handleTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
+    let nextIndex: number;
+    switch (event.key) {
+      case "ArrowLeft":
+        nextIndex = (index - 1 + props.tabs.length) % props.tabs.length;
+        break;
+      case "ArrowRight":
+        nextIndex = (index + 1) % props.tabs.length;
+        break;
+      case "Home":
+        nextIndex = 0;
+        break;
+      case "End":
+        nextIndex = props.tabs.length - 1;
+        break;
+      case "Delete":
+        event.preventDefault();
+        props.onTabClose(props.tabs[index].id);
+        requestAnimationFrame(() => {
+          scrollRef.current?.querySelector<HTMLButtonElement>('[role="tab"][tabindex="0"]')?.focus();
+        });
+        return;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    const nextTab = props.tabs[nextIndex];
+    props.onTabSelect(nextTab.id);
+    scrollRef.current?.querySelector<HTMLButtonElement>(`[data-tab-target="${CSS.escape(nextTab.id)}"]`)?.focus();
+  }
+
   function menuItems(): MenuItemDef[] {
     const m = menuState;
     if (!m) return [];
@@ -154,6 +194,8 @@ export function TabBar(props: {
       <div
         ref={scrollRef}
         className="tab-bar-scroll"
+        role="tablist"
+        aria-label={t("tabs.openTabs")}
         onDragOver={(e) => {
           e.preventDefault();
           if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
@@ -174,7 +216,7 @@ export function TabBar(props: {
           }
         }}
       >
-        {props.tabs.map((tab) => {
+        {props.tabs.map((tab, index) => {
           const isActive = tab.id === props.activeTabId;
           const isPreview = tab.id === props.previewTabId;
           return (
@@ -209,12 +251,6 @@ export function TabBar(props: {
               onDragEnd={(e) => {
                 (e.currentTarget as HTMLElement).style.opacity = "";
               }}
-              onClick={(e) => {
-                if (e.button === 0) props.onTabSelect(tab.id);
-              }}
-              onDoubleClick={() => {
-                if (isPreview) props.onPinTab(tab.id);
-              }}
               onMouseDown={(e) => {
                 if (e.button === 1) {
                   e.preventDefault();
@@ -223,13 +259,30 @@ export function TabBar(props: {
               }}
               onContextMenu={(e) => handleContextMenu(e, tab.id)}
             >
-              <span className="tab-dot" style={{ background: providerColor(tab.provider) }} />
-              <span className="tab-title">{tab.title}</span>
+              <button
+                type="button"
+                role="tab"
+                id={`tab-${props.groupId}-${tab.id}`}
+                className="tab-select"
+                data-tab-target={tab.id}
+                aria-selected={isActive}
+                aria-controls={`tabpanel-${props.groupId}-${tab.id}`}
+                tabIndex={isActive ? 0 : -1}
+                onClick={() => props.onTabSelect(tab.id)}
+                onDoubleClick={() => {
+                  if (isPreview) props.onPinTab(tab.id);
+                }}
+                onKeyDown={(event) => handleTabKeyDown(event, index)}
+              >
+                <span className="tab-dot" style={{ background: providerColor(tab.provider) }} />
+                <span className="tab-title">{tab.title}</span>
+              </button>
               <Button
                 variant="ghost"
                 size="icon-xs"
                 className={`tab-close active:translate-y-0${isActive ? " visible" : ""}`}
-                aria-label={t("common.closeTab")}
+                aria-label={`${t("common.closeTab")}: ${tab.title}`}
+                tabIndex={-1}
                 onClick={(e) => {
                   e.stopPropagation();
                   props.onTabClose(tab.id);
@@ -252,6 +305,7 @@ export function TabBar(props: {
                 size="icon-xs"
                 className="tab-overflow-btn shrink-0"
                 title={t("tabs.showOpenTabs")}
+                aria-label={t("tabs.showOpenTabs")}
               />
             }
           >

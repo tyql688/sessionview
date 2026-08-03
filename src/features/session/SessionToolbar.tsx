@@ -9,7 +9,7 @@ import { useI18n } from "@/i18n/index";
 import { getProviderLabel, useProviderSnapshotVersion } from "@/stores/providerSnapshots";
 import { formatTimestamp, formatDuration, fmtTokens, formatFileSize, shortenHomePath } from "@/lib/formatters";
 
-export function SessionToolbar(props: {
+interface SessionToolbarProps {
   meta: SessionMeta;
   messages: Message[];
   starred: boolean | null;
@@ -18,7 +18,9 @@ export function SessionToolbar(props: {
   onAnalyze: () => void;
   onResume: () => void;
   onExport: () => void;
-}) {
+}
+
+export function SessionToolbar(props: SessionToolbarProps) {
   const { t, locale } = useI18n();
 
   const copyResumeCommand = async () => {
@@ -34,20 +36,14 @@ export function SessionToolbar(props: {
   // resolved provider name.
   useProviderSnapshotVersion();
 
-  const providerLabel = () => {
-    const meta = props.meta;
-    return getProviderLabel(meta.provider, meta.variant_name);
-  };
+  const providerLabel = getProviderLabel(props.meta.provider, props.meta.variant_name);
 
   // Total token usage from session meta (aggregated in DB, unaffected by paging)
-  const totalTokens = () => {
-    const meta = props.meta;
-    const input = meta.input_tokens ?? 0;
-    const output = meta.output_tokens ?? 0;
-    const cacheRead = meta.cache_read_tokens ?? 0;
-    const cacheWrite = meta.cache_write_tokens ?? 0;
-    return input + output + cacheRead + cacheWrite > 0 ? { input, output, cacheRead, cacheWrite } : null;
-  };
+  const input = props.meta.input_tokens ?? 0;
+  const output = props.meta.output_tokens ?? 0;
+  const cacheRead = props.meta.cache_read_tokens ?? 0;
+  const cacheWrite = props.meta.cache_write_tokens ?? 0;
+  const tokenUsage = input + output + cacheRead + cacheWrite > 0 ? { input, output, cacheRead, cacheWrite } : null;
 
   return (
     <>
@@ -56,7 +52,7 @@ export function SessionToolbar(props: {
         <div className="session-breadcrumb">
           <div className="breadcrumb-nav">
             <span className="breadcrumb-provider" style={{ color: `var(--${props.meta.provider})` }}>
-              {providerLabel()}
+              {providerLabel}
             </span>
             <span className="breadcrumb-sep">&rsaquo;</span>
             <span className="breadcrumb-project">{props.meta.project_name || t("explorer.noProject")}</span>
@@ -72,6 +68,13 @@ export function SessionToolbar(props: {
                     variant="ghost"
                     size="icon-sm"
                     disabled={props.starred === null}
+                    aria-label={
+                      props.starred === null
+                        ? t("common.loading")
+                        : props.starred
+                          ? t("session.favoriteRemove")
+                          : t("session.favoriteAdd")
+                    }
                     onClick={props.onToggleFavorite}
                   />
                 }
@@ -87,7 +90,16 @@ export function SessionToolbar(props: {
               </TooltipContent>
             </Tooltip>
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-sm" onClick={props.onAnalyze} />}>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={t("session.analytics")}
+                    onClick={props.onAnalyze}
+                  />
+                }
+              >
                 <ChartColumn className="size-4" aria-hidden="true" />
               </TooltipTrigger>
               <TooltipContent side="bottom">{t("session.analytics")}</TooltipContent>
@@ -96,7 +108,14 @@ export function SessionToolbar(props: {
               <>
                 <Tooltip>
                   <TooltipTrigger
-                    render={<Button variant="ghost" size="icon-sm" onClick={() => void copyResumeCommand()} />}
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={t("session.copyResumeCommand")}
+                        onClick={() => void copyResumeCommand()}
+                      />
+                    }
                   >
                     <SquareTerminal className="size-4" aria-hidden="true" />
                   </TooltipTrigger>
@@ -137,24 +156,24 @@ export function SessionToolbar(props: {
             for incremental-poll freshness, not a per-session size. Surfacing it
             would show the same DB size on every session, so render it as unknown. */}
         <span>{formatFileSize(props.meta.provider === "opencode" ? 0 : props.meta.file_size_bytes)}</span>
-        {totalTokens() && (
+        {tokenUsage && (
           <>
             <span className="info-sep">&middot;</span>
             <span
               className="session-info-tokens"
-              title={`${t("common.inputTokens")}: ${totalTokens()!.input.toLocaleString()}, ${t("common.outputTokens")}: ${totalTokens()!.output.toLocaleString()}${totalTokens()!.cacheWrite > 0 ? `, ${t("common.cacheWriteTokens")}: ${totalTokens()!.cacheWrite.toLocaleString()}` : ""}${totalTokens()!.cacheRead > 0 ? `, ${t("common.cacheReadTokens")}: ${totalTokens()!.cacheRead.toLocaleString()}` : ""}`}
+              title={`${t("common.inputTokens")}: ${tokenUsage.input.toLocaleString()}, ${t("common.outputTokens")}: ${tokenUsage.output.toLocaleString()}${tokenUsage.cacheWrite > 0 ? `, ${t("common.cacheWriteTokens")}: ${tokenUsage.cacheWrite.toLocaleString()}` : ""}${tokenUsage.cacheRead > 0 ? `, ${t("common.cacheReadTokens")}: ${tokenUsage.cacheRead.toLocaleString()}` : ""}`}
             >
               {"\u2191"}
-              {fmtTokens(totalTokens()!.input)} {"\u2193"}
-              {fmtTokens(totalTokens()!.output)} {t("common.tokens")}
-              {totalTokens()!.cacheWrite + totalTokens()!.cacheRead > 0 && (
+              {fmtTokens(tokenUsage.input)} {"\u2193"}
+              {fmtTokens(tokenUsage.output)} {t("common.tokens")}
+              {tokenUsage.cacheWrite + tokenUsage.cacheRead > 0 && (
                 <>
                   {" · "}
                   <span className="cache-read-label">
-                    {t("common.cacheRead")} {fmtTokens(totalTokens()!.cacheRead)}
+                    {t("common.cacheRead")} {fmtTokens(tokenUsage.cacheRead)}
                   </span>
                   {" · "}
-                  {t("common.cacheWrite")} {fmtTokens(totalTokens()!.cacheWrite)}
+                  {t("common.cacheWrite")} {fmtTokens(tokenUsage.cacheWrite)}
                 </>
               )}
             </span>

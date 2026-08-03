@@ -27,7 +27,7 @@
 .skeleton {
   background: linear-gradient(90deg, var(--bg-tab-hover) 25%, var(--border-subtle) 50%, var(--bg-tab-hover) 75%);
   background-size: 200% 100%;
-  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+  animation: skeleton-shimmer 1.5s linear infinite;
   border-radius: 4px;
 }
 
@@ -40,13 +40,22 @@
   }
 }
 
-.skeleton-line {
-  height: 12px;
-  margin-bottom: 8px;
-}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+    background: var(--bg-tab-hover);
+  }
 
-.skeleton-line:last-child {
-  width: 60%;
+  [data-slot="dialog-overlay"],
+  [data-slot="dialog-content"],
+  [data-slot="alert-dialog-overlay"],
+  [data-slot="alert-dialog-content"],
+  [data-slot="dropdown-menu-content"],
+  [data-slot="select-content"],
+  [data-slot="tooltip-content"],
+  .context-menu-popup {
+    animation: none;
+  }
 }
 
 .skeleton-tree-item {
@@ -67,32 +76,4 @@
   height: 10px;
   flex: 1;
   max-width: 140px;
-}
-
-.skeleton-message {
-  display: flex;
-  gap: 10px;
-  padding: 8px 20px;
-}
-
-.skeleton-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  flex-shrink: 0;
-}
-
-.skeleton-bubble {
-  flex: 1;
-  max-width: 65%;
-  border-radius: 12px;
-  height: 48px;
-}
-
-.skeleton-message:nth-child(even) {
-  flex-direction: row-reverse;
-}
-
-.skeleton-message:nth-child(even) .skeleton-bubble {
-  max-width: 55%;
 }

@@ -1,4 +1,6 @@
+import { Copy, Minus, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/i18n/index";
 
 export interface TitleBarProps {
   showWindowControls: boolean;
@@ -10,12 +12,14 @@ export interface TitleBarProps {
 }
 
 function isInteractiveTitlebarTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && target.closest("input, button, .search-panel") !== null;
+  return target instanceof HTMLElement && target.closest("input, button") !== null;
 }
 
 export function TitleBar(props: TitleBarProps) {
+  const { t } = useI18n();
+
   return (
-    <div
+    <header
       className="titlebar"
       onMouseDown={(e) => {
         if (e.buttons !== 1) return;
@@ -40,28 +44,23 @@ export function TitleBar(props: TitleBarProps) {
             size="icon-sm"
             type="button"
             className="win-ctrl-btn active:translate-y-0"
+            aria-label={t("window.minimize")}
             onClick={props.onMinimize}
           >
-            <svg viewBox="0 0 10 10">
-              <line x1="0" y1="5" x2="10" y2="5" stroke="currentColor" strokeWidth="1.2" />
-            </svg>
+            <Minus className="size-3" aria-hidden="true" />
           </Button>
           <Button
             variant="ghost"
             size="icon-sm"
             type="button"
             className="win-ctrl-btn active:translate-y-0"
+            aria-label={props.isMaximized ? t("window.restore") : t("window.maximize")}
             onClick={props.onToggleMaximize}
           >
             {props.isMaximized ? (
-              <svg viewBox="0 0 10 10">
-                <path d="M2.6 2.6 V1.1 H8.9 V7.4 H7.4" fill="none" stroke="currentColor" strokeWidth="1.2" />
-                <rect x="1.1" y="2.6" width="6.3" height="6.3" fill="none" stroke="currentColor" strokeWidth="1.2" />
-              </svg>
+              <Copy className="size-3" aria-hidden="true" />
             ) : (
-              <svg viewBox="0 0 10 10">
-                <rect x="0.6" y="0.6" width="8.8" height="8.8" fill="none" stroke="currentColor" strokeWidth="1.2" />
-              </svg>
+              <Square className="size-3" aria-hidden="true" />
             )}
           </Button>
           <Button
@@ -69,15 +68,13 @@ export function TitleBar(props: TitleBarProps) {
             size="icon-sm"
             type="button"
             className="win-ctrl-btn close active:translate-y-0"
+            aria-label={t("window.close")}
             onClick={props.onClose}
           >
-            <svg viewBox="0 0 10 10">
-              <line x1="0.5" y1="0.5" x2="9.5" y2="9.5" stroke="currentColor" strokeWidth="1.2" />
-              <line x1="9.5" y1="0.5" x2="0.5" y2="9.5" stroke="currentColor" strokeWidth="1.2" />
-            </svg>
+            <X className="size-3" aria-hidden="true" />
           </Button>
         </div>
       )}
-    </div>
+    </header>
   );
 }

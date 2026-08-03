@@ -271,7 +271,6 @@ export function UsagePanel() {
           void handleRefreshUsage();
         }}
         onCancel={() => setShowClearUsageConfirm(false)}
-        danger={true}
       />
     </div>
   );

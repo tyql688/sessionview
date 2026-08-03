@@ -1,4 +1,5 @@
 import type { ProcessedEntry } from "@/features/session/hooks";
+import { preferredScrollBehavior } from "@/lib/motion";
 
 export const SESSION_SEARCH_DEBOUNCE_MS = 180;
 
@@ -171,5 +172,5 @@ export function applySearchHighlight(ranges: Range[], activeIndex: number | null
 export function scrollRangeIntoView(range: Range): void {
   const node = range.startContainer;
   const element = node instanceof Element ? node : (node.parentElement ?? null);
-  element?.scrollIntoView({ behavior: "smooth", block: "center" });
+  element?.scrollIntoView({ behavior: preferredScrollBehavior(), block: "center" });
 }

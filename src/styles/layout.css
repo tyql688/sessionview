@@ -18,6 +18,23 @@ body {
   overflow: hidden;
 }
 
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 1000;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-editor);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-2);
+  transform: translateY(calc(-100% - 16px));
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
 /* Titlebar — uses native overlay mode (macOS traffic lights need extra left padding) */
 .titlebar {
   height: 36px;
@@ -76,6 +93,15 @@ body {
   padding: 0 var(--chrome-gap) var(--chrome-gap) 0;
 }
 
+.main-content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: var(--chrome-gap);
+}
+
 /* Activity Bar */
 .activity-bar {
   width: 52px;
@@ -119,8 +145,8 @@ body {
   cursor: pointer;
   border-radius: 10px;
   transition:
-    color 0.15s,
-    background 0.15s;
+    color var(--dur-fast) var(--ease-standard),
+    background var(--dur-fast) var(--ease-standard);
   position: relative;
 }
 
@@ -150,10 +176,20 @@ body {
   font-size: 12px;
   color: var(--text-secondary);
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 .statusbar-left {
   display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.status-detail {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
 }
@@ -162,6 +198,13 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+  .status-detail {
+    display: none;
+  }
 }
 
 .status-dot {
@@ -179,7 +222,7 @@ body {
   border-radius: 50%;
   background: var(--accent);
   flex-shrink: 0;
-  animation: indexingPulse 1.2s ease-in-out infinite;
+  animation: indexingPulse 1.2s linear infinite;
 }
 
 @keyframes indexingPulse {
@@ -189,6 +232,12 @@ body {
   }
   50% {
     opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-dot-indexing {
+    animation: none;
   }
 }
 
@@ -207,7 +256,7 @@ body {
 }
 
 .status-badge-tokens {
-  color: #6366f1;
+  color: #5558c9;
 }
 
 .status-badge-cost {
@@ -237,8 +286,8 @@ body {
   padding: 1px 4px;
   border-radius: 3px;
   transition:
-    background 0.1s,
-    color 0.1s;
+    background var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard);
 }
 
 .locale-btn.active {
@@ -263,7 +312,7 @@ body {
   font-size: 12px;
   padding: 1px 4px;
   border-radius: 3px;
-  transition: background 0.1s;
+  transition: background var(--dur-fast) var(--ease-standard);
   line-height: 1;
 }
 
@@ -321,14 +370,14 @@ body {
   border: none;
   color: var(--fg-muted);
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background var(--dur-fast) var(--ease-standard);
   padding: 0;
 }
 
 .win-ctrl-btn svg {
   width: 10px;
   height: 10px;
-  fill: currentColor;
+  fill: none;
 }
 
 .win-ctrl-btn:hover {

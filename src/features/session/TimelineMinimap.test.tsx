@@ -61,12 +61,10 @@ describe("TimelineMinimap", () => {
 
   it("marks the active tick", () => {
     const { container } = renderMinimap(outlineOf(5), 3);
-    const ticks = container.querySelectorAll(".timeline-minimap-tick");
-    expect(ticks[3]?.classList.contains("timeline-minimap-tick-active")).toBe(
-      true,
-    );
-    expect(ticks[0]?.classList.contains("timeline-minimap-tick-active")).toBe(
-      false,
-    );
+    const ticks = container.querySelectorAll<HTMLElement>(".timeline-minimap-tick");
+    expect(ticks[3]?.classList.contains("timeline-minimap-tick-active")).toBe(true);
+    expect(ticks[0]?.classList.contains("timeline-minimap-tick-active")).toBe(false);
+    expect(ticks[0]?.style.width).toBe("");
+    expect(ticks[0]?.style.getPropertyValue("--tick-scale")).toBe(String(5 / 24));
   });
 });

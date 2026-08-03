@@ -20,7 +20,6 @@ interface SelectFieldProps<Value extends string> {
   options: readonly SelectOption<Value>[];
   onValueChange: (value: Value) => void;
   placeholder?: React.ReactNode;
-  size?: "sm" | "default";
   disabled?: boolean;
   triggerClassName?: string;
   contentClassName?: string;
@@ -34,20 +33,12 @@ function SelectValue({ className, ...props }: SelectPrimitive.Value.Props) {
   );
 }
 
-function SelectTrigger({
-  className,
-  size = "default",
-  children,
-  ...props
-}: SelectPrimitive.Trigger.Props & {
-  size?: "sm" | "default";
-}) {
+function SelectTrigger({ className, children, ...props }: SelectPrimitive.Trigger.Props) {
   return (
     <SelectPrimitive.Trigger
       data-slot="select-trigger"
-      data-size={size}
       className={cn(
-        "group/select flex w-fit min-w-0 items-center justify-between gap-2 rounded-lg border border-input bg-background/80 py-2 pr-2 pl-2.5 text-sm whitespace-nowrap shadow-xs transition-[background,border-color,box-shadow,color] outline-none select-none hover:border-foreground/20 hover:bg-muted/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/35 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-placeholder:text-muted-foreground data-popup-open:border-ring/70 data-popup-open:bg-muted data-popup-open:ring-2 data-popup-open:ring-ring/20 data-[size=default]:h-8 data-[size=sm]:h-7 data-[size=sm]:rounded-[min(var(--radius-md),10px)] *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "group/select flex h-7 w-fit min-w-0 items-center justify-between gap-2 rounded-[min(var(--radius-md),10px)] border border-input bg-background/80 py-2 pr-2 pl-2.5 text-sm whitespace-nowrap shadow-xs transition-[background,border-color,box-shadow,color] outline-none select-none hover:border-foreground/20 hover:bg-muted/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/35 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-placeholder:text-muted-foreground data-popup-open:border-ring/70 data-popup-open:bg-muted data-popup-open:ring-2 data-popup-open:ring-ring/20 *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className,
       )}
       {...props}
@@ -125,7 +116,6 @@ function SelectField<Value extends string>({
   options,
   onValueChange,
   placeholder,
-  size = "sm",
   disabled,
   triggerClassName,
   contentClassName,
@@ -143,7 +133,7 @@ function SelectField<Value extends string>({
 
   return (
     <Select value={value} onValueChange={handleValueChange} disabled={disabled}>
-      <SelectTrigger size={size} className={triggerClassName} aria-label={ariaLabel}>
+      <SelectTrigger className={triggerClassName} aria-label={ariaLabel}>
         <SelectValue placeholder={placeholder}>{selected?.label ?? placeholder}</SelectValue>
       </SelectTrigger>
       <SelectContent className={contentClassName}>

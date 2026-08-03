@@ -1,6 +1,5 @@
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { CircleDollarSign, Hash } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useIsCompact } from "@/stores/viewport";
 import { useI18n } from "@/i18n/index";
@@ -78,8 +77,16 @@ export function ActivityHeatmap(props: ActivityHeatmapProps) {
 
   const inspectorText = hovered ? cellTooltip(hovered) : t("usage.activityHint");
 
-  const flatCells = props.grid.weeks.flatMap((week) => week.cells);
+  const flatCells = useMemo(() => props.grid.weeks.flatMap((week) => week.cells), [props.grid.weeks]);
+  const inRangeCells = useMemo(() => flatCells.filter((cell) => cell.inRange), [flatCells]);
   const weekCount = props.grid.weeks.length;
+  const [focusedDate, setFocusedDate] = useState<string | null>(() => inRangeCells.at(-1)?.date ?? null);
+
+  useEffect(() => {
+    setFocusedDate((current) =>
+      current && inRangeCells.some((cell) => cell.date === current) ? current : (inRangeCells.at(-1)?.date ?? null),
+    );
+  }, [inRangeCells]);
 
   // Compact layouts scroll the grid horizontally (see mobile.css); land on
   // the newest weeks, which are what the reader came for.
@@ -89,6 +96,48 @@ export function ActivityHeatmap(props: ActivityHeatmapProps) {
     const el = scrollRef.current;
     if (isCompact && el) el.scrollLeft = el.scrollWidth;
   }, [isCompact, weekCount]);
+
+  const handleCellKeyDown = (event: KeyboardEvent<HTMLTableCellElement>, date: string) => {
+    const currentIndex = flatCells.findIndex((cell) => cell.date === date);
+    const firstIndex = flatCells.findIndex((cell) => cell.inRange);
+    const lastIndex = flatCells.findLastIndex((cell) => cell.inRange);
+    if (currentIndex < 0 || firstIndex < 0 || lastIndex < 0) return;
+
+    const weekday = currentIndex % 7;
+    let nextIndex: number;
+    switch (event.key) {
+      case "ArrowLeft":
+        nextIndex = currentIndex - 7;
+        break;
+      case "ArrowRight":
+        nextIndex = currentIndex + 7;
+        break;
+      case "ArrowUp":
+        nextIndex = weekday > 0 ? currentIndex - 1 : currentIndex;
+        break;
+      case "ArrowDown":
+        nextIndex = weekday < 6 ? currentIndex + 1 : currentIndex;
+        break;
+      case "Home":
+        nextIndex = flatCells.findIndex((cell, index) => index % 7 === weekday && cell.inRange);
+        break;
+      case "End":
+        nextIndex = flatCells.findLastIndex((cell, index) => index % 7 === weekday && cell.inRange);
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    const nextCell = flatCells[Math.max(firstIndex, Math.min(lastIndex, nextIndex))];
+    if (!nextCell?.inRange) return;
+    setFocusedDate(nextCell.date);
+    requestAnimationFrame(() => {
+      scrollRef.current
+        ?.querySelector<HTMLElement>(`[data-heatmap-date="${nextCell.date}"]`)
+        ?.focus({ preventScroll: true });
+    });
+  };
 
   return (
     <section className="usage-card usage-heatmap-card">
@@ -163,9 +212,8 @@ export function ActivityHeatmap(props: ActivityHeatmapProps) {
 
       {weekCount > 0 && (
         <div className="usage-heatmap-scroll" ref={scrollRef}>
-          <fieldset
+          <div
             className={`usage-heatmap-graph${props.loading ? " is-loading" : ""}`}
-            aria-label={headline}
             style={{ "--weeks": String(weekCount) } as CSSProperties}
           >
             <div className="usage-heatmap-corner" aria-hidden="true" />
@@ -190,38 +238,51 @@ export function ActivityHeatmap(props: ActivityHeatmapProps) {
               ))}
             </div>
 
-            <div className="usage-heatmap-cells">
-              {flatCells.map((cell) => {
-                if (!cell.inRange) {
-                  return (
-                    <span
-                      key={cell.date}
-                      className="usage-heatmap-cell is-empty"
-                      data-level={cell.level}
-                      aria-hidden="true"
-                    />
-                  );
-                }
+            <table className="usage-heatmap-cells" aria-busy={props.loading}>
+              <caption className="sr-only">{headline}</caption>
+              <tbody className="usage-heatmap-body">
+                {WEEKDAY_ROWS.map((row) => (
+                  <tr className="usage-heatmap-row" key={row}>
+                    {props.grid.weeks.map((week) => {
+                      const cell = week.cells[row];
+                      if (!cell.inRange) {
+                        return (
+                          <td
+                            key={cell.date}
+                            className="usage-heatmap-cell is-empty"
+                            data-level={cell.level}
+                            aria-hidden="true"
+                            tabIndex={-1}
+                          />
+                        );
+                      }
 
-                const label = cellTooltip(cell);
-                return (
-                  <Button
-                    key={cell.date}
-                    variant="ghost"
-                    type="button"
-                    className="usage-heatmap-cell h-auto min-h-0 min-w-0 p-0 active:translate-y-0"
-                    data-level={cell.level}
-                    title={label}
-                    aria-label={label}
-                    onBlur={() => setHovered(null)}
-                    onFocus={() => setHovered(cell)}
-                    onMouseEnter={() => setHovered(cell)}
-                    onMouseLeave={() => setHovered(null)}
-                  />
-                );
-              })}
-            </div>
-          </fieldset>
+                      const label = cellTooltip(cell);
+                      return (
+                        <td
+                          key={cell.date}
+                          className="usage-heatmap-cell"
+                          data-heatmap-date={cell.date}
+                          data-level={cell.level}
+                          tabIndex={cell.date === focusedDate ? 0 : -1}
+                          title={label}
+                          aria-label={label}
+                          onBlur={() => setHovered(null)}
+                          onFocus={() => {
+                            setFocusedDate(cell.date);
+                            setHovered(cell);
+                          }}
+                          onKeyDown={(event) => handleCellKeyDown(event, cell.date)}
+                          onMouseEnter={() => setHovered(cell)}
+                          onMouseLeave={() => setHovered(null)}
+                        />
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

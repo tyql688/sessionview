@@ -96,6 +96,7 @@ export function SubagentInline(props: {
             size="icon-xs"
             type="button"
             title={t("tool.openInTab")}
+            aria-label={t("tool.openInTab")}
             onClick={() => openSession(meta)}
             className="size-5 shrink-0 rounded p-0.5 text-text-tertiary transition-colors hover:text-text-primary active:translate-y-0"
           >

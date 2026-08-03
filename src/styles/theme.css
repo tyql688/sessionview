@@ -50,6 +50,10 @@
   --radius: 0.375rem; /* 6px — matches --radius-md; denser than shadcn preset */
 }
 
+[data-theme="dark"] {
+  --primary-foreground: #08111f;
+}
+
 @theme inline {
   /* shadcn token bridge */
   --color-background: var(--background);

@@ -712,7 +712,6 @@ export function FolderAnalyticsPanel() {
           void handleRefreshUsage();
         }}
         onCancel={() => setShowClearUsageConfirm(false)}
-        danger={true}
       />
     </div>
   );

@@ -10,7 +10,7 @@ import { fmtTokens } from "@/lib/formatters";
 import type { TodayTokens } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 
-export function StatusBar(props: {
+interface StatusBarProps {
   sessionCount: number;
   providerCount: number;
   isIndexing?: boolean;
@@ -18,7 +18,9 @@ export function StatusBar(props: {
   nextAutoIndexTime?: number;
   todayCost?: number;
   todayTokens?: TodayTokens;
-}) {
+}
+
+export function StatusBar(props: StatusBarProps) {
   const { t, locale, setLocale } = useI18n();
   const theme = useTheme();
   const phase = useUpdaterPhase();
@@ -51,11 +53,6 @@ export function StatusBar(props: {
       hour: "2-digit",
       minute: "2-digit",
     });
-  };
-
-  const hasTokens = () => {
-    const t = props.todayTokens;
-    return t && (t.input > 0 || t.output > 0);
   };
 
   function cycleTheme() {
@@ -101,10 +98,16 @@ export function StatusBar(props: {
     }
   };
 
-  const isBusy = () => phase === "downloading" || phase === "installing" || phase === "error";
+  const isBusy = phase === "downloading" || phase === "installing" || phase === "error";
+  const lastScan = lastScanLabel();
+  const nextAutoIndex = nextAutoIndexLabel();
+  const costLabel = todayCostLabel();
+  const tokens =
+    props.todayTokens && (props.todayTokens.input > 0 || props.todayTokens.output > 0) ? props.todayTokens : null;
+  const update = updateLabel();
 
   return (
-    <div className="statusbar">
+    <footer className="statusbar">
       <div className="statusbar-left">
         <span className={props.isIndexing ? "status-dot-indexing" : "status-dot"} />
         <span>
@@ -116,72 +119,71 @@ export function StatusBar(props: {
             </>
           )}
         </span>
-        <span className="status-separator">·</span>
-        <span>
-          {props.providerCount} {t("status.providers")}
+        <span className="status-detail">
+          <span className="status-separator">·</span>
+          <span>
+            {props.providerCount} {t("status.providers")}
+          </span>
         </span>
-        {lastScanLabel() && (
-          <>
+        {lastScan && (
+          <span className="status-detail">
             <span className="status-separator">·</span>
             <span title={props.lastScanTime ? new Date(props.lastScanTime).toLocaleString() : ""}>
-              {t("status.lastUpdate")} {lastScanLabel()}
+              {t("status.lastUpdate")} {lastScan}
             </span>
-          </>
+          </span>
         )}
-        {nextAutoIndexLabel() && (
-          <>
+        {nextAutoIndex && (
+          <span className="status-detail">
             <span className="status-separator">·</span>
             <span title={props.nextAutoIndexTime ? new Date(props.nextAutoIndexTime).toLocaleString() : ""}>
-              {t("status.nextUpdate")} {nextAutoIndexLabel()}
+              {t("status.nextUpdate")} {nextAutoIndex}
             </span>
-          </>
+          </span>
         )}
-        {(hasTokens() || todayCostLabel()) && (
-          <>
+        {(tokens || costLabel) && (
+          <span className="status-detail">
             <span className="status-separator">·</span>
             <span className="status-today">
-              {hasTokens() && (
+              {tokens && (
                 <span
                   className="status-badge status-badge-tokens"
-                  title={(() => {
-                    const tk = props.todayTokens!;
-                    return `${t("common.inputTokens")}: ${tk.input.toLocaleString()}, ${t("common.outputTokens")}: ${tk.output.toLocaleString()}${tk.cache_read > 0 ? `, ${t("common.cacheReadTokens")}: ${tk.cache_read.toLocaleString()}` : ""}${tk.cache_write > 0 ? `, ${t("common.cacheWriteTokens")}: ${tk.cache_write.toLocaleString()}` : ""}`;
-                  })()}
+                  title={`${t("common.inputTokens")}: ${tokens.input.toLocaleString()}, ${t("common.outputTokens")}: ${tokens.output.toLocaleString()}${tokens.cache_read > 0 ? `, ${t("common.cacheReadTokens")}: ${tokens.cache_read.toLocaleString()}` : ""}${tokens.cache_write > 0 ? `, ${t("common.cacheWriteTokens")}: ${tokens.cache_write.toLocaleString()}` : ""}`}
                 >
                   {"\u2191"}
-                  {fmtTokens(props.todayTokens!.input)}
+                  {fmtTokens(tokens.input)}
                   {" \u2193"}
-                  {fmtTokens(props.todayTokens!.output)} {t("common.tokens")}
-                  {props.todayTokens!.cache_read + props.todayTokens!.cache_write > 0 && (
+                  {fmtTokens(tokens.output)} {t("common.tokens")}
+                  {tokens.cache_read + tokens.cache_write > 0 && (
                     <>
                       {" · "}
                       <span className="cache-read-label">
-                        {t("common.cacheRead")} {fmtTokens(props.todayTokens!.cache_read)}
+                        {t("common.cacheRead")} {fmtTokens(tokens.cache_read)}
                       </span>
                       {" · "}
-                      {t("common.cacheWrite")} {fmtTokens(props.todayTokens!.cache_write)}
+                      {t("common.cacheWrite")} {fmtTokens(tokens.cache_write)}
                     </>
                   )}
                 </span>
               )}
-              {todayCostLabel() && <span className="status-badge status-badge-cost">{todayCostLabel()}</span>}
+              {costLabel && <span className="status-badge status-badge-cost">{costLabel}</span>}
             </span>
-          </>
+          </span>
         )}
       </div>
       <div className="statusbar-right">
-        {updateLabel() !== null && (
+        {update !== null && (
           <Button
             variant="ghost"
             size="xs"
-            className={cn("update-badge active:translate-y-0", isBusy() && "busy")}
-            disabled={isBusy()}
+            className={cn("update-badge active:translate-y-0", isBusy && "busy")}
+            disabled={isBusy}
             onClick={() => {
               if (phase === "available") void downloadAndInstall();
             }}
-            title={updateLabel() ?? ""}
+            title={update}
           >
-            {updateLabel()}
+            {update}
           </Button>
         )}
         <Button
@@ -189,7 +191,8 @@ export function StatusBar(props: {
           size="icon-xs"
           className="theme-toggle h-[18px] min-w-0 px-1 active:translate-y-0"
           onClick={cycleTheme}
-          title={themeLabel()}
+          title={t("status.changeTheme").replace("{theme}", themeLabel())}
+          aria-label={t("status.changeTheme").replace("{theme}", themeLabel())}
         >
           {themeIcon()}
         </Button>
@@ -220,6 +223,6 @@ export function StatusBar(props: {
           </ToggleGroupItem>
         </ToggleGroup>
       </div>
-    </div>
+    </footer>
   );
 }

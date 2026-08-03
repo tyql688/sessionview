@@ -96,8 +96,8 @@
   border-radius: 3px;
   opacity: 0.6;
   transition:
-    opacity 0.1s,
-    color 0.1s;
+    opacity var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard);
   flex-shrink: 0;
 }
 

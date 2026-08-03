@@ -5,6 +5,7 @@ use std::path::Path;
 use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use walkdir::WalkDir;
 
 use crate::models::TokenUsage;
 
@@ -111,26 +112,25 @@ pub fn subagents_ancestor(path: &Path) -> Option<&Path> {
 /// Workflow runs nest theirs under `subagents/workflows/wf_*/`, so a
 /// single-level read misses them.
 pub fn collect_subagent_jsonl_files(subagents_dir: &Path) -> Vec<std::path::PathBuf> {
-    let mut files = Vec::new();
-    let mut pending = vec![subagents_dir.to_path_buf()];
-    while let Some(dir) = pending.pop() {
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(entries) => entries,
+    WalkDir::new(subagents_dir)
+        .into_iter()
+        .filter_map(|entry| match entry {
+            Ok(entry)
+                if entry.file_type().is_file()
+                    && entry.path().extension().and_then(|ext| ext.to_str()) == Some("jsonl") =>
+            {
+                Some(entry.into_path())
+            }
+            Ok(_) => None,
             Err(error) => {
-                log::warn!("failed to read subagent dir '{}': {error}", dir.display());
-                continue;
+                log::warn!(
+                    "failed to walk subagent dir '{}': {error}",
+                    subagents_dir.display()
+                );
+                None
             }
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                pending.push(path);
-            } else if path.extension().and_then(|ext| ext.to_str()) == Some("jsonl") {
-                files.push(path);
-            }
-        }
-    }
-    files
+        })
+        .collect()
 }
 
 pub fn is_system_content(trimmed: &str) -> bool {
@@ -327,6 +327,24 @@ fn strip_image_markers(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collect_subagent_jsonl_files_nested_tree_returns_only_jsonl() {
+        let temp = tempfile::tempdir().unwrap();
+        let nested = temp.path().join("workflows/wf_1");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(temp.path().join("root.jsonl"), "{}\n").unwrap();
+        std::fs::write(nested.join("child.jsonl"), "{}\n").unwrap();
+        std::fs::write(nested.join("notes.txt"), "ignored").unwrap();
+
+        let mut files = collect_subagent_jsonl_files(temp.path());
+        files.sort();
+
+        assert_eq!(
+            files,
+            vec![temp.path().join("root.jsonl"), nested.join("child.jsonl")]
+        );
+    }
 
     // --- project_name_from_path ---
 

@@ -1,4 +1,5 @@
 import type React from "react";
+import { ChevronRight, Clock3, CornerDownRight, Folder, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatTreeTime } from "@/lib/formatters";
 import type { TreeNode } from "@/lib/types";
@@ -7,70 +8,13 @@ import { isSelected, toggleSelected } from "@/features/explorer/selection";
 import { getProviderColor } from "@/stores/providerSnapshots";
 import { ProviderDot } from "@/components/icons";
 import { useLongPress } from "@/lib/useLongPress";
+import { collectSessionNodes } from "@/lib/tree-utils";
 
 /** The coordinates a context menu anchors to — satisfied by a real mouse
  * event or by a synthesized long-press position. */
 export interface MenuAnchorEvent {
   clientX: number;
   clientY: number;
-}
-
-function ChevronIcon(props: { expanded: boolean }) {
-  return (
-    <svg
-      width="16"
-      height="16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      viewBox="0 0 24 24"
-      className={`chevron${props.expanded ? " expanded" : ""}`}
-    >
-      <polyline points="9 18 15 12 9 6" />
-    </svg>
-  );
-}
-
-function FolderIcon() {
-  return (
-    <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-    </svg>
-  );
-}
-
-function ChatIcon() {
-  return (
-    <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-      <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-    </svg>
-  );
-}
-
-function ClockIcon() {
-  return (
-    <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-      <circle cx="12" cy="12" r="10" />
-      <polyline points="12 6 12 12 16 14" />
-    </svg>
-  );
-}
-
-function SidechainIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <path d="M7 5v6a4 4 0 004 4h6" />
-      <path d="M14 11l4 4-4 4" />
-    </svg>
-  );
 }
 
 function formatSessionLabel(raw: string, fallback = "Untitled"): string {
@@ -84,13 +28,9 @@ function formatSessionLabel(raw: string, fallback = "Untitled"): string {
 
   if (/^[/~.]/.test(label) && label.includes("/")) {
     const segments = label.split("/").filter(Boolean);
-    if (segments.length > 0) {
-      label = segments[segments.length - 1];
-    }
+    if (segments.length > 0) label = segments[segments.length - 1];
   }
 
-  // No JS truncation: .tree-node-label ellipsizes via CSS, which adapts to
-  // the actual panel width instead of a hardcoded character count.
   return label || fallback;
 }
 
@@ -98,87 +38,64 @@ function formatSessionLabel(raw: string, fallback = "Untitled"): string {
 function directoryProviders(node: TreeNode): NonNullable<TreeNode["provider"]>[] {
   const seen = new Set<NonNullable<TreeNode["provider"]>>();
   for (const child of node.children) {
-    if (child.node_type === "session" && child.provider) {
-      seen.add(child.provider);
-    }
+    if (child.node_type === "session" && child.provider) seen.add(child.provider);
   }
   return [...seen];
 }
 
-/** Recursively collect all session node IDs under a tree node. */
-function collectAllSessions(nodes: TreeNode[]): TreeNode[] {
-  const result: TreeNode[] = [];
-  for (const n of nodes) {
-    if (n.node_type === "session") result.push(n);
-    if (n.children.length > 0) result.push(...collectAllSessions(n.children));
-  }
-  return result;
-}
-
-export function TreeNodeComponent(props: {
+interface TreeNodeComponentProps {
   node: TreeNode;
   depth: number;
   activeSessionId: string | null;
+  focusedNodeId: string | null;
+  onNodeFocus: (nodeId: string) => void;
+  parentNodeId?: string;
   parentProjectLabel?: string;
   isNodeExpanded: (nodeId: string) => boolean;
   toggleExpanded: (nodeId: string) => void;
-  onSessionContextMenu: (e: MenuAnchorEvent, node: TreeNode, parentProjectLabel: string) => void;
-  onNodeContextMenu: (e: MenuAnchorEvent, node: TreeNode) => void;
-  onSessionClick: (e: React.MouseEvent, node: TreeNode, parentProjectLabel: string) => void;
-  onSessionDblClick?: (e: React.MouseEvent, node: TreeNode, parentProjectLabel: string) => void;
+  onSessionContextMenu: (event: MenuAnchorEvent, node: TreeNode, parentProjectLabel: string) => void;
+  onNodeContextMenu: (event: MenuAnchorEvent, node: TreeNode) => void;
+  onSessionClick: (event: React.MouseEvent, node: TreeNode, parentProjectLabel: string) => void;
+  onSessionDblClick?: (event: React.MouseEvent, node: TreeNode, parentProjectLabel: string) => void;
   /** Directory grouping merges providers, so each session row identifies its
    * provider with a colored dot instead of the generic chat icon. */
   sessionProviderDot?: boolean;
   /** Directory grouping is visually denser because the root already carries
    * the working directory identity. */
   directoryGrouping?: boolean;
-}) {
+}
+
+export function TreeNodeComponent(props: TreeNodeComponentProps) {
   const { t } = useI18n();
   const hasChildren = () => props.node.children.length > 0;
   const isSession = () => props.node.node_type === "session";
   const isSubagentParent = () => isSession() && hasChildren();
-  // Project folder where ALL session descendants are sidechain (orphans)
   const isOrphanFolder = () => {
     if (props.node.node_type !== "project" || !props.node.project_path) return false;
-    function collectSessions(nodes: TreeNode[]): TreeNode[] {
-      const result: TreeNode[] = [];
-      for (const n of nodes) {
-        if (n.node_type === "session") result.push(n);
-        else result.push(...collectSessions(n.children));
-      }
-      return result;
-    }
-    const sessions = collectSessions(props.node.children);
-    return sessions.length > 0 && sessions.every((s) => s.is_sidechain);
+    const sessions = collectSessionNodes(props.node);
+    return sessions.length > 0 && sessions.every((session) => session.is_sidechain);
   };
   const isLeaf = () => props.node.node_type === "session" && !hasChildren();
   const expanded = () => props.isNodeExpanded(props.node.id);
 
-  const handleClick = (e: React.MouseEvent) => {
-    // A click on a subagent parent's chevron toggles its children instead of
-    // opening the session (delegated: the chevron can't be its own button
-    // inside this row button).
-    if (isSubagentParent() && (e.target as Element).closest("[data-subagent-chevron]")) {
+  const handleClick = (event: React.MouseEvent) => {
+    if (isSubagentParent() && (event.target as Element).closest("[data-subagent-chevron]")) {
       props.toggleExpanded(props.node.id);
       return;
     }
     if (isSession()) {
-      // Opening a session never auto-expands its subagents — multi-agent
-      // sessions carry dozens of (now nested) children; the chevron toggles.
-      props.onSessionClick(e, props.node, props.parentProjectLabel ?? "");
-    } else if (e.metaKey || e.ctrlKey) {
-      // Ctrl+Click on folder: select all sessions under it
-      const sessions = collectAllSessions(props.node.children);
-      for (const s of sessions) toggleSelected(s.id);
+      props.onSessionClick(event, props.node, props.parentProjectLabel ?? "");
+    } else if (event.metaKey || event.ctrlKey) {
+      for (const session of collectSessionNodes(props.node)) toggleSelected(session.id);
     } else {
       props.toggleExpanded(props.node.id);
     }
   };
 
-  const handleDblClick = (e: React.MouseEvent) => {
+  const handleDblClick = (event: React.MouseEvent) => {
     if (isSession() && props.onSessionDblClick) {
-      e.preventDefault();
-      props.onSessionDblClick(e, props.node, props.parentProjectLabel ?? "");
+      event.preventDefault();
+      props.onSessionDblClick(event, props.node, props.parentProjectLabel ?? "");
     }
   };
 
@@ -190,41 +107,89 @@ export function TreeNodeComponent(props: {
     }
   };
 
-  const handleContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    openMenuAt(e);
+  const handleContextMenu = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openMenuAt(event);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      event.preventDefault();
+      const rect = event.currentTarget.getBoundingClientRect();
+      openMenuAt({ clientX: rect.left + 16, clientY: rect.top + rect.height });
+      return;
+    }
+
+    const tree = event.currentTarget.closest<HTMLElement>('[role="tree"]');
+    if (!tree) return;
+    const items = [...tree.querySelectorAll<HTMLButtonElement>('[role="treeitem"]')];
+    const index = items.indexOf(event.currentTarget);
+    let target: HTMLButtonElement | null = null;
+
+    switch (event.key) {
+      case "ArrowDown":
+        target = items[Math.min(index + 1, items.length - 1)] ?? null;
+        break;
+      case "ArrowUp":
+        target = items[Math.max(index - 1, 0)] ?? null;
+        break;
+      case "Home":
+        target = items[0] ?? null;
+        break;
+      case "End":
+        target = items.at(-1) ?? null;
+        break;
+      case "ArrowRight":
+        if (!isLeaf() && !expanded()) {
+          props.toggleExpanded(props.node.id);
+        } else if (!isLeaf()) {
+          target = items[index + 1] ?? null;
+        }
+        break;
+      case "ArrowLeft":
+        if (!isLeaf() && expanded()) {
+          props.toggleExpanded(props.node.id);
+        } else if (props.parentNodeId) {
+          target = tree.querySelector<HTMLButtonElement>(`[data-tree-node-id="${CSS.escape(props.parentNodeId)}"]`);
+        }
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    target?.focus();
   };
 
   const longPress = useLongPress((pos) => openMenuAt({ clientX: pos.x, clientY: pos.y }));
-
   const projectLabel = () =>
     props.node.node_type === "project"
       ? props.node.label === "(No Project)"
         ? t("explorer.noProject")
         : props.node.label
       : props.parentProjectLabel;
-
-  const displayLabel = () => {
-    if (props.node.node_type === "project" && props.node.label === "(No Project)") {
-      return t("explorer.noProject");
-    }
-    return props.node.label;
-  };
-
+  const displayLabel = () =>
+    props.node.node_type === "project" && props.node.label === "(No Project)"
+      ? t("explorer.noProject")
+      : props.node.label;
   const nodeSelected = () => isSession() && isSelected(props.node.id);
-  const indentLeft = () => {
-    const unit = props.directoryGrouping ? 14 : 16;
-    const base = props.directoryGrouping ? 4 : 8;
-    return props.depth * unit + base;
-  };
+  const indentLeft = () => props.depth * (props.directoryGrouping ? 14 : 16) + (props.directoryGrouping ? 4 : 8);
+  const providers = props.sessionProviderDot ? directoryProviders(props.node) : [];
 
   return (
     <div className="tree-node-wrapper">
       <Button
         variant="ghost"
+        role="treeitem"
+        tabIndex={props.focusedNodeId === props.node.id ? 0 : -1}
+        aria-level={props.depth + 1}
+        aria-expanded={isLeaf() ? undefined : expanded()}
+        aria-selected={isSession() ? nodeSelected() || props.activeSessionId === props.node.id : undefined}
         className={`tree-node justify-start rounded-none active:translate-y-0 tree-node-${props.node.node_type}${props.directoryGrouping ? " tree-node-directory" : ""}${isSession() && props.activeSessionId === props.node.id ? " active" : ""}${nodeSelected() ? " selected" : ""}`}
         style={{ paddingLeft: `${indentLeft()}px` }}
+        onFocus={() => props.onNodeFocus(props.node.id)}
+        onKeyDown={handleKeyDown}
         onClick={handleClick}
         onDoubleClick={handleDblClick}
         onContextMenu={handleContextMenu}
@@ -233,14 +198,15 @@ export function TreeNodeComponent(props: {
         onPointerUp={longPress.onPointerUp}
         onPointerCancel={longPress.onPointerCancel}
         onClickCapture={longPress.onClickCapture}
+        data-tree-node-id={props.node.id}
         data-session-id={isSession() ? props.node.id : undefined}
       >
         {!isLeaf() && isSubagentParent() ? (
           <span data-subagent-chevron>
-            <ChevronIcon expanded={expanded()} />
+            <ChevronRight className={`chevron${expanded() ? " expanded" : ""}`} size={16} aria-hidden="true" />
           </span>
         ) : !isLeaf() ? (
-          <ChevronIcon expanded={expanded()} />
+          <ChevronRight className={`chevron${expanded() ? " expanded" : ""}`} size={16} aria-hidden="true" />
         ) : (
           <span className="tree-node-icon-spacer" />
         )}
@@ -248,35 +214,33 @@ export function TreeNodeComponent(props: {
         {props.node.node_type === "provider" && props.node.provider && <ProviderDot provider={props.node.provider} />}
         {props.node.node_type === "project" && props.node.project_path && !isOrphanFolder() && (
           <span className="tree-node-icon">
-            <FolderIcon />
+            <Folder size={16} strokeWidth={1.5} aria-hidden="true" />
           </span>
         )}
-        {props.sessionProviderDot &&
-          props.node.node_type === "project" &&
-          directoryProviders(props.node).length > 0 && (
-            <span className="tree-provider-cluster">
-              {directoryProviders(props.node).map((provider) => (
-                <i
-                  key={provider}
-                  className="tree-provider-cluster-dot"
-                  style={{ background: getProviderColor(provider) }}
-                />
-              ))}
-            </span>
-          )}
+        {props.sessionProviderDot && props.node.node_type === "project" && providers.length > 0 && (
+          <span className="tree-provider-cluster" aria-hidden="true">
+            {providers.map((provider) => (
+              <i
+                key={provider}
+                className="tree-provider-cluster-dot"
+                style={{ background: getProviderColor(provider) }}
+              />
+            ))}
+          </span>
+        )}
         {isOrphanFolder() && (
           <span className="tree-node-icon tree-node-icon-orphan-folder">
-            <SidechainIcon />
+            <CornerDownRight size={16} strokeWidth={1.7} aria-hidden="true" />
           </span>
         )}
         {props.node.node_type === "project" && !props.node.project_path && (
           <span className="tree-node-icon tree-node-icon-time">
-            <ClockIcon />
+            <Clock3 size={16} strokeWidth={1.5} aria-hidden="true" />
           </span>
         )}
-        {props.node.node_type === "session" && isSession() && props.node.is_sidechain && !isSubagentParent() && (
+        {props.node.node_type === "session" && props.node.is_sidechain && !isSubagentParent() && (
           <span className="tree-node-icon tree-node-icon-orphan">
-            <SidechainIcon />
+            <CornerDownRight size={16} strokeWidth={1.7} aria-hidden="true" />
           </span>
         )}
         {props.node.node_type === "session" &&
@@ -285,7 +249,7 @@ export function TreeNodeComponent(props: {
             <ProviderDot provider={props.node.provider} />
           ) : (
             <span className="tree-node-icon">
-              <ChatIcon />
+              <MessageSquare size={16} strokeWidth={1.5} aria-hidden="true" />
             </span>
           ))}
 
@@ -300,7 +264,7 @@ export function TreeNodeComponent(props: {
 
         {props.node.is_sidechain && (
           <span className="tree-node-sidechain" title={t("common.subagentSession")}>
-            <SidechainIcon />
+            <CornerDownRight size={16} strokeWidth={1.7} aria-hidden="true" />
           </span>
         )}
         {isSession() && props.node.updated_at !== undefined && (
@@ -309,27 +273,30 @@ export function TreeNodeComponent(props: {
         {props.node.count > 0 && !isLeaf() && <span className="tree-node-count">{props.node.count}</span>}
       </Button>
 
-      {/* All children — subagents included — use expand/collapse and start
-          collapsed (expandedIds is opt-in). */}
-      {expanded() &&
-        !isLeaf() &&
-        props.node.children.map((child) => (
-          <TreeNodeComponent
-            key={child.id}
-            node={child}
-            depth={props.depth + 1}
-            activeSessionId={props.activeSessionId}
-            parentProjectLabel={projectLabel()}
-            isNodeExpanded={props.isNodeExpanded}
-            toggleExpanded={props.toggleExpanded}
-            onSessionContextMenu={props.onSessionContextMenu}
-            onNodeContextMenu={props.onNodeContextMenu}
-            onSessionClick={props.onSessionClick}
-            onSessionDblClick={props.onSessionDblClick}
-            sessionProviderDot={props.sessionProviderDot}
-            directoryGrouping={props.directoryGrouping}
-          />
-        ))}
+      {expanded() && !isLeaf() && (
+        <fieldset className="tree-node-group">
+          {props.node.children.map((child) => (
+            <TreeNodeComponent
+              key={child.id}
+              node={child}
+              depth={props.depth + 1}
+              activeSessionId={props.activeSessionId}
+              focusedNodeId={props.focusedNodeId}
+              onNodeFocus={props.onNodeFocus}
+              parentNodeId={props.node.id}
+              parentProjectLabel={projectLabel()}
+              isNodeExpanded={props.isNodeExpanded}
+              toggleExpanded={props.toggleExpanded}
+              onSessionContextMenu={props.onSessionContextMenu}
+              onNodeContextMenu={props.onNodeContextMenu}
+              onSessionClick={props.onSessionClick}
+              onSessionDblClick={props.onSessionDblClick}
+              sessionProviderDot={props.sessionProviderDot}
+              directoryGrouping={props.directoryGrouping}
+            />
+          ))}
+        </fieldset>
+      )}
     </div>
   );
 }

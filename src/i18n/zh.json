@@ -29,14 +29,23 @@
     "previousMatch": "上一个匹配",
     "nextMatch": "下一个匹配",
     "closeSearch": "关闭搜索",
-    "subagentSession": "子代理会话"
+    "subagentSession": "子代理会话",
+    "skipToContent": "跳到内容"
+  },
+  "window": {
+    "minimize": "最小化窗口",
+    "maximize": "最大化窗口",
+    "restore": "还原窗口",
+    "close": "关闭窗口"
   },
   "explorer": {
     "title": "资源管理器",
+    "sessionsTree": "会话",
     "noProject": "(无项目)",
     "selected": "已选择",
     "locateSession": "定位到当前会话",
     "hideExplorer": "隐藏资源管理器",
+    "resize": "调整资源管理器宽度",
     "groupByProvider": "按提供商分组",
     "groupByDirectory": "按目录分组"
   },
@@ -120,6 +129,7 @@
     "rebuildFailed": "索引重建失败",
     "pricingRefreshOk": "价格目录已刷新",
     "exportOk": "导出成功",
+    "sessionsExported": "已导出 {count} 个会话",
     "clearIndexOk": "索引已清除",
     "refreshUsageStarted": "用量已在后台开始刷新",
     "refreshUsageOk": "用量已刷新",
@@ -130,12 +140,15 @@
   },
   "favorites": {
     "title": "收藏",
+    "sessionsTree": "收藏的会话",
     "empty": "暂无收藏",
-    "emptyHint": "右键点击会话并选择「切换收藏」即可添加到此处"
+    "emptyHint": "打开会话的操作菜单，即可将它添加到收藏。",
+    "browseSessions": "浏览会话"
   },
   "editor": {
     "recentSessions": "最近的会话",
-    "emptyHint": "从资源管理器中选择一个会话来查看"
+    "emptyHint": "从资源管理器中选择一个会话来查看",
+    "resizePanels": "调整编辑器面板宽度"
   },
   "export": {
     "title": "导出会话",
@@ -159,7 +172,8 @@
     "indexing": "索引中...",
     "themeLight": "浅色",
     "themeDark": "深色",
-    "themeSystem": "跟随系统"
+    "themeSystem": "跟随系统",
+    "changeTheme": "切换主题（当前：{theme}）"
   },
   "keyboard": {
     "title": "键盘快捷键",
@@ -198,7 +212,6 @@
     "copySessionId": "复制会话 ID",
     "copyResumeCommand": "复制恢复命令",
     "resumeSession": "恢复会话",
-    "export": "导出",
     "collapseAll": "全部折叠",
     "expandAll": "全部展开",
     "refresh": "刷新",
@@ -212,6 +225,7 @@
     "keepOpen": "保持打开"
   },
   "tabs": {
+    "openTabs": "已打开的标签页",
     "showOpenTabs": "显示已打开标签页"
   },
   "settings": {
@@ -244,6 +258,7 @@
     "languageChinese": "中文",
     "enabled": "已启用",
     "disabled": "已禁用",
+    "providerEnabled": "启用 {provider}",
     "clearIndexConfirm": "清除整个索引？下次重建时将重新扫描会话。",
     "rebuildIndexNote": "“重建索引”会重新扫描本地会话来源并重算用量，不会删除会话；“清除索引”只会清空本地数据库，之后重建会再次导入会话。",
     "rebuildShortcutNote": "手动重建快捷键：Cmd/Ctrl + R。现在会在后台运行，并在完成后通知。",
@@ -353,7 +368,8 @@
     "commandOutput": "输出"
   },
   "blocked": {
-    "hint": "右键项目文件夹，选择「屏蔽此文件夹」"
+    "hint": "打开项目文件夹的操作菜单，选择「屏蔽此文件夹」。",
+    "browseProjects": "浏览项目文件夹"
   },
   "usage": {
     "title": "用量统计",
@@ -373,8 +389,6 @@
     "rangeCustom": "自定义",
     "customRangeStart": "开始日期",
     "customRangeEnd": "结束日期",
-    "previousMonth": "上个月",
-    "nextMonth": "下个月",
     "dailyUsage": "每日用量",
     "costByModel": "按模型",
     "total": "合计",

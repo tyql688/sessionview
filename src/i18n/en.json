@@ -29,14 +29,23 @@
     "previousMatch": "Previous match",
     "nextMatch": "Next match",
     "closeSearch": "Close search",
-    "subagentSession": "Subagent session"
+    "subagentSession": "Subagent session",
+    "skipToContent": "Skip to content"
+  },
+  "window": {
+    "minimize": "Minimize window",
+    "maximize": "Maximize window",
+    "restore": "Restore window",
+    "close": "Close window"
   },
   "explorer": {
     "title": "Explorer",
+    "sessionsTree": "Sessions",
     "noProject": "(No Project)",
     "selected": "selected",
     "locateSession": "Scroll to active session",
     "hideExplorer": "Hide explorer",
+    "resize": "Resize explorer",
     "groupByProvider": "Group by provider",
     "groupByDirectory": "Group by directory"
   },
@@ -120,6 +129,7 @@
     "rebuildFailed": "Failed to rebuild index",
     "pricingRefreshOk": "Pricing catalog refreshed",
     "exportOk": "Exported successfully",
+    "sessionsExported": "Exported {count} sessions",
     "clearIndexOk": "Index cleared",
     "refreshUsageStarted": "Usage refresh started in the background",
     "refreshUsageOk": "Usage refreshed",
@@ -130,12 +140,15 @@
   },
   "favorites": {
     "title": "Favorites",
+    "sessionsTree": "Favorite sessions",
     "empty": "No favorites yet",
-    "emptyHint": "Right-click a session and select \"Toggle Favorite\" to add it here"
+    "emptyHint": "Use a session's actions menu to add it to favorites.",
+    "browseSessions": "Browse sessions"
   },
   "editor": {
     "recentSessions": "Recent Sessions",
-    "emptyHint": "Select a session from the explorer to view"
+    "emptyHint": "Select a session from the explorer to view",
+    "resizePanels": "Resize editor panels"
   },
   "export": {
     "title": "Export Session",
@@ -159,7 +172,8 @@
     "indexing": "Indexing...",
     "themeLight": "Light",
     "themeDark": "Dark",
-    "themeSystem": "System"
+    "themeSystem": "System",
+    "changeTheme": "Change theme (current: {theme})"
   },
   "keyboard": {
     "title": "Keyboard Shortcuts",
@@ -198,7 +212,6 @@
     "copySessionId": "Copy Session ID",
     "copyResumeCommand": "Copy Resume Command",
     "resumeSession": "Resume Session",
-    "export": "Export",
     "collapseAll": "Collapse All",
     "expandAll": "Expand All",
     "refresh": "Refresh",
@@ -212,7 +225,8 @@
     "keepOpen": "Keep Open"
   },
   "tabs": {
-    "showOpenTabs": "Show Open Tabs"
+    "openTabs": "Open tabs",
+    "showOpenTabs": "Show open tabs"
   },
   "settings": {
     "title": "Settings",
@@ -244,6 +258,7 @@
     "languageChinese": "Chinese",
     "enabled": "Enabled",
     "disabled": "Disabled",
+    "providerEnabled": "{provider} enabled",
     "clearIndexConfirm": "Clear the entire index? Sessions will be re-scanned on next rebuild.",
     "rebuildIndexNote": "Rebuild Index rescans your local session sources and recomputes usage. It does not delete sessions. Clear Index wipes the local database only; rebuilding imports sessions again.",
     "rebuildShortcutNote": "Manual rebuild shortcut: Cmd/Ctrl + R. It now runs in the background and notifies when complete.",
@@ -353,7 +368,8 @@
     "commandOutput": "Output"
   },
   "blocked": {
-    "hint": "Right-click a project folder and select \"Block This Folder\""
+    "hint": "Open a project folder's actions menu and choose \"Block this folder\".",
+    "browseProjects": "Browse project folders"
   },
   "usage": {
     "title": "Usage",
@@ -373,8 +389,6 @@
     "rangeCustom": "Custom",
     "customRangeStart": "Start date",
     "customRangeEnd": "End date",
-    "previousMonth": "Previous month",
-    "nextMonth": "Next month",
     "dailyUsage": "Daily Usage",
     "costByModel": "Cost by Model",
     "total": "Total",

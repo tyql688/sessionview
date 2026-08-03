@@ -11,7 +11,8 @@ html[data-compact] .app-layout {
   height: 100dvh;
 }
 
-html[data-compact] .main-layout {
+html[data-compact] .main-layout,
+html[data-compact] .main-content {
   padding: 0;
   gap: 0;
 }
@@ -32,7 +33,7 @@ html[data-compact] .statusbar {
   justify-content: center;
   gap: 2px;
   padding: 2px 8px calc(2px + env(safe-area-inset-bottom, 0px));
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--border);
 }
 
 .activity-bar.horizontal .activity-bar-top,
@@ -114,6 +115,18 @@ html[data-compact] .settings-content {
   padding: 16px;
 }
 
+html[data-compact] .settings-row {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 10px;
+}
+
+html[data-compact] .settings-row > div:last-child,
+html[data-compact] .settings-row [data-slot="select-trigger"] {
+  width: 100%;
+  justify-content: flex-start;
+}
+
 /* Session header: at phone widths the action buttons must not squeeze the
  * title into a vertical sliver — wrap them onto their own row. */
 html[data-compact] .session-header {
@@ -165,9 +178,9 @@ html[data-compact] .msg-model-label {
   white-space: nowrap;
 }
 
-/* The right-anchored fixed-width dropdown would overflow a phone screen. */
-html[data-compact] .search-dropdown {
-  width: min(360px, calc(100vw - 24px));
+html[data-compact] .search-overlay-input,
+html[data-compact] .session-search-input {
+  font-size: 16px;
 }
 
 /* Activity calendar: the fluid 53-column grid collapses to ~3px cells at

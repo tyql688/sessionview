@@ -23,6 +23,7 @@ export function SessionSearch(props: SessionSearchProps) {
       <Input
         className="session-search-input h-auto"
         type="text"
+        aria-label={t("session.searchPlaceholder")}
         placeholder={t("session.searchPlaceholder")}
         value={props.sessionSearch}
         onChange={(e) => {

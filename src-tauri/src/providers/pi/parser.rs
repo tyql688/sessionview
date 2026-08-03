@@ -1,3 +1,7 @@
+//! Pi keeps pre-compaction entries in its JSONL tree. Compaction changes the
+//! context sent to the model, not the transcript SessionView should display,
+//! so message extraction always follows the complete active root-to-leaf branch.
+
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -15,8 +19,7 @@ pub(crate) fn parse_session_file(path: &Path) -> Option<ParsedSession> {
     let (header, entries, mut parse_warning_count) = parse_entries(path)?;
 
     let active_branch = build_active_branch(&entries);
-    let context_branch = build_context_branch(&entries, &active_branch, path);
-    let messages = extract_messages(&entries, &context_branch);
+    let messages = extract_messages(&entries, &active_branch);
     let title = extract_title(&entries, &active_branch, &header);
     let model = extract_model(&entries, &active_branch);
     let usage_events = extract_usage_events(&entries, path, &mut parse_warning_count);
@@ -180,12 +183,10 @@ fn migrate_pi_header_value(header: &mut Value) {
 
 fn migrate_pi_entry_values(entries: &mut [Value], original_version: u32) {
     if original_version < 2 {
-        let mut file_index_to_id: HashMap<usize, String> = HashMap::new();
         let mut previous_id: Option<String> = None;
 
         for (entry_index, value) in entries.iter_mut().enumerate() {
             let id = format!("legacy-{entry_index:08}");
-            file_index_to_id.insert(entry_index + 1, id.clone());
             if let Some(obj) = value.as_object_mut() {
                 obj.insert("id".to_string(), Value::String(id.clone()));
                 obj.insert(
@@ -197,26 +198,6 @@ fn migrate_pi_entry_values(entries: &mut [Value], original_version: u32) {
                 );
             }
             previous_id = Some(id);
-        }
-
-        for value in entries.iter_mut() {
-            let Some(obj) = value.as_object_mut() else {
-                continue;
-            };
-            let Some(first_kept_index) = obj
-                .get("firstKeptEntryIndex")
-                .and_then(Value::as_u64)
-                .and_then(|idx| usize::try_from(idx).ok())
-            else {
-                continue;
-            };
-            if let Some(first_kept_id) = file_index_to_id.get(&first_kept_index) {
-                obj.insert(
-                    "firstKeptEntryId".to_string(),
-                    Value::String(first_kept_id.clone()),
-                );
-            }
-            obj.remove("firstKeptEntryIndex");
         }
     }
 
@@ -265,60 +246,6 @@ fn build_active_branch(entries: &[PiEntry]) -> Vec<String> {
     branch
 }
 
-/// Build the message context branch using Pi's compaction semantics.
-///
-/// Pi's active tree path still contains all entries from root to leaf, but the
-/// visible/LLM context after compaction is:
-///   compaction summary, kept pre-compaction entries, post-compaction entries.
-fn build_context_branch(entries: &[PiEntry], active_branch: &[String], path: &Path) -> Vec<String> {
-    let entry_by_id: HashMap<String, &PiEntry> = entries
-        .iter()
-        .filter_map(|entry| get_entry_id(entry).map(|id| (id, entry)))
-        .collect();
-    let latest_compaction = active_branch
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, id)| match entry_by_id.get(id).copied() {
-            Some(PiEntry::Compaction(compaction)) => Some((idx, compaction)),
-            _ => None,
-        })
-        .next_back();
-
-    let Some((compaction_idx, compaction)) = latest_compaction else {
-        return active_branch.to_vec();
-    };
-
-    let mut context_branch = vec![compaction.base.id.clone()];
-    if let Some(first_kept_id) = compaction_first_kept_id(compaction, entries) {
-        if let Some(first_kept_idx) = active_branch[..compaction_idx]
-            .iter()
-            .position(|id| id == &first_kept_id)
-        {
-            context_branch.extend_from_slice(&active_branch[first_kept_idx..compaction_idx]);
-        } else {
-            log::warn!(
-                "Pi compaction firstKeptEntryId '{}' was not on the active branch: {}",
-                first_kept_id,
-                path.display()
-            );
-        }
-    }
-    context_branch.extend_from_slice(&active_branch[compaction_idx + 1..]);
-    context_branch
-}
-
-fn compaction_first_kept_id(compaction: &PiCompactionEntry, entries: &[PiEntry]) -> Option<String> {
-    if let Some(first_kept_id) = compaction.first_kept_entry_id.as_ref() {
-        return Some(first_kept_id.clone());
-    }
-    let legacy_index = compaction.first_kept_entry_index?;
-    if legacy_index == 0 {
-        return None;
-    }
-    entries.get(legacy_index - 1).and_then(get_entry_id)
-}
-
-/// Extract messages from entries on the active branch
 /// Extract title from session
 fn extract_title(entries: &[PiEntry], branch: &[String], header: &PiSessionHeader) -> String {
     let branch_set: HashSet<&str> = branch.iter().map(String::as_str).collect();

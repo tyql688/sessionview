@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { render, fireEvent, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { ActivityHeatmap } from "@/features/usage/ActivityHeatmap";
 import { buildHeatmapGrid, type HeatmapMetric } from "@/features/usage/heatmap";
@@ -102,5 +102,20 @@ describe("ActivityHeatmap", () => {
 
     const inspector = container.querySelector(".usage-heatmap-inspector");
     expect(inspector?.textContent).toContain("5 sessions");
+  });
+
+  it("keeps one grid cell in the tab order and moves with arrow keys", async () => {
+    const { container } = setup();
+    const cells = [...container.querySelectorAll<HTMLElement>(".usage-heatmap-cell[data-heatmap-date]")];
+    const tabbable = cells.filter((cell) => cell.tabIndex === 0);
+
+    expect(tabbable).toHaveLength(1);
+    expect(tabbable[0]?.dataset.heatmapDate).toBe("2026-01-07");
+
+    tabbable[0]?.focus();
+    fireEvent.keyDown(tabbable[0]!, { key: "ArrowUp" });
+
+    await waitFor(() => expect((document.activeElement as HTMLElement).dataset.heatmapDate).toBe("2026-01-06"));
+    expect(cells.filter((cell) => cell.tabIndex === 0)).toHaveLength(1);
   });
 });

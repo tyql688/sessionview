@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { SessionTurnOutlineEntry } from "@/lib/tauri";
 import { entryFirstMessageIndex, type ProcessedEntry } from "@/features/session/hooks";
@@ -13,6 +13,7 @@ const MOUNTAIN = [
   { width: 8, className: "timeline-minimap-tick-far" },
 ] as const;
 const BASE_WIDTH = 5;
+const MAX_TICK_WIDTH = MOUNTAIN[0].width;
 
 interface MinimapProps {
   /** Every turn of the session — one tick each; the strip compresses via
@@ -226,7 +227,7 @@ export function TimelineMinimap(props: MinimapProps) {
             >
               <span
                 className={`timeline-minimap-tick ${tickClass(index)}`}
-                style={{ width: `${tickWidth(index)}px` }}
+                style={{ "--tick-scale": tickWidth(index) / MAX_TICK_WIDTH } as CSSProperties}
               />
             </Button>
             {hovered === index && (

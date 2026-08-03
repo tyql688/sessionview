@@ -111,6 +111,7 @@
 .session-analytics-overlay {
   background: rgb(0 0 0 / 10%);
   backdrop-filter: blur(6px);
+  transition: opacity var(--dur-base) var(--ease-out);
 }
 
 .session-analytics-dialog {
@@ -137,14 +138,20 @@
     -8px 0 24px rgb(0 0 0 / 10%);
   transform: translateX(0);
   backdrop-filter: blur(28px) saturate(1.35);
+  transition:
+    transform var(--dur-base) var(--ease-out),
+    opacity var(--dur-base) var(--ease-out);
 }
 
-.session-analytics-dialog[data-open] {
-  animation: session-analytics-drawer-in 180ms cubic-bezier(0.22, 0.72, 0.16, 1) both;
+.session-analytics-overlay[data-starting-style],
+.session-analytics-overlay[data-ending-style] {
+  opacity: 0;
 }
 
-.session-analytics-dialog[data-closed] {
-  animation: session-analytics-drawer-out 140ms ease-in both;
+.session-analytics-dialog[data-starting-style],
+.session-analytics-dialog[data-ending-style] {
+  opacity: 0;
+  transform: translateX(24px);
 }
 
 .session-analytics-body {
@@ -413,13 +420,13 @@
   fill: url(#session-token-fill);
   stroke: none;
   opacity: 0;
-  animation: session-token-area-in 460ms ease-out 130ms forwards;
+  animation: session-token-area-in 240ms var(--ease-out) 40ms forwards;
 }
 
 .session-analytics-token-bucket rect {
   transform-box: fill-box;
   transform-origin: center bottom;
-  animation: session-token-bar-in 520ms cubic-bezier(0.2, 0.75, 0.22, 1) both;
+  animation: session-token-bar-in 300ms var(--ease-out) both;
   animation-delay: var(--bucket-delay);
   transition:
     filter 140ms ease,
@@ -452,7 +459,7 @@
   stroke-width: 2;
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
-  animation: session-token-line-draw 760ms cubic-bezier(0.22, 0.72, 0.16, 1) 220ms forwards;
+  animation: session-token-line-draw 420ms var(--ease-out) 60ms forwards;
 }
 
 .session-analytics-token-marker {
@@ -604,30 +611,6 @@
   }
 }
 
-@keyframes session-analytics-drawer-in {
-  from {
-    opacity: 0;
-    transform: translateX(28px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes session-analytics-drawer-out {
-  from {
-    opacity: 1;
-    transform: translateX(0);
-  }
-
-  to {
-    opacity: 0;
-    transform: translateX(20px);
-  }
-}
-
 .session-analytics-insights {
   margin-top: 12px;
   margin-bottom: 22px;
@@ -776,6 +759,20 @@
     animation: none;
     opacity: 1;
     stroke-dashoffset: 0;
+    transform: none;
+  }
+
+  .session-analytics-overlay,
+  .session-analytics-dialog,
+  .timeline-minimap-tick {
+    transition: none;
+  }
+
+  .session-analytics-overlay[data-starting-style],
+  .session-analytics-overlay[data-ending-style],
+  .session-analytics-dialog[data-starting-style],
+  .session-analytics-dialog[data-ending-style] {
+    opacity: 1;
     transform: none;
   }
 }
@@ -940,10 +937,13 @@
 
 .timeline-minimap-tick {
   display: block;
+  width: 24px;
   height: 2px;
   border-radius: var(--radius-full);
+  transform: scaleX(var(--tick-scale));
+  transform-origin: right center;
   transition:
-    width var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out),
     background-color var(--dur-base) var(--ease-out);
 }
 
@@ -1057,7 +1057,7 @@
   padding: 0 10px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  background: var(--bg-secondary);
+  background: var(--bg-sidebar);
   color: var(--text-secondary);
   font-size: 13px;
   font-weight: 500;
@@ -1065,7 +1065,7 @@
 }
 
 .session-focus-toggle:hover {
-  background: var(--bg-tertiary);
+  background: var(--bg-tab-hover);
   color: var(--text-primary);
 }
 
