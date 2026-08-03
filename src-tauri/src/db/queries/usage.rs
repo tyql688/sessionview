@@ -7,6 +7,19 @@ use rusqlite::params_from_iter;
 use super::{Database, UsageByModelRow, UsageSessionModelDetailRow, UsageTotalsRow};
 use crate::services::timeday::{SUPPORTED_QUERY_YEARS, epoch_in, epoch_to_date};
 
+/// Grok's parent `TurnCompleted.usage` already folds linked subagent ledgers.
+/// Keep child rows for direct session loading, but omit them from rollups
+/// whenever their authoritative parent has indexed usage.
+const EXCLUDE_FOLDED_GROK_CHILD_USAGE: &str = "NOT (
+    sess.provider = 'grok'
+    AND sess.is_sidechain = 1
+    AND sess.parent_id IS NOT NULL
+    AND EXISTS (
+        SELECT 1 FROM session_token_stats parent_stats
+        WHERE parent_stats.session_id = sess.parent_id
+    )
+)";
+
 /// Groups buckets into civil days, skipping and reporting any whose epoch has
 /// no local time rather than filing it under a fabricated date.
 pub(super) struct DayFolder {
@@ -437,12 +450,13 @@ impl Database {
     /// Total cost inside a half-open bucket range (all providers).
     pub(crate) fn cost_for_range(&self, start: i64, end: i64) -> Result<f64, rusqlite::Error> {
         let conn = self.lock_read()?;
-        conn.query_row(
-            "SELECT COALESCE(SUM(cost_usd), 0.0) FROM session_token_stats \
-             WHERE bucket >= ?1 AND bucket < ?2",
-            rusqlite::params![start, end],
-            |row| row.get(0),
-        )
+        let sql = format!(
+            "SELECT COALESCE(SUM(s.cost_usd), 0.0) \
+             FROM session_token_stats s \
+             JOIN sessions sess ON s.session_id = sess.id \
+             WHERE s.bucket >= ?1 AND s.bucket < ?2 AND {EXCLUDE_FOLDED_GROK_CHILD_USAGE}"
+        );
+        conn.query_row(&sql, rusqlite::params![start, end], |row| row.get(0))
     }
 
     /// Token breakdown inside a half-open bucket range (all providers).
@@ -452,21 +466,39 @@ impl Database {
         end: i64,
     ) -> Result<(u64, u64, u64, u64), rusqlite::Error> {
         let conn = self.lock_read()?;
-        conn.query_row(
-            "SELECT COALESCE(SUM(input_tokens), 0), \
-                    COALESCE(SUM(output_tokens), 0), \
-                    COALESCE(SUM(cache_read_tokens), 0), \
-                    COALESCE(SUM(cache_write_tokens), 0) \
-             FROM session_token_stats WHERE bucket >= ?1 AND bucket < ?2",
-            rusqlite::params![start, end],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )
+        let sql = format!(
+            "SELECT COALESCE(SUM(s.input_tokens), 0), \
+                    COALESCE(SUM(s.output_tokens), 0), \
+                    COALESCE(SUM(s.cache_read_tokens), 0), \
+                    COALESCE(SUM(s.cache_write_tokens), 0) \
+             FROM session_token_stats s \
+             JOIN sessions sess ON s.session_id = sess.id \
+             WHERE s.bucket >= ?1 AND s.bucket < ?2 AND {EXCLUDE_FOLDED_GROK_CHILD_USAGE}"
+        );
+        conn.query_row(&sql, rusqlite::params![start, end], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
     }
 }
 
 pub(super) fn build_usage_where(
     providers: &[String],
     bounds: UsageBucketBounds,
+) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
+    build_usage_where_impl(providers, bounds, true)
+}
+
+pub(super) fn build_tool_usage_where(
+    providers: &[String],
+    bounds: UsageBucketBounds,
+) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
+    build_usage_where_impl(providers, bounds, false)
+}
+
+fn build_usage_where_impl(
+    providers: &[String],
+    bounds: UsageBucketBounds,
+    exclude_folded_grok_children: bool,
 ) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
     if providers.is_empty() {
         return (" WHERE 1 = 0".to_string(), Vec::new());
@@ -491,6 +523,10 @@ pub(super) fn build_usage_where(
         conditions.push(format!("s.bucket < ?{}", params.len()));
     }
 
+    if exclude_folded_grok_children {
+        conditions.push(EXCLUDE_FOLDED_GROK_CHILD_USAGE.to_string());
+    }
+
     // conditions always has at least the provider IN clause (empty providers early-return above)
     let clause = format!(" WHERE {}", conditions.join(" AND "));
     (clause, params)
@@ -499,7 +535,7 @@ pub(super) fn build_usage_where(
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    use crate::db::sync::TokenStatRow;
+    use crate::db::sync::{TokenStatRow, ToolStatRow};
     use crate::models::{Provider, SessionMeta};
     use crate::provider::ParsedSession;
     use crate::services::timeday::day_range_epochs;
@@ -830,6 +866,75 @@ pub(super) mod tests {
         assert_eq!(
             total_in, 1000,
             "single-day bounds must include only that day's rows (inclusive end)"
+        );
+    }
+
+    #[test]
+    fn usage_rollups_do_not_double_count_grok_children_folded_into_parent() {
+        let dir = TempDir::new().unwrap();
+        let db = Database::open(dir.path()).unwrap();
+        let mut parent = sample_meta("grok-parent");
+        parent.provider = Provider::Grok;
+        parent.model = Some("grok-4.5".into());
+        let mut child = sample_meta("grok-child");
+        child.provider = Provider::Grok;
+        child.model = Some("grok-4.5".into());
+        child.is_sidechain = true;
+        child.parent_id = Some(parent.id.clone());
+        db.sync_provider_snapshot(
+            &Provider::Grok,
+            &[
+                parsed_session(parent.clone(), String::new()),
+                parsed_session(child.clone(), String::new()),
+            ],
+            true,
+            &[],
+        )
+        .unwrap();
+
+        let parent_stats = stat_row("2026-07-31", "grok-4.5", 2, [100, 10, 20, 5], 1.0);
+        let child_stats = stat_row("2026-07-31", "grok-4.5", 1, [40, 4, 8, 2], 0.4);
+        db.replace_token_stats(&parent.id, &[parent_stats]).unwrap();
+        db.replace_token_stats(&child.id, &[child_stats]).unwrap();
+
+        let providers = [Provider::Grok.key().to_string()];
+        assert_eq!(
+            db.usage_totals(&providers, UsageBucketBounds::default())
+                .unwrap(),
+            (2, 100, 10, 20, 5)
+        );
+        assert_eq!(
+            db.tokens_for_range(i64::MIN, i64::MAX).unwrap(),
+            (100, 10, 20, 5)
+        );
+        assert!((db.cost_for_range(i64::MIN, i64::MAX).unwrap() - 1.0).abs() < f64::EPSILON);
+
+        // Token rollups own the bill at the parent, but project tool analytics
+        // must still include the child's actual tool calls.
+        db.replace_tool_stats(
+            &child.id,
+            &[ToolStatRow {
+                key: "Read".into(),
+                label: "Read".into(),
+                category: "file".into(),
+                count: 3,
+            }],
+        )
+        .unwrap();
+        let tools = db
+            .usage_project_tool_usage(&providers, UsageBucketBounds::default(), "/tmp/project")
+            .unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].key, "Read");
+        assert_eq!(tools[0].count, 3);
+
+        // An orphaned child remains countable: suppress only when a parent
+        // usage row exists to own the folded bill.
+        db.replace_token_stats(&parent.id, &[]).unwrap();
+        assert_eq!(
+            db.usage_totals(&providers, UsageBucketBounds::default())
+                .unwrap(),
+            (1, 40, 4, 8, 2)
         );
     }
 }

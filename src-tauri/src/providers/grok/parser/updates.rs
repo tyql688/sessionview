@@ -24,6 +24,7 @@ pub(super) struct GrokTurnUsage {
     pub(super) input_tokens: u64,
     pub(super) output_tokens: u64,
     pub(super) cache_read_tokens: u64,
+    pub(super) cache_creation_tokens: u64,
 }
 
 /// Status / body recovered from `tool_call` / `tool_call_update` lines so the
@@ -60,6 +61,23 @@ pub(super) struct UpdateAnchors {
     /// system messages. Ordered as they appeared in the stream.
     pub(super) session_notes: Vec<Message>,
     pub(super) parse_warning_count: u32,
+}
+
+pub(super) fn input_token_buckets(usage: &Value) -> Option<(u64, u64, u64)> {
+    let input = usage
+        .get("inputTokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let cache_read = usage
+        .get("cachedReadTokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let cache_creation = usage
+        .get("cacheCreationTokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let uncached = input.checked_sub(cache_read)?.checked_sub(cache_creation)?;
+    Some((uncached, cache_read, cache_creation))
 }
 
 /// Scan `updates.jsonl` for anchors and, when `history_cutoff` is set,
@@ -203,80 +221,138 @@ pub(super) fn collect_anchor(anchors: &mut UpdateAnchors, line: &Value, updates_
                 anchors.parse_warning_count = anchors.parse_warning_count.saturating_add(1);
                 return;
             };
-            let reasoning = usage
-                .get("reasoningTokens")
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
             let output = usage
                 .get("outputTokens")
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
-            // Grok reports reasoning separately; SessionView has no dedicated
-            // field, so fold it into output so totals are not undercounted.
-            let output_with_reasoning = output.saturating_add(reasoning);
-            let cost_usd = usage
-                .get("costUsdTicks")
-                .and_then(Value::as_u64)
-                .map(|ticks| ticks as f64 / USD_TICKS_PER_USD);
+            // Grok's totalTokens identity is inputTokens + outputTokens;
+            // reasoningTokens is a subset of outputTokens, not an extra bucket.
+            let usage_incomplete = usage
+                .get("usageIsIncomplete")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if usage_incomplete {
+                log::warn!(
+                    "Grok turn_completed reports incomplete usage in '{}'; token totals are a lower bound",
+                    updates_path.display()
+                );
+                anchors.parse_warning_count = anchors.parse_warning_count.saturating_add(1);
+            }
+            let turn_input = input_token_buckets(usage);
+            if turn_input.is_none() {
+                log::warn!(
+                    "Grok turn_completed has cache buckets larger than input in '{}'; skipping its turn-level usage",
+                    updates_path.display()
+                );
+                anchors.parse_warning_count = anchors.parse_warning_count.saturating_add(1);
+            }
+            let cost_is_partial = usage
+                .get("costIsPartial")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let cost_trusted = !(usage_incomplete || cost_is_partial);
+            let cost_usd = cost_trusted
+                .then(|| {
+                    usage
+                        .get("costUsdTicks")
+                        .and_then(Value::as_u64)
+                        .map(|ticks| ticks as f64 / USD_TICKS_PER_USD)
+                })
+                .flatten();
             // Bind the turn's totals to the prompt it completes; last
             // write wins (regenerated turns re-report).
-            if let Some(prompt_index) = anchors.last_prompt_index {
+            if let Some(prompt_index) = anchors.last_prompt_index
+                && let Some((input_tokens, cache_read_tokens, cache_creation_tokens)) = turn_input
+            {
                 anchors.turn_usages.insert(
                     prompt_index,
                     GrokTurnUsage {
                         timestamp: ts.clone(),
-                        input_tokens: usage
-                            .get("inputTokens")
-                            .and_then(Value::as_u64)
-                            .unwrap_or(0),
-                        output_tokens: output_with_reasoning,
-                        cache_read_tokens: usage
-                            .get("cachedReadTokens")
-                            .and_then(Value::as_u64)
-                            .unwrap_or(0),
+                        input_tokens,
+                        output_tokens: output,
+                        cache_read_tokens,
+                        cache_creation_tokens,
                     },
                 );
             }
             for (model, model_usage_value) in model_usage {
-                let input = model_usage_value
-                    .get("inputTokens")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0);
-                let cache_read = model_usage_value
-                    .get("cachedReadTokens")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0)
-                    .min(input);
-                let model_reasoning = model_usage_value
-                    .get("reasoningTokens")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0);
+                let Some((input, cache_read, cache_creation)) =
+                    input_token_buckets(model_usage_value)
+                else {
+                    log::warn!(
+                        "Grok model usage for '{model}' has cache buckets larger than input in '{}'; skipping usage",
+                        updates_path.display()
+                    );
+                    anchors.parse_warning_count = anchors.parse_warning_count.saturating_add(1);
+                    continue;
+                };
                 let model_output = model_usage_value
                     .get("outputTokens")
                     .and_then(Value::as_u64)
-                    .unwrap_or(0)
-                    .saturating_add(model_reasoning);
+                    .unwrap_or(0);
                 // Turn-level cost only stands in for a single-model turn:
                 // copying it onto every model of a multi-model turn would
                 // double-count, and the data offers no split to apportion it.
-                let model_cost = model_usage_value
-                    .get("costUsdTicks")
-                    .and_then(Value::as_u64)
-                    .map(|ticks| ticks as f64 / USD_TICKS_PER_USD)
-                    .or(if model_usage.len() == 1 {
-                        cost_usd
-                    } else {
-                        None
-                    });
+                let model_cost_is_partial = model_usage_value
+                    .get("costIsPartial")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let model_cost = (cost_trusted && !model_cost_is_partial)
+                    .then(|| {
+                        model_usage_value
+                            .get("costUsdTicks")
+                            .and_then(Value::as_u64)
+                            .map(|ticks| ticks as f64 / USD_TICKS_PER_USD)
+                            .or(if model_usage.len() == 1 {
+                                cost_usd
+                            } else {
+                                None
+                            })
+                    })
+                    .flatten();
                 anchors.usage_events.push(UsageEvent {
                     timestamp: ts.clone(),
                     model: model.clone(),
-                    input_tokens: input.saturating_sub(cache_read),
+                    turn_count: model_usage_value
+                        .get("modelCalls")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(1)
+                        .max(1),
+                    input_tokens: input,
                     output_tokens: model_output,
                     cache_read_input_tokens: cache_read,
-                    cache_creation_input_tokens: 0,
+                    cache_creation_input_tokens: cache_creation,
                     usage_hash: None,
                     cost_usd: model_cost,
+                });
+            }
+        }
+        "retry_state" => {
+            let note = match update.get("type").and_then(Value::as_str) {
+                Some("failed") => update
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|message| !message.is_empty())
+                    .map(|message| {
+                        let error_type = update
+                            .get("error_type")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown");
+                        format!("[Error:{error_type}] {message}")
+                    }),
+                Some("exhausted") => update
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|reason| !reason.is_empty())
+                    .map(|reason| format!("[Retry exhausted] {reason}")),
+                _ => None,
+            };
+            if let Some(note) = note {
+                anchors.session_notes.push(Message {
+                    timestamp: timestamp.clone(),
+                    ..Message::system(note)
                 });
             }
         }
@@ -308,7 +384,13 @@ pub(super) fn collect_anchor(anchors: &mut UpdateAnchors, line: &Value, updates_
             }
         }
         "image_compressed" => {
-            if let Some(message) = update.get("message").and_then(Value::as_str) {
+            // Grok itself hides successful compression. An empty images list
+            // means re-encoding failed and the oversized original was kept.
+            let is_success = update
+                .get("images")
+                .and_then(Value::as_array)
+                .is_some_and(|images| !images.is_empty());
+            if !is_success && let Some(message) = update.get("message").and_then(Value::as_str) {
                 let trimmed = message.trim();
                 if !trimmed.is_empty() {
                     anchors.session_notes.push(Message {
@@ -316,6 +398,23 @@ pub(super) fn collect_anchor(anchors: &mut UpdateAnchors, line: &Value, updates_
                         ..Message::system(format!("[Image] {trimmed}"))
                     });
                 }
+            }
+        }
+        "image_dropped" => {
+            let notes = update
+                .get("notes")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|note| !note.is_empty())
+                .collect::<Vec<_>>();
+            if !notes.is_empty() {
+                anchors.session_notes.push(Message {
+                    timestamp: timestamp.clone(),
+                    ..Message::system(format!("[Image dropped]\n{}", notes.join("\n")))
+                });
             }
         }
         _ => {}
@@ -441,15 +540,166 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_tokens_fold_into_output() {
+    fn reasoning_tokens_are_not_double_counted() {
         let line = turn_completed_line(json!({
-            "inputTokens": 100, "outputTokens": 10, "reasoningTokens": 7,
+            "inputTokens": 100, "outputTokens": 10, "totalTokens": 110,
+            "cachedReadTokens": 30, "cacheCreationTokens": 20,
+            "reasoningTokens": 7,
             "modelUsage": { "grok-4.5": {
-                "inputTokens": 100, "outputTokens": 10, "reasoningTokens": 7,
+                "inputTokens": 100, "outputTokens": 10, "totalTokens": 110,
+                "cachedReadTokens": 30, "cacheCreationTokens": 20,
+                "reasoningTokens": 7,
             }},
         }));
         let anchors = scan_line(&line);
-        assert_eq!(anchors.usage_events[0].output_tokens, 17);
+        let usage = &anchors.usage_events[0];
+        assert_eq!(usage.input_tokens, 50);
+        assert_eq!(usage.cache_read_input_tokens, 30);
+        assert_eq!(usage.cache_creation_input_tokens, 20);
+        assert_eq!(usage.output_tokens, 10);
+        assert_eq!(usage.cost_usd, None);
+    }
+
+    #[test]
+    fn invalid_cache_buckets_are_rejected() {
+        let line = turn_completed_line(json!({
+            "inputTokens": 10, "cachedReadTokens": 8, "cacheCreationTokens": 3,
+            "modelUsage": { "grok-4.5": {
+                "inputTokens": 10, "cachedReadTokens": 8, "cacheCreationTokens": 3,
+            }},
+        }));
+        let anchors = scan_line(&line);
+        assert!(anchors.usage_events.is_empty());
+        assert_eq!(anchors.parse_warning_count, 2);
+    }
+
+    #[test]
+    fn incomplete_usage_is_flagged_and_cost_is_not_trusted() {
+        let line = turn_completed_line(json!({
+            "inputTokens": 100, "outputTokens": 10,
+            "usageIsIncomplete": true,
+            "costUsdTicks": 10_000_000_000_u64,
+            "modelUsage": { "grok-4.5": {
+                "inputTokens": 100, "outputTokens": 10,
+                "costUsdTicks": 10_000_000_000_u64,
+            }},
+        }));
+        let anchors = scan_line(&line);
+        assert_eq!(anchors.parse_warning_count, 1);
+        assert_eq!(anchors.usage_events[0].output_tokens, 10);
         assert_eq!(anchors.usage_events[0].cost_usd, None);
+    }
+
+    #[test]
+    fn partial_cost_is_not_trusted() {
+        let line = turn_completed_line(json!({
+            "inputTokens": 100, "outputTokens": 10,
+            "costUsdTicks": 10_000_000_000_u64,
+            "costIsPartial": true,
+            "modelUsage": { "grok-4.5": {
+                "inputTokens": 100, "outputTokens": 10,
+                "costUsdTicks": 10_000_000_000_u64,
+            }},
+        }));
+        assert_eq!(scan_line(&line).usage_events[0].cost_usd, None);
+
+        let line = turn_completed_line(json!({
+            "inputTokens": 100, "outputTokens": 10,
+            "modelUsage": { "grok-4.5": {
+                "inputTokens": 100, "outputTokens": 10,
+                "costUsdTicks": 10_000_000_000_u64,
+                "costIsPartial": true,
+            }},
+        }));
+        assert_eq!(scan_line(&line).usage_events[0].cost_usd, None);
+    }
+
+    #[test]
+    fn terminal_retry_state_surfaces_as_session_note() {
+        let failed = scan_line(&json!({
+            "timestamp": 1_782_892_920,
+            "params": { "update": {
+                "sessionUpdate": "retry_state",
+                "type": "failed",
+                "error_type": "api",
+                "message": "request failed",
+            }},
+        }));
+        assert_eq!(
+            failed.session_notes[0].content,
+            "[Error:api] request failed"
+        );
+
+        let exhausted = scan_line(&json!({
+            "timestamp": 1_782_892_920,
+            "params": { "update": {
+                "sessionUpdate": "retry_state",
+                "type": "exhausted",
+                "reason": "still rate limited",
+            }},
+        }));
+        assert_eq!(
+            exhausted.session_notes[0].content,
+            "[Retry exhausted] still rate limited"
+        );
+
+        let retrying = scan_line(&json!({
+            "timestamp": 1_782_892_920,
+            "params": { "update": {
+                "sessionUpdate": "retry_state",
+                "type": "retrying",
+                "reason": "temporary",
+            }},
+        }));
+        assert!(retrying.session_notes.is_empty());
+    }
+
+    #[test]
+    fn image_notifications_surface_only_actionable_warnings() {
+        let mut anchors = UpdateAnchors::default();
+        let line = |update| {
+            json!({
+                "timestamp": 1_782_892_920,
+                "params": { "update": update },
+            })
+        };
+        collect_anchor(
+            &mut anchors,
+            &line(json!({
+                "sessionUpdate": "image_compressed",
+                "images": [{"original_bytes": 100, "compressed_bytes": 50}],
+                "message": "compressed successfully",
+            })),
+            Path::new("test-updates.jsonl"),
+        );
+        assert!(anchors.session_notes.is_empty());
+
+        collect_anchor(
+            &mut anchors,
+            &line(json!({
+                "sessionUpdate": "image_compressed",
+                "images": [],
+                "message": "original image was kept",
+            })),
+            Path::new("test-updates.jsonl"),
+        );
+        collect_anchor(
+            &mut anchors,
+            &line(json!({
+                "sessionUpdate": "image_dropped",
+                "notes": ["Image 1 was corrupt", "Image 2 was too small"],
+            })),
+            Path::new("test-updates.jsonl"),
+        );
+
+        assert_eq!(anchors.session_notes.len(), 2);
+        assert_eq!(
+            anchors.session_notes[0].content,
+            "[Image] original image was kept"
+        );
+        assert_eq!(
+            anchors.session_notes[1].content,
+            "[Image dropped]\nImage 1 was corrupt\nImage 2 was too small"
+        );
     }
 }

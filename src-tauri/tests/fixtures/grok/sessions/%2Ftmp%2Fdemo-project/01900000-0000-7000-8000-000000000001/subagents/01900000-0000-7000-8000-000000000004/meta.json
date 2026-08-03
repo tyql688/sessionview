@@ -4,5 +4,6 @@
   "child_session_id": "01900000-0000-7000-8000-000000000004",
   "subagent_type": "general-purpose",
   "description": "goal plan writer",
-  "status": "completed"
+  "status": "completed",
+  "resumed_from": "01900000-0000-7000-8000-000000000002"
 }

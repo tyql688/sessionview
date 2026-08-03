@@ -14,9 +14,12 @@ pub(super) struct GrokSummary {
     pub(super) created_at: Option<String>,
     #[serde(default)]
     pub(super) updated_at: Option<String>,
+    /// Last transcript activity; metadata-only writes may advance `updated_at`.
+    #[serde(default)]
+    pub(super) last_active_at: Option<String>,
     #[serde(default)]
     pub(super) current_model_id: Option<String>,
-    /// `"subagent"` or `"subagent_fork"` on child sessions.
+    /// Starts with `"subagent"` on child sessions (including resumed children).
     #[serde(default)]
     pub(super) session_kind: Option<String>,
     /// Git branch recorded when the session was created / last refreshed.
@@ -75,6 +78,9 @@ pub(super) enum GrokChatEntry {
         tool_call_id: String,
         #[serde(default)]
         content: String,
+        /// Inline image/PDF results persisted by tools such as `read_file`.
+        #[serde(default)]
+        images: Vec<GrokContentBlock>,
     },
     /// Built-in server-side tools (web_search / x_search) that do not go
     /// through the regular `assistant.tool_calls` + `tool_result` pair.
@@ -137,7 +143,10 @@ pub(super) enum GrokContentBlock {
         #[serde(default)]
         text: String,
     },
-    Image {},
+    Image {
+        #[serde(default)]
+        url: Option<String>,
+    },
     #[serde(other)]
     Unknown,
 }
@@ -195,7 +204,7 @@ pub(super) fn user_content_to_text(content: &GrokContent) -> String {
                 }
                 parts.push(strip_user_query_wrapper(text));
             }
-            GrokContentBlock::Image {} => match image_paths.next() {
+            GrokContentBlock::Image { .. } => match image_paths.next() {
                 Some(path) => parts.push(format!("[Image: source: {path}]")),
                 None => parts.push("[Image]".to_string()),
             },

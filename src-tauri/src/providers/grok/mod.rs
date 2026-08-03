@@ -8,7 +8,6 @@ use rayon::prelude::*;
 use crate::models::Provider;
 use crate::provider::{
     LoadedSession, ParsedSession, ProviderError, ScanOutcome, SessionProvider, SourceState,
-    partition_files_by_freshness,
 };
 
 pub(crate) struct Descriptor;
@@ -90,6 +89,38 @@ impl GrokProvider {
     }
 }
 
+/// Fingerprint every sidecar the parser reads. Grok appends usage and
+/// lifecycle data to updates.jsonl after chat_history.jsonl can stop changing.
+fn source_fingerprint(chat_path: &Path) -> Option<(u64, i64)> {
+    let session_dir = chat_path.parent()?;
+    let paths = [
+        chat_path.to_path_buf(),
+        session_dir.join("updates.jsonl"),
+        session_dir.join("summary.json"),
+    ];
+    let mut size = 0_u64;
+    let mut latest_mtime_ns = 0_i64;
+    for (index, path) in paths.iter().enumerate() {
+        let metadata = match std::fs::metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) if index > 0 && error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                log::warn!("cannot stat Grok source '{}': {error}", path.display());
+                return None;
+            }
+        };
+        size = size.saturating_add(metadata.len());
+        let nanos = metadata
+            .modified()
+            .ok()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_nanos();
+        latest_mtime_ns = latest_mtime_ns.max(i64::try_from(nanos).ok()?);
+    }
+    Some((size, latest_mtime_ns))
+}
+
 impl SessionProvider for GrokProvider {
     fn provider(&self) -> Provider {
         Provider::Grok
@@ -113,10 +144,21 @@ impl SessionProvider for GrokProvider {
         known: &HashMap<String, SourceState>,
     ) -> Result<ScanOutcome, ProviderError> {
         let files = self.collect_chat_files();
-        let (mut to_parse, mut unchanged_source_paths) = partition_files_by_freshness(files, known);
-        // A rename rewrites only summary.json; promote unchanged chat files
-        // whose stored title disagrees (user-customized titles are None and
-        // never promoted) — same pattern as Codex's session_index check.
+        let (mut to_parse, mut unchanged_source_paths) = (Vec::new(), Vec::new());
+        for path in files {
+            let path_str = path.to_string_lossy().to_string();
+            let unchanged = known
+                .get(&path_str)
+                .zip(source_fingerprint(&path))
+                .is_some_and(|(state, current)| current == (state.size, state.mtime));
+            if unchanged {
+                unchanged_source_paths.push(path_str);
+            } else {
+                to_parse.push(path);
+            }
+        }
+        // Also repair provider-derived titles stored by an older parser;
+        // user-customized titles are None and are never promoted.
         unchanged_source_paths.retain(|path_str| {
             let stale = Path::new(path_str)
                 .parent()
@@ -180,5 +222,50 @@ mod tests {
     #[test]
     fn descriptor_display_key() {
         assert_eq!(Descriptor.display_key(None), "grok");
+    }
+
+    #[test]
+    fn incremental_scan_reparses_when_updates_sidecar_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let session_dir = root
+            .path()
+            .join("sessions/%2Ftmp%2Fdemo/11111111-1111-4111-a111-111111111111");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let chat_path = session_dir.join("chat_history.jsonl");
+        std::fs::write(
+            &chat_path,
+            concat!(
+                "{\"type\":\"user\",\"content\":\"hello\",\"prompt_index\":0}\n",
+                "{\"type\":\"assistant\",\"content\":\"hi\"}\n",
+            ),
+        )
+        .unwrap();
+
+        let provider = GrokProvider::with_root(root.path().to_path_buf());
+        let first = provider.scan_all().unwrap();
+        assert_eq!(first.len(), 1);
+        let mut known = HashMap::new();
+        known.insert(
+            first[0].meta.source_path.clone(),
+            SourceState {
+                size: first[0].meta.file_size_bytes,
+                mtime: first[0].source_mtime,
+                title: Some(first[0].meta.title.clone()),
+            },
+        );
+        std::fs::write(
+            session_dir.join("updates.jsonl"),
+            "{\"timestamp\":1782892920,\"params\":{\"update\":{\"sessionUpdate\":\"session_recap\",\"summary\":\"new recap\"}}}\n",
+        )
+        .unwrap();
+
+        let outcome = provider.scan_incremental(&known).unwrap();
+        assert_eq!(outcome.parsed.len(), 1);
+        assert!(
+            outcome.parsed[0]
+                .messages
+                .iter()
+                .any(|message| message.content == "[Recap] new recap")
+        );
     }
 }

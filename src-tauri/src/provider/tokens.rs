@@ -28,6 +28,8 @@ pub struct TokenStatRow {
 pub struct UsageEvent {
     pub timestamp: String,
     pub model: String,
+    /// Provider model calls represented by this aggregate event.
+    pub turn_count: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cache_read_input_tokens: u64,
@@ -87,7 +89,7 @@ pub fn compute_token_stats_from_usage_events(
                 cache_write_tokens: 0,
                 cost_usd: 0.0,
             });
-        entry.turn_count += 1;
+        entry.turn_count += event.turn_count;
         entry.input_tokens += event.input_tokens;
         entry.output_tokens += event.output_tokens;
         entry.cache_read_tokens += event.cache_read_input_tokens;

@@ -66,6 +66,14 @@ impl HistoryBuilder {
                     self.done = true;
                     return;
                 }
+                self.last_assistant = None;
+                if update
+                    .pointer("/_meta/hideFromScrollback")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                {
+                    return;
+                }
                 let text = update
                     .pointer("/content/text")
                     .and_then(Value::as_str)
@@ -73,7 +81,6 @@ impl HistoryBuilder {
                 if text.trim().is_empty() {
                     return;
                 }
-                self.last_assistant = None;
                 self.messages.push(Message {
                     timestamp: timestamp.map(str::to_string),
                     ..Message::user(text)
@@ -110,12 +117,13 @@ impl HistoryBuilder {
             // ACP / runtime bookkeeping updates with no transcript content.
             // Task and subagent lifecycle events duplicate what the tool
             // call stream already shows; retry states are transient; session
-            // notes (plan / goal / recap / image_compressed) are surfaced
-            // once by the shared updates scan as system messages.
+            // notes (plan / goal / recap / actionable image warnings) are
+            // surfaced once by the shared updates scan as system messages.
             "plan"
             | "goal_updated"
             | "session_recap"
             | "image_compressed"
+            | "image_dropped"
             | "available_commands_update"
             | "current_mode_update"
             | "hook_execution"
@@ -226,28 +234,21 @@ impl HistoryBuilder {
         let Some(usage) = update.get("usage") else {
             return;
         };
-        let input = usage
-            .get("inputTokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
+        let Some((input, cache_read, cache_creation)) = super::updates::input_token_buckets(usage)
+        else {
+            self.last_assistant = None;
+            return;
+        };
         let output = usage
             .get("outputTokens")
             .and_then(Value::as_u64)
             .unwrap_or(0);
-        let reasoning = usage
-            .get("reasoningTokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let cache_read = usage
-            .get("cachedReadTokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
         if let Some(message) = self.messages.get_mut(idx) {
             message.token_usage = Some(TokenUsage {
-                input_tokens: input.saturating_sub(cache_read) as u32,
-                // Fold reasoning into output — no dedicated field on TokenUsage.
-                output_tokens: output.saturating_add(reasoning) as u32,
-                cache_creation_input_tokens: 0,
+                input_tokens: input as u32,
+                // reasoningTokens is already a subset of outputTokens.
+                output_tokens: output as u32,
+                cache_creation_input_tokens: cache_creation as u32,
                 cache_read_input_tokens: cache_read as u32,
             });
         }
@@ -336,6 +337,18 @@ fn decode_raw_output(raw: &Value) -> (String, Option<Value>, bool) {
     {
         return (format!("[Image: source: {path}]"), Some(raw.clone()), false);
     }
+    if let Some(image) = raw.get("ImageContent")
+        && let (Some(data), Some(mime_type)) = (
+            image.get("data").and_then(Value::as_str),
+            image.get("mime_type").and_then(Value::as_str),
+        )
+    {
+        return (
+            format!("[Image: source: data:{mime_type};base64,{data}]"),
+            None,
+            false,
+        );
+    }
     if raw.get("action").is_some() && raw.get("status").is_some() {
         return (raw.to_string(), Some(raw.clone()), false);
     }
@@ -354,7 +367,7 @@ fn decode_raw_output(raw: &Value) -> (String, Option<Value>, bool) {
 #[cfg(test)]
 mod tests {
     use super::{HistoryBuilder, decode_raw_output};
-    use crate::models::ToolResultMode;
+    use crate::models::{MessageRole, ToolResultMode};
     use serde_json::json;
 
     #[test]
@@ -374,6 +387,41 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&text).unwrap()["summary"],
             "done"
         );
+    }
+
+    #[test]
+    fn hidden_replay_prompt_does_not_become_user_message() {
+        let mut history = HistoryBuilder::new(2);
+        history.push_update(
+            "user_message_chunk",
+            &json!({
+                "content": {"text": "internal wake-up"},
+                "_meta": {"promptIndex": 0, "hideFromScrollback": true},
+            }),
+            None,
+        );
+        history.push_update(
+            "agent_message_chunk",
+            &json!({"content": {"text": "visible response"}}),
+            None,
+        );
+
+        let messages = history.into_messages();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, MessageRole::Assistant);
+        assert_eq!(messages[0].content, "visible response");
+    }
+
+    #[test]
+    fn image_content_becomes_renderable_marker() {
+        let raw = json!({
+            "type": "ReadFile",
+            "ImageContent": {"data": "AAAA", "mime_type": "image/png"},
+        });
+        let (text, structured, is_raw) = decode_raw_output(&raw);
+        assert_eq!(text, "[Image: source: data:image/png;base64,AAAA]");
+        assert!(structured.is_none());
+        assert!(!is_raw);
     }
 
     #[test]

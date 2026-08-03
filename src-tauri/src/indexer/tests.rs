@@ -341,6 +341,7 @@ fn usage_events_dedup_same_hash_across_sessions() {
         parsed.usage_events.push(UsageEvent {
             timestamp: "2026-04-09T12:00:00Z".into(),
             model: "gpt-5.4".into(),
+            turn_count: 1,
             input_tokens: 100,
             output_tokens: 50,
             cache_read_input_tokens: 25,

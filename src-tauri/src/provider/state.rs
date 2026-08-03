@@ -9,15 +9,12 @@ use super::{UsageEvent, token_totals_from_usage_events};
 /// needs to be re-parsed on the next scan. Mirrors what the `sessions`
 /// table stores per-row in `(file_size_bytes, source_mtime)`.
 ///
-/// For JSONL providers, `mtime` is epoch seconds (i64) — matches
-/// `SystemTime → UNIX_EPOCH` duration and survives JSON / SQLite
-/// roundtrips without precision loss for the resolution we care about
-/// (sub-second changes always also bump file size on append-only JSONL).
-/// DB-backed providers may store a provider-specific freshness value in
-/// the same slot when they need tighter resolution (OpenCode stores
-/// nanoseconds + the whole-DB size). Each such provider only ever compares
-/// the value it wrote — via its own `scan_incremental`, never the
-/// seconds-based `source_state_matches` helper — so the units never mix.
+/// Most JSONL providers store epoch seconds in `mtime`. Providers that
+/// fingerprint multiple files may use provider-specific values instead:
+/// Grok stores the latest sidecar mtime in nanoseconds plus their combined
+/// size, and OpenCode does the same for the database and WAL. Each compares
+/// only values it wrote via its own `scan_incremental`, never the seconds-based
+/// `source_state_matches` helper, so the units never mix.
 /// `title` carries the provider-derived title currently stored for the
 /// session backing this path, or `None` when the stored title must not be
 /// compared against provider metadata (user-customized titles, unknown
@@ -115,10 +112,11 @@ pub struct ParsedSession {
     pub usage_events: Vec<UsageEvent>,
     /// Provider freshness value for the source at parse time.
     /// 0 means "unknown" — the indexer treats that as "always reparse".
-    /// JSONL providers store epoch seconds; DB-backed providers may store a
-    /// tighter-resolution value. Used together with `meta.file_size_bytes` to
-    /// short-circuit unchanged sources in `scan_incremental`. Not exposed to
-    /// the frontend; never read outside the indexer / sync layer.
+    /// Most JSONL providers store epoch seconds; providers with multi-file
+    /// sources may store a tighter-resolution fingerprint. Used together with
+    /// `meta.file_size_bytes` to short-circuit unchanged sources in
+    /// `scan_incremental`. Not exposed to the frontend; never read outside the
+    /// indexer / sync layer.
     pub source_mtime: i64,
 }
 

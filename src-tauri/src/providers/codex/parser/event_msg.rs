@@ -111,6 +111,7 @@ impl CodexScanAccum {
                 self.usage_events.push(UsageEvent {
                     timestamp: ts.clone(),
                     model: resolved_model.clone(),
+                    turn_count: 1,
                     input_tokens: input.saturating_sub(cached.min(input)),
                     output_tokens: output,
                     cache_read_input_tokens: cached.min(input),

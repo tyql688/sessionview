@@ -11,11 +11,11 @@
 //! - `chat_history.jsonl` has no timestamps and no token usage. Both come
 //!   from `updates.jsonl`: timestamps via `promptIndex` / `toolCallId`
 //!   anchors, usage via per-turn `turn_completed` events. The wire's
-//!   `inputTokens` INCLUDES `cachedReadTokens`; the parser subtracts it so
-//!   `ParsedSession::usage_events` stores the two disjoint, and each turn's
-//!   totals also attach to that turn's final assistant message for display.
-//!   `reasoningTokens` are folded into output (no dedicated TokenUsage field).
-//!   `costUsdTicks` (1e10 ticks = $1) becomes `UsageEvent::cost_usd`.
+//!   `inputTokens` includes both cache buckets; the parser subtracts them so
+//!   `ParsedSession::usage_events` stores all four components disjointly, and
+//!   each turn's totals also attach to its final assistant message for display.
+//!   `reasoningTokens` is a subset of `outputTokens` and must not be added
+//!   again. `costUsdTicks` (1e10 ticks = $1) becomes `UsageEvent::cost_usd`.
 //! - Real user prompts carry a numeric `prompt_index` and a `<user_query>`
 //!   wrapper; CLI-injected context (`<user_info>`, `synthetic_reason`
 //!   entries) does not and is skipped.
@@ -27,11 +27,11 @@
 //! - Auto-compact REWRITES chat_history.jsonl in place; dropped history is
 //!   reconstructed from updates.jsonl (see `parser/history.rs`). In-place
 //!   rewrites are also why `load_messages` retries transient parse failures.
-//! - Incremental freshness = chat file `(size, mtime)` + a title comparison
-//!   against summary.json (title regeneration rewrites only summary.json).
+//! - Incremental freshness fingerprints chat_history.jsonl, updates.jsonl,
+//!   and summary.json together, plus a stored-title comparison.
 //!
-//! Subagents: a child is a sibling session dir with
-//! `session_kind: "subagent"` or `"subagent_fork"`; the typed parent→child
+//! Subagents: a child is a sibling session dir whose `session_kind` starts
+//! with `subagent` (`subagent`, `subagent_fork`, or `subagent_resume`); the typed parent→child
 //! link lives in `<parent-dir>/subagents/<child-id>/meta.json` (and forks
 //! also stamp `parent_session_id` on summary.json). Parents surface
 //! `child_session_ids` (db sync back-fills), children resolve `parent_id`
@@ -60,8 +60,8 @@ use crate::tool_metadata::{
 };
 
 use types::{
-    GrokBackendToolKind, GrokChatEntry, GrokSubagentMeta, GrokSummary, GrokToolCall,
-    content_text_raw, prompt_index_u64, user_content_to_text,
+    GrokBackendToolKind, GrokChatEntry, GrokContentBlock, GrokSubagentMeta, GrokSummary,
+    GrokToolCall, content_text_raw, prompt_index_u64, user_content_to_text,
 };
 use updates::{ToolCallState, UpdateAnchors, scan_updates};
 
@@ -97,10 +97,10 @@ fn non_empty(value: Option<String>) -> Option<String> {
 }
 
 fn is_subagent(summary: &GrokSummary) -> bool {
-    matches!(
-        summary.session_kind.as_deref(),
-        Some("subagent" | "subagent_fork")
-    )
+    summary
+        .session_kind
+        .as_deref()
+        .is_some_and(|kind| kind.starts_with("subagent"))
 }
 
 /// Resolve the parent-side link for a subagent child: probe every sibling
@@ -288,6 +288,10 @@ pub(crate) fn parse_session_file(chat_path: &Path) -> Option<ParsedSession> {
         .and_then(|m| m.modified().ok())
         .and_then(crate::provider::system_time_to_epoch_seconds)
         .unwrap_or(0);
+    let source_fingerprint = super::source_fingerprint(chat_path).unwrap_or((
+        file_metadata.as_ref().map(|m| m.len()).unwrap_or(0),
+        mtime_fallback,
+    ));
     let created_at = summary
         .as_ref()
         .and_then(|s| s.created_at.as_deref())
@@ -295,7 +299,7 @@ pub(crate) fn parse_session_file(chat_path: &Path) -> Option<ParsedSession> {
         .unwrap_or(mtime_fallback);
     let updated_at = summary
         .as_ref()
-        .and_then(|s| s.updated_at.as_deref())
+        .and_then(|s| s.last_active_at.as_deref().or(s.updated_at.as_deref()))
         .map(|ts| crate::provider::util::parse_rfc3339_timestamp(Some(ts)))
         .unwrap_or(mtime_fallback);
 
@@ -321,7 +325,7 @@ pub(crate) fn parse_session_file(chat_path: &Path) -> Option<ParsedSession> {
         created_at,
         updated_at,
         message_count: messages.len() as u32,
-        file_size_bytes: file_metadata.as_ref().map(|m| m.len()).unwrap_or(0),
+        file_size_bytes: source_fingerprint.0,
         source_path: chat_path.to_string_lossy().to_string(),
         is_sidechain,
         variant_name,
@@ -349,10 +353,7 @@ pub(crate) fn parse_session_file(chat_path: &Path) -> Option<ParsedSession> {
         parse_warning_count,
         child_session_ids: children,
         usage_events: anchors.usage_events,
-        source_mtime: file_metadata
-            .and_then(|m| m.modified().ok())
-            .and_then(crate::provider::system_time_to_epoch_seconds)
-            .unwrap_or(0),
+        source_mtime: source_fingerprint.1,
     })
 }
 
@@ -449,8 +450,16 @@ fn build_messages(
             GrokChatEntry::ToolResult {
                 tool_call_id,
                 content,
+                images,
             } => {
-                merge_tool_result(&mut messages, &pairer, tool_call_id, content, anchors);
+                merge_tool_result(
+                    &mut messages,
+                    &pairer,
+                    tool_call_id,
+                    content,
+                    images,
+                    anchors,
+                );
             }
             GrokChatEntry::BackendToolCall { kind } => {
                 push_backend_tool_call(&mut messages, kind, anchors);
@@ -493,9 +502,9 @@ fn attach_turn_usage(
         return;
     };
     message.token_usage = Some(TokenUsage {
-        input_tokens: turn.input_tokens.saturating_sub(turn.cache_read_tokens) as u32,
+        input_tokens: turn.input_tokens as u32,
         output_tokens: turn.output_tokens as u32,
-        cache_creation_input_tokens: 0,
+        cache_creation_input_tokens: turn.cache_creation_tokens as u32,
         cache_read_input_tokens: turn.cache_read_tokens as u32,
     });
     if message.timestamp.is_none() {
@@ -761,11 +770,39 @@ fn merge_tool_result(
     pairer: &ToolCallPairer,
     tool_call_id: &str,
     content: &str,
+    images: &[GrokContentBlock],
     anchors: &UpdateAnchors,
 ) {
+    let mut rendered_content = content.to_string();
+    for image in images {
+        let part = match image {
+            GrokContentBlock::Text { text } if !text.trim().is_empty() => text.clone(),
+            GrokContentBlock::Image { url: Some(url) } if !url.is_empty() => {
+                format!("[Image: source: {url}]")
+            }
+            GrokContentBlock::Image { .. } => {
+                log::warn!(
+                    "Grok tool_result '{tool_call_id}' image has no URL; emitting placeholder"
+                );
+                "[Image]".to_string()
+            }
+            GrokContentBlock::Text { .. } => continue,
+            GrokContentBlock::Unknown => {
+                log::warn!(
+                    "Grok tool_result '{tool_call_id}' has an unsupported inline content block"
+                );
+                continue;
+            }
+        };
+        if !rendered_content.is_empty() && !rendered_content.ends_with('\n') {
+            rendered_content.push('\n');
+        }
+        rendered_content.push_str(&part);
+    }
+
     let state = anchors.tool_states.get(tool_call_id);
     if let Some(message) = pairer.message_mut(Some(tool_call_id), messages) {
-        message.content = content.to_string();
+        message.content = rendered_content.clone();
         if let Some(metadata) = message.tool_metadata.as_mut() {
             let mut result_value = grok_result_value(
                 &metadata.canonical_name,
@@ -821,7 +858,7 @@ fn merge_tool_result(
     messages.push(Message {
         tool_name: Some(metadata.canonical_name.clone()),
         tool_metadata: Some(metadata),
-        ..Message::new(MessageRole::Tool, content.to_string())
+        ..Message::new(MessageRole::Tool, rendered_content)
     });
 }
 

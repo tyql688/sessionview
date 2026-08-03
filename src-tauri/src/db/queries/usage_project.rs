@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashSet};
 use chrono_tz::Tz;
 use rusqlite::params_from_iter;
 
-use super::usage::{DayFolder, build_usage_where};
+use super::usage::{DayFolder, build_tool_usage_where, build_usage_where};
 use super::{Database, UsageProjectDailyRow, UsageProjectModelDetailRow, UsageProjectToolRow};
 use crate::db::queries::UsageBucketBounds;
 
@@ -62,7 +62,7 @@ impl Database {
         project_path: &str,
     ) -> Result<Vec<String>, rusqlite::Error> {
         let conn = self.lock_read()?;
-        let (mut where_clause, mut params) = build_usage_where(providers, bounds);
+        let (mut where_clause, mut params) = build_tool_usage_where(providers, bounds);
         where_clause.push_str(&format!(" AND sess.project_path = ?{}", params.len() + 1));
         params.push(Box::new(project_path.to_string()));
         let sql = format!(
@@ -84,7 +84,7 @@ impl Database {
         project_path: &str,
     ) -> Result<Vec<String>, rusqlite::Error> {
         let conn = self.lock_read()?;
-        let (mut where_clause, mut params) = build_usage_where(providers, bounds);
+        let (mut where_clause, mut params) = build_tool_usage_where(providers, bounds);
         where_clause.push_str(&format!(" AND sess.project_path = ?{}", params.len() + 1));
         params.push(Box::new(project_path.to_string()));
         let sql = format!(
@@ -112,7 +112,7 @@ impl Database {
         project_path: &str,
     ) -> Result<Vec<UsageProjectToolRow>, rusqlite::Error> {
         let conn = self.lock_read()?;
-        let (mut where_clause, mut params) = build_usage_where(providers, bounds);
+        let (mut where_clause, mut params) = build_tool_usage_where(providers, bounds);
         where_clause.push_str(&format!(" AND sess.project_path = ?{}", params.len() + 1));
         params.push(Box::new(project_path.to_string()));
         let sql = format!(

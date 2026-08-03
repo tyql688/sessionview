@@ -2104,7 +2104,10 @@ fn grok_scans_fixture_session_with_summary_metadata() {
     );
     assert!(!session.meta.is_sidechain);
     assert!(session.meta.created_at > 0);
-    assert!(session.meta.updated_at >= session.meta.created_at);
+    assert_eq!(
+        session.meta.updated_at, 1_782_893_100,
+        "last_active_at must win over metadata-only updated_at"
+    );
     assert_eq!(session.parse_warning_count, 0);
 }
 
@@ -2164,6 +2167,11 @@ fn grok_tool_calls_merge_results_and_map_canonical_names() {
         .find(|m| m.tool_name.as_deref() == Some("Read"))
         .expect("read_file must canonicalize to Read");
     assert!(read.content.contains("# Demo Project"));
+    assert!(
+        read.content
+            .contains("[Image: source: data:image/png;base64,AAAA]"),
+        "inline tool-result images must survive as renderable markers"
+    );
 }
 
 #[test]
@@ -2172,18 +2180,20 @@ fn grok_usage_events_from_turn_completed_model_usage() {
     assert_eq!(session.usage_events.len(), 1);
     let event = &session.usage_events[0];
     assert_eq!(event.model, "grok-4.5");
-    assert_eq!(event.input_tokens, 13312 - 11264);
-    // outputTokens (106) + reasoningTokens (72) folded into output.
-    assert_eq!(event.output_tokens, 106 + 72);
+    assert_eq!(event.input_tokens, 13312 - 11264 - 128);
+    // reasoningTokens (72) is already included in outputTokens (106).
+    assert_eq!(event.output_tokens, 106);
     assert_eq!(event.cache_read_input_tokens, 11264);
+    assert_eq!(event.cache_creation_input_tokens, 128);
 
     let provider = grok_fixture_provider();
     let rows = provider.compute_token_stats(&session, None, None);
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].input_tokens, 13312 - 11264);
-    assert_eq!(rows[0].output_tokens, 106 + 72);
+    assert_eq!(rows[0].input_tokens, 13312 - 11264 - 128);
+    assert_eq!(rows[0].output_tokens, 106);
     assert_eq!(rows[0].cache_read_tokens, 11264);
-    assert_eq!(rows[0].turn_count, 1);
+    assert_eq!(rows[0].cache_write_tokens, 128);
+    assert_eq!(rows[0].turn_count, 2);
 }
 
 #[test]
@@ -2193,9 +2203,10 @@ fn grok_load_messages_totals_come_from_usage_events() {
     let loaded = provider
         .load_messages(GROK_BASIC_ID, &session.meta.source_path)
         .expect("grok fixture must load messages");
-    assert_eq!(loaded.token_totals.input_tokens, 13312 - 11264);
-    assert_eq!(loaded.token_totals.output_tokens, 106 + 72);
+    assert_eq!(loaded.token_totals.input_tokens, 13312 - 11264 - 128);
+    assert_eq!(loaded.token_totals.output_tokens, 106);
     assert_eq!(loaded.token_totals.cache_read_tokens, 11264);
+    assert_eq!(loaded.token_totals.cache_write_tokens, 128);
 }
 
 #[test]
@@ -2206,15 +2217,7 @@ fn grok_scan_incremental_short_circuits_unchanged_and_reparses_on_title_change()
 
     let fresh_state_of = |session: &sessionview_lib::provider::ParsedSession| SourceState {
         size: session.meta.file_size_bytes,
-        mtime: {
-            let metadata =
-                fs::metadata(&session.meta.source_path).expect("fixture chat file must stat");
-            let modified = metadata.modified().expect("fixture mtime must exist");
-            modified
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("mtime after epoch")
-                .as_secs() as i64
-        },
+        mtime: session.source_mtime,
         title: Some(session.meta.title.clone()),
     };
 
@@ -2267,8 +2270,11 @@ fn grok_parent_surfaces_child_session_ids_and_agent_id_metadata() {
         "parent must list the regular subagent child"
     );
     assert!(
-        parent.child_session_ids.iter().any(|id| id == GROK_FORK_ID),
-        "parent must also list the forked child"
+        parent
+            .child_session_ids
+            .iter()
+            .any(|id| id == GROK_RESUME_ID),
+        "parent must also list the resumed child"
     );
 
     let spawn = parent
@@ -2301,12 +2307,12 @@ fn grok_turn_usage_attached_to_final_assistant_message() {
         .token_usage
         .as_ref()
         .expect("turn totals must attach to the turn's final assistant message");
-    // inputTokens includes cachedReadTokens — stored disjoint.
-    // outputTokens folds in reasoningTokens (72).
-    assert_eq!(usage.input_tokens, 13312 - 11264);
-    assert_eq!(usage.output_tokens, 106 + 72);
+    // inputTokens includes both cache buckets — stored disjoint.
+    // reasoningTokens is a subset of outputTokens, not an extra bucket.
+    assert_eq!(usage.input_tokens, 13312 - 11264 - 128);
+    assert_eq!(usage.output_tokens, 106);
     assert_eq!(usage.cache_read_input_tokens, 11264);
-    assert_eq!(usage.cache_creation_input_tokens, 0);
+    assert_eq!(usage.cache_creation_input_tokens, 128);
     // Turn-end timestamp lands on the message that had none.
     assert_eq!(
         closing.timestamp.as_deref(),
@@ -2487,10 +2493,11 @@ fn grok_compacted_session_reconstructs_history_from_updates() {
         .find(|m| m.content == "Hi! How can I help?")
         .expect("reconstructed greeting");
     let usage = greeting.token_usage.as_ref().expect("turn usage attached");
-    assert_eq!(usage.input_tokens, 1000 - 800);
-    // outputTokens (20) + reasoningTokens (5)
-    assert_eq!(usage.output_tokens, 20 + 5);
+    assert_eq!(usage.input_tokens, 1000 - 800 - 50);
+    // reasoningTokens (5) is already included in outputTokens (20).
+    assert_eq!(usage.output_tokens, 20);
     assert_eq!(usage.cache_read_input_tokens, 800);
+    assert_eq!(usage.cache_creation_input_tokens, 50);
 
     // All three turns land in usage_events for the stats layer.
     assert_eq!(session.usage_events.len(), 3);
@@ -2526,7 +2533,7 @@ fn grok_session_parses_without_summary_json() {
     assert!(meta.created_at > 0);
 }
 
-const GROK_FORK_ID: &str = "01900000-0000-7000-8000-000000000004";
+const GROK_RESUME_ID: &str = "01900000-0000-7000-8000-000000000004";
 
 #[test]
 fn grok_backend_tool_calls_and_image_gen_are_parsed() {
@@ -2677,17 +2684,23 @@ fn grok_backend_tool_calls_and_image_gen_are_parsed() {
 }
 
 #[test]
-fn grok_subagent_fork_links_parent_and_uses_description_title() {
-    let fork = parse_grok_fixture_session(GROK_FORK_ID);
-    assert!(fork.meta.is_sidechain);
-    assert_eq!(fork.meta.parent_id.as_deref(), Some(GROK_BASIC_ID));
-    assert_eq!(fork.meta.title, "goal plan writer");
-    assert_eq!(fork.meta.git_branch.as_deref(), Some("feature/demo"));
-    assert_eq!(fork.meta.variant_name.as_deref(), Some("general-purpose"));
+fn grok_resumed_subagent_links_to_spawning_parent() {
+    let resumed = parse_grok_fixture_session(GROK_RESUME_ID);
+    assert!(resumed.meta.is_sidechain);
+    assert_eq!(resumed.meta.parent_id.as_deref(), Some(GROK_BASIC_ID));
+    assert_eq!(resumed.meta.title, "goal plan writer");
+    assert_eq!(resumed.meta.git_branch.as_deref(), Some("feature/demo"));
+    assert_eq!(
+        resumed.meta.variant_name.as_deref(),
+        Some("general-purpose")
+    );
 
     let parent = parse_grok_fixture_session(GROK_BASIC_ID);
     assert!(
-        parent.child_session_ids.iter().any(|id| id == GROK_FORK_ID),
-        "parent must list the forked child"
+        parent
+            .child_session_ids
+            .iter()
+            .any(|id| id == GROK_RESUME_ID),
+        "parent must list the resumed child"
     );
 }

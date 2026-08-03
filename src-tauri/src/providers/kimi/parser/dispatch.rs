@@ -347,6 +347,7 @@ impl ScanAccum {
         let mut event = UsageEvent {
             timestamp,
             model: model.to_string(),
+            turn_count: 1,
             input_tokens: u64::from(usage.input_tokens),
             output_tokens: u64::from(usage.output_tokens),
             cache_read_input_tokens: u64::from(usage.cache_read_input_tokens),

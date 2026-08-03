@@ -338,6 +338,7 @@ fn extract_usage_events(
             Some(UsageEvent {
                 timestamp: message.base.timestamp.clone(),
                 model: model.to_string(),
+                turn_count: 1,
                 input_tokens: usage.input,
                 output_tokens: usage.output,
                 cache_read_input_tokens: usage.cache_read,

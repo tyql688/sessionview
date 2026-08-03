@@ -6,7 +6,7 @@
 {"type":"assistant","content":"Let me check the files.","model_id":"grok-4.5","model_fingerprint":"fp_demo","reasoning_effort":"high"}
 {"type":"assistant","content":"","model_id":"grok-4.5","model_fingerprint":"fp_demo","reasoning_effort":"high","tool_calls":[{"id":"call-00000000-0000-0000-0000-000000000001-0","name":"run_terminal_command","arguments":"{\"command\":\"ls -la\",\"description\":\"List files\"}"},{"id":"call-00000000-0000-0000-0000-000000000001-1","name":"read_file","arguments":"{\"target_file\":\"/tmp/demo-project/README.md\"}"}]}
 {"type":"tool_result","tool_call_id":"call-00000000-0000-0000-0000-000000000001-0","content":"total 8\n-rw-r--r-- README.md"}
-{"type":"tool_result","tool_call_id":"call-00000000-0000-0000-0000-000000000001-1","content":"# Demo Project\n"}
+{"type":"tool_result","tool_call_id":"call-00000000-0000-0000-0000-000000000001-1","content":"# Demo Project\n","images":[{"type":"image","url":"data:image/png;base64,AAAA"}]}
 {"type":"assistant","content":"The project contains a single README.md file.","model_id":"grok-4.5","model_fingerprint":"fp_demo","reasoning_effort":"high"}
 {"type":"assistant","content":"","model_id":"grok-4.5","model_fingerprint":"fp_demo","reasoning_effort":"high","tool_calls":[{"id":"call-00000000-0000-0000-0000-000000000001-2","name":"spawn_subagent","arguments":"{\"description\":\"Demo child task\",\"prompt\":\"Count the lines in README.md\",\"subagent_type\":\"general-purpose\"}"}]}
 {"type":"tool_result","tool_call_id":"call-00000000-0000-0000-0000-000000000001-2","content":"Subagent started in background.\nsubagent_id: 01900000-0000-7000-8000-000000000002\ntype: general-purpose\ndescription: Demo child task"}
