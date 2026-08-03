@@ -65,7 +65,7 @@ let openWindowMessages = MESSAGES;
 let openWindowStart = 0;
 let totalMessages = MESSAGES.length;
 let messagesWindowMessages = MESSAGES;
-let messagesWindowDelay = 0;
+let messagesWindowGate: Promise<void> | null = null;
 let outlineEntries: Array<Record<string, unknown>> = [];
 const openWindowCalls: Array<Record<string, unknown> | undefined> = [];
 const messagesWindowCalls: Array<Record<string, unknown> | undefined> = [];
@@ -127,7 +127,7 @@ vi.mock("@tauri-apps/api/core", () => ({
         return META;
       case "get_session_messages_window":
         messagesWindowCalls.push(args);
-        if (messagesWindowDelay > 0) await new Promise((resolve) => setTimeout(resolve, messagesWindowDelay));
+        if (messagesWindowGate) await messagesWindowGate;
         return {
           total: totalMessages,
           start: typeof args?.offset === "number" ? (args.offset as number) : 0,
@@ -232,7 +232,7 @@ beforeEach(async () => {
   openWindowStart = 0;
   totalMessages = MESSAGES.length;
   messagesWindowMessages = MESSAGES;
-  messagesWindowDelay = 0;
+  messagesWindowGate = null;
   outlineEntries = [];
   openWindowCalls.length = 0;
   messagesWindowCalls.length = 0;
@@ -509,15 +509,17 @@ describe("SessionView smoke", () => {
 
   it("re-centers and re-aligns a far minimap jump after row layout settles", async () => {
     let targetScrolls = 0;
-    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function () {
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) {
       if (this.getAttribute("data-entry-key")?.startsWith("msg-450-")) targetScrolls += 1;
     });
     const nativeRect = Element.prototype.getBoundingClientRect;
-    const targetGeometry = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function () {
-      if (!this.getAttribute("data-entry-key")?.startsWith("msg-450-")) return nativeRect.call(this);
-      const top = targetScrolls < 2 ? 100 : 0;
-      return { x: 0, y: top, width: 0, height: 0, top, right: 0, bottom: top, left: 0, toJSON: () => ({}) };
-    });
+    const targetGeometry = vi
+      .spyOn(Element.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: Element) {
+        if (!this.getAttribute("data-entry-key")?.startsWith("msg-450-")) return nativeRect.call(this);
+        const top = targetScrolls < 2 ? 100 : 0;
+        return { x: 0, y: top, width: 0, height: 0, top, right: 0, bottom: top, left: 0, toJSON: () => ({}) };
+      });
     // Open a 900-message session at its newest tail, then jump to a turn in
     // the middle. The jump must fetch a small window around the target — NOT
     // the hundreds of messages in between — and align again after the newly
@@ -582,7 +584,10 @@ describe("SessionView smoke", () => {
     openWindowStart = 600;
     totalMessages = 900;
     messagesWindowMessages = all.slice(300, 600);
-    messagesWindowDelay = 100;
+    let releaseMessagesWindow = () => {};
+    messagesWindowGate = new Promise((resolve) => {
+      releaseMessagesWindow = () => resolve();
+    });
     outlineEntries = [
       { ordinal: 0, message_index: 450, user_text: "middle turn", reply_text: "" },
       { ordinal: 1, message_index: 700, user_text: "latest turn", reply_text: "" },
@@ -609,9 +614,12 @@ describe("SessionView smoke", () => {
       expect(messagesWindowCalls).toContainEqual(expect.objectContaining({ offset: 300, limit: 300 })),
     );
     fireEvent.click(getByLabelText("latest turn"));
+    messagesWindowGate = null;
+    releaseMessagesWindow();
 
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(queryByText("message 700")).toBeInTheDocument();
-    expect(queryByText("message 450")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(queryByText("message 700")).toBeInTheDocument();
+      expect(queryByText("message 450")).not.toBeInTheDocument();
+    });
   }, 10_000);
 });
