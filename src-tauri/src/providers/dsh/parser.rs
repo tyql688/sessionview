@@ -69,7 +69,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::models::{Message, MessageRole, Provider, SessionMeta};
+use crate::models::{Message, MessageRole, Provider, SessionMeta, TokenUsage};
 use crate::provider::util::{UsageKeys, epoch_ms_to_rfc3339, session_title, token_usage_from};
 use crate::provider::{ParsedSession, ProviderError, UsageEvent, system_time_to_epoch_seconds};
 use crate::tool_metadata::{
@@ -117,6 +117,12 @@ struct StepChunkBuf {
     /// rows). Gives chunk-reconstructed messages a provenance so a later
     /// compaction splice can remove them when it shadows the step.
     last_seq: Option<u64>,
+    /// Last streamed usage chunk for the step. The assembled message's own
+    /// usage supersedes it (the buffer is dropped on assembly), so this only
+    /// feeds interrupted steps at flush — without it their tokens vanish.
+    usage: Option<TokenUsage>,
+    /// Timestamp of that usage chunk's row, for the usage event's bucket.
+    usage_timestamp: Option<String>,
 }
 
 #[derive(Default)]
@@ -128,6 +134,9 @@ struct ParseState {
     tool_by_call_id: HashMap<String, usize>,
     latest_title: Option<String>,
     first_user_text: Option<String>,
+    /// `subagent/descriptor.label`: the delegation name the parent chose.
+    /// A delegated session is never LLM-titled, so this is its display name.
+    descriptor_label: Option<String>,
     last_event_time_ms: Option<i64>,
     model: Option<String>,
     /// Chunk deltas per (turn, step), dropped once the step's
@@ -340,7 +349,19 @@ fn handle_record(record: &Value, state: &mut ParseState) {
         "assistant/chunk" | "text-chunks" | "reasoning-chunks" | "tool-call-chunks" => {
             // Packed chunk rows carry `seq0` instead of `seq`.
             let chunk_seq = seq.or_else(|| record.get("seq0").and_then(Value::as_u64));
-            handle_chunk_event(event_type, data, state, chunk_seq);
+            handle_chunk_event(event_type, data, state, chunk_seq, timestamp.clone());
+        }
+        // A delegated (subagent) session opens with its descriptor; the
+        // `label` is the delegation name the parent chose — the only
+        // human-meaningful title such a session ever gets.
+        "subagent/descriptor" => {
+            if let Some(label) = data
+                .get("label")
+                .and_then(Value::as_str)
+                .filter(|label| !label.trim().is_empty())
+            {
+                state.descriptor_label = Some(label.to_string());
+            }
         }
         "step/end" => {
             if let (Some(turn), Some(step)) = (
@@ -372,7 +393,6 @@ fn handle_record(record: &Value, state: &mut ParseState) {
         | "compaction/start"
         | "compaction/end"
         | "compaction/summary"
-        | "subagent/descriptor"
         | "approval/requested"
         | "approval/resolved"
         | "goal/change"
@@ -537,6 +557,49 @@ fn handle_user_message(
             ) =>
         {
             log::debug!("skipping DSH plugin {form:?} user message");
+        }
+        // A background subagent's relayed report. The first block is DSH's
+        // boilerplate ("Background subagent <id> reported:") — drop it and
+        // render the report body as a tagged, collapsible system row.
+        "subagent-report" => {
+            let body = match text.split_once('\n') {
+                Some((first, rest)) if first.starts_with("Background subagent") => rest.trim(),
+                _ => text.trim(),
+            };
+            if !body.is_empty() {
+                state.push_with_provenance(
+                    Message {
+                        timestamp,
+                        ..Message::system(format!("[subagent_report] {body}"))
+                    },
+                    seq,
+                );
+            }
+        }
+        // The settle notice: boilerplate ("Background subagent <id>
+        // finished…" + "Its closing message:") wraps the child's closing
+        // report — strip the wrapper, tag the report.
+        "subagent-settled" => {
+            let mut body = text.as_str();
+            if let Some((first, rest)) = body.split_once('\n')
+                && first.starts_with("Background subagent")
+            {
+                body = rest;
+            }
+            let body = body.trim_start();
+            let body = body
+                .strip_prefix("Its closing message:")
+                .unwrap_or(body)
+                .trim();
+            if !body.is_empty() {
+                state.push_with_provenance(
+                    Message {
+                        timestamp,
+                        ..Message::system(format!("[subagent_settled] {body}"))
+                    },
+                    seq,
+                );
+            }
         }
         // Everything else that reaches the surface (policy changes, goal
         // rounds, notices, compaction checkpoints, …) renders as a system
@@ -813,7 +876,13 @@ fn handle_tool_result(
     );
 }
 
-fn handle_chunk_event(event_type: &str, data: &Value, state: &mut ParseState, seq: Option<u64>) {
+fn handle_chunk_event(
+    event_type: &str,
+    data: &Value,
+    state: &mut ParseState,
+    seq: Option<u64>,
+    timestamp: Option<String>,
+) {
     let (Some(turn), Some(step)) = (
         data.get("turn").and_then(Value::as_u64),
         data.get("step").and_then(Value::as_u64),
@@ -835,6 +904,20 @@ fn handle_chunk_event(event_type: &str, data: &Value, state: &mut ParseState, se
             let Some(chunk) = data.get("chunk") else {
                 return;
             };
+            // Usage chunks carry no block index — capture them before the
+            // index gate, so an interrupted step keeps its token accounting.
+            if chunk.get("type").and_then(Value::as_str) == Some("usage") {
+                if let Some(usage) = chunk
+                    .get("usage")
+                    .and_then(|usage| token_usage_from(usage, &DSH_USAGE_KEYS))
+                {
+                    buf.usage = Some(usage);
+                    if timestamp.is_some() {
+                        buf.usage_timestamp = timestamp;
+                    }
+                }
+                return;
+            }
             let Some(index) = chunk.get("index").and_then(Value::as_u64) else {
                 return;
             };
@@ -938,6 +1021,7 @@ fn flush_step_chunks(state: &mut ParseState, turn: u32, step: u32, provenance: O
         return;
     };
     let provenance = provenance.or(buf.last_seq);
+    let produced_start = state.messages.len();
     let mut indices: Vec<usize> = buf
         .text
         .keys()
@@ -964,6 +1048,43 @@ fn flush_step_chunks(state: &mut ParseState, turn: u32, step: u32, provenance: O
         {
             let name = name.as_deref().unwrap_or("tool");
             push_tool_message(state, name, arguments, Some(call_id), None, provenance);
+        }
+    }
+    // Mirror the assembled-message path: the step's streamed usage lands in
+    // `usage_events` and on the flush's last non-System message, so an
+    // interrupted step still counts toward the session's tokens.
+    if let Some(usage) = buf.usage {
+        match (buf.usage_timestamp.as_deref(), state.model.clone()) {
+            (Some(timestamp), Some(model)) => state.usage_events.push(UsageEvent {
+                timestamp: timestamp.to_string(),
+                model,
+                turn_count: 1,
+                input_tokens: u64::from(usage.input_tokens),
+                output_tokens: u64::from(usage.output_tokens),
+                cache_read_input_tokens: u64::from(usage.cache_read_input_tokens),
+                cache_creation_input_tokens: u64::from(usage.cache_creation_input_tokens),
+                usage_hash: None,
+                cost_usd: None,
+            }),
+            _ => {
+                log::warn!("skipping DSH usage chunk without a timestamp or model");
+                state.parse_warning_count = state.parse_warning_count.saturating_add(1);
+            }
+        }
+        if let Some(last) = state.messages[produced_start..]
+            .iter_mut()
+            .filter(|message| message.role != MessageRole::System)
+            .last()
+        {
+            last.token_usage = Some(usage);
+        } else {
+            state.push_with_provenance(
+                Message {
+                    token_usage: Some(usage),
+                    ..Message::assistant(String::new())
+                },
+                provenance,
+            );
         }
     }
 }
@@ -1055,13 +1176,21 @@ fn assemble_session_meta(
         .map(|time| time / 1000)
         .unwrap_or(source_mtime);
     let parent_id = header.parent_session.clone().filter(|id| !id.is_empty());
-    let is_sidechain = header.origin.as_deref() == Some("subagent") || parent_id.is_some();
-    // `first_user_text` is set by `push_user` for every surfaced direct
-    // prompt, so it is exactly the first User message's text; no scan needed.
-    let title = state
-        .latest_title
-        .clone()
-        .unwrap_or_else(|| session_title(state.first_user_text.as_deref()));
+    // `parentSession` alone is seed lineage — a forked/resumed branch carries
+    // it too. Only `origin: "subagent"` marks a delegated child.
+    let is_sidechain = header.origin.as_deref() == Some("subagent");
+    // A delegated session's `session/title` is only the deterministic
+    // fallback (auto-titling skips subagents), so the parent-chosen
+    // delegation label wins when present. `first_user_text` is set by
+    // `push_user` for every surfaced direct prompt, so it is exactly the
+    // first User message's text; no scan needed.
+    let title = if is_sidechain {
+        state.descriptor_label.clone()
+    } else {
+        None
+    }
+    .or_else(|| state.latest_title.clone())
+    .unwrap_or_else(|| session_title(state.first_user_text.as_deref()));
     SessionMeta {
         id,
         provider: Provider::Dsh,
@@ -1164,6 +1293,139 @@ mod tests {
         let dir = TempDir::new().expect("temp dir must be created");
         let path = write_log(&dir, "session.jsonl", lines);
         parse_session_file(&path).expect("fixture must parse")
+    }
+
+    /// A subagent header: `parentSession` + `origin` mark a delegated child.
+    fn subagent_header_line(cwd: &str) -> String {
+        format!(
+            r#"{{"type":"session","version":0,"id":"{SESSION_ID}","createdAt":1786865077879,"cwd":"{cwd}","parentSession":"session-parent","origin":"subagent","delegationDepth":1,"agentPreset":"standard"}}"#
+        )
+    }
+
+    #[test]
+    fn subagent_title_prefers_descriptor_label() {
+        let session = parse_lines(&[
+            &subagent_header_line("/home/user/my-project"),
+            &event_line(
+                "subagent/descriptor",
+                0,
+                1786865077879,
+                r#"{"version":2,"mode":"continuable","provider":"spawn","label":"Deep review all project code","agentProvider":"opencode-go","agentModel":"deepseek-v4-flash"}"#,
+            ),
+            &user_message_line(
+                1,
+                1786865077880,
+                r#"{"kind":"user"}"#,
+                r#""You are conducting a deep code review of…""#,
+            ),
+            &event_line(
+                "session/title",
+                2,
+                1786865077881,
+                r#"{"title":"You are conducting a deep","messageSeqs":[1],"source":{"kind":"fallback"}}"#,
+            ),
+        ]);
+        assert!(session.meta.is_sidechain);
+        assert_eq!(session.meta.parent_id.as_deref(), Some("session-parent"));
+        assert_eq!(session.meta.title, "Deep review all project code");
+    }
+
+    #[test]
+    fn subagent_report_renders_as_tagged_system_row() {
+        let session = parse_lines(&[
+            &header_line("/home/user/my-project"),
+            &user_message_line(1, 1786865077880, r#"{"kind":"user"}"#, r#""hello""#),
+            &event_line(
+                "user/message",
+                2,
+                1786865077881,
+                r#"{"content":[{"type":"text","text":"Background subagent cb61a6b7 reported:"},{"type":"text","text":"Review complete."}],"source":{"kind":"subagent-report","form":"relay","senderSessionId":"cb61a6b7"},"role":"user","id":"u2"}"#,
+            ),
+        ]);
+        let report = session
+            .messages
+            .iter()
+            .find(|message| message.content.starts_with("[subagent_report]"))
+            .expect("report row");
+        assert_eq!(report.role, MessageRole::System);
+        assert_eq!(report.content, "[subagent_report] Review complete.");
+    }
+
+    #[test]
+    fn subagent_settled_strips_wrapper_and_tags_closing_message() {
+        let session = parse_lines(&[
+            &header_line("/home/user/my-project"),
+            &user_message_line(1, 1786865077880, r#"{"kind":"user"}"#, r#""hello""#),
+            &event_line(
+                "user/message",
+                2,
+                1786865077881,
+                r#"{"content":[{"type":"text","text":"Background subagent 036bdb9c finished and will do no further work unless you send it more."},{"type":"text","text":"Its closing message:"},{"type":"text","text":"Review complete.\nAll good."}],"source":{"kind":"subagent-settled","form":"notice","senderSessionId":"036bdb9c"},"role":"user","id":"u2"}"#,
+            ),
+        ]);
+        let settled = session
+            .messages
+            .iter()
+            .find(|message| message.content.starts_with("[subagent_settled]"))
+            .expect("settled row");
+        assert_eq!(settled.role, MessageRole::System);
+        assert_eq!(
+            settled.content,
+            "[subagent_settled] Review complete.\nAll good."
+        );
+        assert!(!settled.content.contains("Background subagent"));
+    }
+
+    #[test]
+    fn forked_session_is_not_a_sidechain() {
+        // `parentSession` without `origin: subagent` is seed lineage (a
+        // fork/resume branch), not a delegated child.
+        let session = parse_lines(&[
+            &format!(
+                r#"{{"type":"session","version":0,"id":"{SESSION_ID}","createdAt":1786865077879,"cwd":"/home/user/my-project","parentSession":"session-parent","seedLength":4}}"#
+            ),
+            &user_message_line(1, 1786865077880, r#"{"kind":"user"}"#, r#""hello""#),
+        ]);
+        assert!(!session.meta.is_sidechain);
+        assert_eq!(session.meta.parent_id.as_deref(), Some("session-parent"));
+    }
+
+    #[test]
+    fn interrupted_step_keeps_streamed_usage() {
+        // A step whose assistant/message never assembled: text arrives as
+        // chunks, usage as a usage chunk, then the stream dies. The flush
+        // must keep both the text and the token accounting.
+        let session = parse_lines(&[
+            &header_line("/home/user/my-project"),
+            &user_message_line(1, 1786865077880, r#"{"kind":"user"}"#, r#""hello""#),
+            &assistant_message_line(
+                2,
+                1786865077881,
+                r#"[{"type":"text","text":"first"}]"#,
+                Some(r#"{"inputTokens":7,"outputTokens":3}"#),
+            ),
+            &event_line(
+                "assistant/chunk",
+                3,
+                1786865077890,
+                r#"{"turn":1,"step":2,"chunk":{"type":"text-delta","index":0,"text":"partial answer"}}"#,
+            ),
+            &event_line(
+                "assistant/chunk",
+                4,
+                1786865077891,
+                r#"{"turn":1,"step":2,"chunk":{"type":"usage","usage":{"inputTokens":100,"outputTokens":20,"cacheReadTokens":40}}}"#,
+            ),
+        ]);
+        assert_eq!(session.usage_events.len(), 2);
+        let orphan = &session.usage_events[1];
+        assert_eq!(orphan.input_tokens, 100);
+        assert_eq!(orphan.output_tokens, 20);
+        assert_eq!(orphan.cache_read_input_tokens, 40);
+        assert_eq!(orphan.model, "deepseek-v4-flash");
+        let last = session.messages.last().expect("flushed message");
+        let usage = last.token_usage.as_ref().expect("usage attached");
+        assert_eq!(usage.input_tokens, 100);
     }
 
     /// Full fixture: user prompt, reasoning + text + tool call, tool result,

@@ -297,6 +297,8 @@
     "scheduledTask": "Scheduled wakeup",
     "taskStatus": "Task",
     "subagentTask": "Subagent task",
+    "subagentReport": "Subagent report",
+    "subagentSettled": "Subagent finished",
     "skillActivation": "Skill activation",
     "kimiContext": "Kimi context",
     "modelFallback": "Model fallback",

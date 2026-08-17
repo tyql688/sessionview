@@ -6,10 +6,13 @@ export function ThinkingBlock(props: { content: string }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const preview = () => {
-    // Models pepper thinking with markdown-ish **emphasis**; the collapsed
-    // one-liner reads better with the markers stripped (content stays raw).
-    const first = props.content.split("\n")[0].replaceAll("**", "");
-    return first;
+    // A bold lead ("**Title** …") is the model's own headline — show just
+    // it. Otherwise the first line stands in, markdown-ish **emphasis**
+    // stripped, hard-capped so an untitled wall of thought stays one line.
+    const firstLine = props.content.split("\n")[0].trim();
+    const bold = /^\*\*([^*]+)\*\*/.exec(firstLine);
+    const summary = (bold ? bold[1] : firstLine.replaceAll("**", "")).trim();
+    return summary.length > 80 ? `${summary.slice(0, 80)}\u2026` : summary;
   };
 
   return (

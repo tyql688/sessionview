@@ -117,6 +117,8 @@ describe("i18n dictionaries", () => {
       expect(dict.system.scheduledTask).toBeTruthy();
       expect(dict.system.taskStatus).toBeTruthy();
       expect(dict.system.subagentTask).toBeTruthy();
+      expect(dict.system.subagentReport).toBeTruthy();
+      expect(dict.system.subagentSettled).toBeTruthy();
       expect(dict.system.skillActivation).toBeTruthy();
       expect(dict.system.kimiContext).toBeTruthy();
       expect(dict.system.prLink).toBeTruthy();

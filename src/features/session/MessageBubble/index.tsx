@@ -105,6 +105,18 @@ const SYSTEM_SUBTYPE_CONFIG: Record<
     cls: "sys-info",
     collapsible: true,
   },
+  subagent_report: {
+    icon: "\uD83E\uDD16",
+    labelKey: "system.subagentReport",
+    cls: "sys-info",
+    collapsible: true,
+  },
+  subagent_settled: {
+    icon: "\uD83E\uDD16",
+    labelKey: "system.subagentSettled",
+    cls: "sys-info",
+    collapsible: true,
+  },
   skill_activation: {
     icon: "\u26A1",
     labelKey: "system.skillActivation",
