@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.7.8] - Unreleased
+
+### Fixed
+
+- DSH subagent sessions now take their display title from the parent-chosen
+  delegation label (`subagent/descriptor`), instead of the five-word fallback
+  title every delegated sibling shared.
+- Forked/resumed DSH sessions are no longer misclassified as sidechains:
+  `parentSession` alone is seed lineage; only `origin: "subagent"` marks a
+  delegated child.
+- An interrupted DSH step keeps its streamed token usage: the step's usage
+  chunk is buffered and folded into the stats at flush, matching the
+  assembled-message path.
+
+### Changed
+
+- DSH subagent traffic renders as tagged collapsible system rows (subagent
+  report / subagent finished) instead of raw "Background subagent <uuid> …"
+  boilerplate walls.
+- The collapsed thinking preview (all providers) prefers a bold `**Title**`
+  lead and hard-caps an untitled first line at 80 characters.
+
 ## [0.7.7] - 2026-08-17
 
 ### Added
