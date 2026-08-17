@@ -36,7 +36,8 @@
           "$HOME/.cursor/**",
           "$HOME/.cc-mirror/**",
           "$HOME/.pi/**",
-          "$HOME/.grok/**"
+          "$HOME/.grok/**",
+          "$HOME/.dsh/sessions/**"
         ]
       }
     }

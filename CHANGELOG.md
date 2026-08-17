@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.7.7] - Unreleased
+
+### Added
+
+- DSH (DeepSeek Harness) sessions: the provider reads the zstd-compressed
+  JSONL event logs under `$DSH_HOME/sessions` (default `~/.dsh/sessions`),
+  surfaces the ordered conversation (user prompts, assistant text and
+  reasoning, tool calls with merged results), links subagent sessions to
+  their parents via the session header, and resumes through
+  `dsh --profile tui --resume <id>`.
+- DSH compaction is honored: `surfaceOp: replace` checkpoints splice the
+  condensed summary into the transcript in place of the shadowed history,
+  while shadowed token usage stays in the stats (matching how DSH's own
+  usage collector folds the log) and the search index keeps the old text.
+- DSH robustness: interrupted streams are reconstructed from their chunk
+  rows, a torn tail is ignored the same way DSH's own scanner does, and
+  retry/compaction/subagent-descriptor rows are recognized log-only events.
+
 ## [0.7.6] - 2026-07-24
 
 ### Added

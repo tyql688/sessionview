@@ -49,6 +49,10 @@ fn build_grok_runtime() -> Option<Box<dyn SessionProvider>> {
     crate::providers::grok::GrokProvider::new().map(|p| Box::new(p) as Box<dyn SessionProvider>)
 }
 
+fn build_dsh_runtime() -> Option<Box<dyn SessionProvider>> {
+    crate::providers::dsh::DshProvider::new().map(|p| Box::new(p) as Box<dyn SessionProvider>)
+}
+
 fn provider_entry(provider: &Provider) -> &'static ProviderCatalogEntry {
     // Exhaustive match: a new Provider variant fails to compile until added.
     // Indices must stay in lock-step with PROVIDER_CATALOG; enforced by
@@ -63,10 +67,11 @@ fn provider_entry(provider: &Provider) -> &'static ProviderCatalogEntry {
         Provider::CcMirror => &PROVIDER_CATALOG[6],
         Provider::Pi => &PROVIDER_CATALOG[7],
         Provider::Grok => &PROVIDER_CATALOG[8],
+        Provider::Dsh => &PROVIDER_CATALOG[9],
     }
 }
 
-static PROVIDER_KINDS: [Provider; 9] = [
+static PROVIDER_KINDS: [Provider; 10] = [
     Provider::Claude,
     Provider::Codex,
     Provider::Antigravity,
@@ -76,9 +81,10 @@ static PROVIDER_KINDS: [Provider; 9] = [
     Provider::CcMirror,
     Provider::Pi,
     Provider::Grok,
+    Provider::Dsh,
 ];
 
-static PROVIDER_CATALOG: [ProviderCatalogEntry; 9] = [
+static PROVIDER_CATALOG: [ProviderCatalogEntry; 10] = [
     ProviderCatalogEntry {
         kind: Provider::Claude,
         key: "claude",
@@ -141,6 +147,13 @@ static PROVIDER_CATALOG: [ProviderCatalogEntry; 9] = [
         label: "Grok Build",
         descriptor: &crate::providers::grok::Descriptor,
         build_runtime: build_grok_runtime,
+    },
+    ProviderCatalogEntry {
+        kind: Provider::Dsh,
+        key: "dsh",
+        label: "DSH",
+        descriptor: &crate::providers::dsh::Descriptor,
+        build_runtime: build_dsh_runtime,
     },
 ];
 

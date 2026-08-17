@@ -68,6 +68,7 @@ walkdir = "2"
 thiserror = "2"
 anyhow = "1"
 base64 = "0.22"
+zstd = "0.13"
 zip = { version = "8", default-features = false, features = ["deflate"] }
 tauri-plugin-updater = { version = "2.10.0", optional = true }
 tauri-plugin-process = { version = "2.3.1", optional = true }

@@ -72,6 +72,7 @@ describe("providerSnapshots store", () => {
       "cursor",
       "pi",
       "grok",
+      "dsh",
     ]);
   });
 

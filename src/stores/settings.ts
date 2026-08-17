@@ -32,6 +32,7 @@ const PROVIDER_FLAGS: Record<Provider, true> = {
   "cc-mirror": true,
   pi: true,
   grok: true,
+  dsh: true,
 };
 const VALID_PROVIDERS = Object.keys(PROVIDER_FLAGS) as Provider[];
 

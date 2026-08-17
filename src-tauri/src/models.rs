@@ -16,6 +16,7 @@ pub enum Provider {
     CcMirror,
     Pi,
     Grok,
+    Dsh,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]

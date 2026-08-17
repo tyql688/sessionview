@@ -1,6 +1,17 @@
 /** Every supported provider, kept as one tuple so the union derives from a
  * single source list. */
-type ProviderValues = ["claude", "codex", "antigravity", "opencode", "kimi", "cursor", "cc-mirror", "pi", "grok"];
+type ProviderValues = [
+  "claude",
+  "codex",
+  "antigravity",
+  "opencode",
+  "kimi",
+  "cursor",
+  "cc-mirror",
+  "pi",
+  "grok",
+  "dsh",
+];
 
 export type Provider = ProviderValues[number];
 

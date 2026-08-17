@@ -96,6 +96,15 @@ const FALLBACK_PROVIDER_SNAPSHOTS: Record<Provider, ProviderSnapshot> = {
     exists: false,
     session_count: 0,
   },
+  dsh: {
+    key: "dsh",
+    label: "DSH",
+    color: "var(--dsh)",
+    sort_order: 12,
+    path: "",
+    exists: false,
+    session_count: 0,
+  },
 };
 
 let loadPromise: Promise<void> | null = null;

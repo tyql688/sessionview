@@ -2704,3 +2704,155 @@ fn grok_resumed_subagent_links_to_spawning_parent() {
         "parent must list the resumed child"
     );
 }
+
+// ---------------------------------------------------------------------------
+// DSH (DeepSeek Harness) parser tests
+// ---------------------------------------------------------------------------
+
+use sessionview_lib::providers::dsh::DshProvider;
+
+const DSH_FIXTURE_ID: &str = "session-11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+fn parse_dsh_fixture() -> sessionview_lib::provider::ParsedSession {
+    let provider = DshProvider::with_home(PathBuf::from("/nonexistent"));
+    let path = fixtures_dir().join("dsh_session.jsonl.zstd");
+    provider
+        .parse_session(&path)
+        .expect("dsh zstd fixture must parse")
+}
+
+#[test]
+fn dsh_parses_zstd_fixture_meta() {
+    let session = parse_dsh_fixture();
+
+    assert_eq!(session.meta.provider, Provider::Dsh);
+    assert_eq!(session.meta.id, DSH_FIXTURE_ID);
+    assert_eq!(session.meta.title, "Fix the login bug");
+    assert_eq!(session.meta.project_path, "/home/user/ccsession");
+    assert_eq!(session.meta.project_name, "ccsession");
+    assert_eq!(session.meta.created_at, 1786865077);
+    assert_eq!(session.meta.updated_at, 1786865149);
+    assert_eq!(session.meta.model.as_deref(), Some("deepseek-v4-flash"));
+    assert!(!session.meta.is_sidechain);
+    assert_eq!(session.meta.parent_id, None);
+    assert_eq!(session.meta.message_count, 5);
+    assert_eq!(session.parse_warning_count, 0);
+    assert_eq!(
+        session.meta.source_path,
+        fixtures_dir()
+            .join("dsh_session.jsonl.zstd")
+            .to_string_lossy()
+    );
+}
+
+#[test]
+fn dsh_surfaces_conversation_with_usage() {
+    let session = parse_dsh_fixture();
+    let messages = &session.messages;
+    assert_eq!(messages.len(), 5);
+
+    // 1. user prompt
+    assert_eq!(messages[0].role, MessageRole::User);
+    assert_eq!(messages[0].content, "Fix the login bug");
+    // 2. thinking
+    assert_eq!(messages[1].role, MessageRole::System);
+    assert_eq!(
+        messages[1].content,
+        "[thinking]\nLet me look at the auth code."
+    );
+    // 3. assistant text
+    assert_eq!(messages[2].role, MessageRole::Assistant);
+    assert_eq!(messages[2].content, "Let me inspect the login flow.");
+    assert_eq!(messages[2].model.as_deref(), Some("deepseek-v4-flash"));
+    // 4. tool call with merged result
+    assert_eq!(messages[3].role, MessageRole::Tool);
+    assert_eq!(messages[3].tool_name.as_deref(), Some("Bash"));
+    assert!(
+        messages[3]
+            .tool_input
+            .as_deref()
+            .unwrap()
+            .contains("cat src/auth.rs")
+    );
+    assert!(messages[3].content.contains("fn login()"));
+    assert_eq!(
+        messages[3]
+            .tool_metadata
+            .as_ref()
+            .unwrap()
+            .status
+            .as_deref(),
+        Some("success")
+    );
+    // 5. final assistant text with usage
+    assert_eq!(messages[4].role, MessageRole::Assistant);
+    let usage = messages[4].token_usage.as_ref().expect("usage must attach");
+    assert_eq!(usage.input_tokens, 900);
+    assert_eq!(usage.output_tokens, 120);
+
+    // Aggregated totals must reflect both usage-bearing messages.
+    let totals = sessionview_lib::models::token_totals_from_messages(messages);
+    assert_eq!(totals.input_tokens, 2100);
+    assert_eq!(totals.output_tokens, 300);
+    assert_eq!(totals.cache_read_tokens, 400);
+    assert_eq!(totals.cache_write_tokens, 60);
+}
+
+#[test]
+fn dsh_provider_scans_fake_home_end_to_end() {
+    let dir = TempDir::new().expect("temp dir must be created");
+    let sessions = dir.path().join("sessions");
+    let project = sessions.join("--home-user-ccsession--");
+    let session_dir = project.join(DSH_FIXTURE_ID);
+    fs::create_dir_all(&session_dir).expect("session dir must be created");
+    fs::copy(
+        fixtures_dir().join("dsh_session.jsonl.zstd"),
+        session_dir.join("session.jsonl.zstd"),
+    )
+    .expect("fixture must be copied");
+
+    let provider = DshProvider::with_home(dir.path().to_path_buf());
+    let scanned = provider.scan_all().expect("scan must succeed");
+    assert_eq!(scanned.len(), 1);
+    assert_eq!(scanned[0].meta.id, DSH_FIXTURE_ID);
+
+    let loaded = provider
+        .load_messages(DSH_FIXTURE_ID, &scanned[0].meta.source_path)
+        .expect("load must succeed");
+    assert_eq!(loaded.messages.len(), 5);
+    assert_eq!(loaded.token_totals.input_tokens, 2100);
+
+    // Incremental scan: identical (size, mtime) short-circuits.
+    let known: std::collections::HashMap<String, SourceState> = scanned
+        .iter()
+        .map(|session| {
+            (
+                session.meta.source_path.clone(),
+                SourceState {
+                    size: session.meta.file_size_bytes,
+                    mtime: session.source_mtime,
+                    title: None,
+                },
+            )
+        })
+        .collect();
+    let outcome = provider.scan_incremental(&known).expect("incremental scan");
+    assert!(outcome.parsed.is_empty());
+    assert_eq!(outcome.unchanged_source_paths.len(), 1);
+}
+
+#[test]
+fn dsh_parses_sidechain_headers() {
+    let dir = TempDir::new().expect("temp dir must be created");
+    let path = dir.path().join("session.jsonl");
+    let header = format!(
+        r#"{{"type":"session","version":0,"id":"session-child","createdAt":1,"cwd":"/home/user/ccsession","parentSession":"{DSH_FIXTURE_ID}","origin":"subagent","delegationDepth":1}}"#
+    );
+    let user = r#"{"type":"user/message","seq":1,"time":2,"data":{"content":[{"type":"text","text":"child work"}],"source":{"kind":"user"},"role":"user","id":"u1"},"surfaceOp":"append"}"#;
+    fs::write(&path, format!("{header}\n{user}\n")).expect("fixture must be written");
+
+    let provider = DshProvider::with_home(PathBuf::from("/nonexistent"));
+    let session = provider.parse_session(&path).expect("fixture must parse");
+    assert!(session.meta.is_sidechain);
+    assert_eq!(session.meta.parent_id.as_deref(), Some(DSH_FIXTURE_ID));
+}
