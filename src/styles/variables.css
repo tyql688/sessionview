@@ -71,6 +71,7 @@
   --pi: #000000;
   --grok: #27272a;
   --dsh: #4d6bfe;
+  --mcode: #f23f5d;
   --code-bg: #f1f4f8;
   --code-text: #24292e;
   --inline-code-bg: rgba(0, 0, 0, 0.06);
@@ -174,6 +175,7 @@
   --pi: #ffffff;
   --grok: #e4e4e7;
   --dsh: #8ea1ff;
+  --mcode: #ff7b93;
   --code-bg: #22272e;
   --code-text: #adbac7;
   --inline-code-bg: rgba(255, 255, 255, 0.1);

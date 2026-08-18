@@ -190,6 +190,42 @@ fn promotes_new_thread_id_to_agent_id_alias() {
 }
 
 #[test]
+fn promotes_mcode_sub_session_id_to_agent_id() {
+    let mut metadata = build_tool_metadata(ToolCallFacts {
+        provider: Provider::Mcode,
+        raw_name: "task",
+        input: Some(&json!({
+            "description": "Inspect workspace",
+            "agent_name": "explore"
+        })),
+        call_id: Some("call_task"),
+        assistant_id: None,
+    });
+    enrich_tool_metadata(
+        &mut metadata,
+        ToolResultFacts {
+            raw_result: Some(&json!({
+                "sub_session_id": "mvs_child1",
+                "status": "succeeded",
+                "agent_name": "explore",
+            })),
+            is_error: Some(false),
+            status: Some("success"),
+            artifact_path: None,
+            raw_output: None,
+        },
+    );
+    assert_eq!(
+        metadata
+            .structured
+            .as_ref()
+            .and_then(|value| value.get("agentId"))
+            .and_then(|value| value.as_str()),
+        Some("mvs_child1")
+    );
+}
+
+#[test]
 fn preserves_call_metadata_when_result_enriches_structured() {
     let mut metadata = build_tool_metadata(ToolCallFacts {
         provider: Provider::Kimi,

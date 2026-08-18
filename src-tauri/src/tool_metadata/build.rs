@@ -173,6 +173,8 @@ fn normalize_structured_result(value: &mut Value) {
     // Codex v2 dropped `agent_id` from spawn_agent results (upstream #17005);
     // fall back to the `new_thread_id` carried by `collab_agent_spawn_end`.
     promote_string_alias(obj, "new_thread_id", "agentId");
+    // MiniMax Code `task` results name the hidden child this way.
+    promote_string_alias(obj, "sub_session_id", "agentId");
     promote_string_alias(obj, "task_id", "taskId");
 
     if obj.contains_key("persistedOutputPath") {

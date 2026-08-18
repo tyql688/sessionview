@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- MiniMax Code (mcode) sessions: the provider reads the SQLite index and
+  per-session `messages.jsonl` files under `~/.minimax/v2/` (or
+  `$MINIMAX_DATA_DIR/v2`, with `$MAVIS_DATA_DIR` as the legacy fallback).
+  User prompts use the wire's `canonicalTextRange` so the injected
+  `<system-reminder>` block is not treated as the user turn. Assistant
+  thinking, prose, and tool calls stay in wire order; tool results merge
+  onto the matching call; images become `[Image: source: data:…]`
+  markers. Per-turn `usage` blobs become `UsageEvent` rows (so the
+  usage dashboard is not zeroed by an empty cost-only event). Resumes
+  through `mcode --session <id>`. Filters by `runtime = 'pi-agent'`,
+  hides `origin = 'root-repair'` scaffolding, and uses
+  `parent_session_id` as the typed subagent signal. A `task` tool result
+  carries `details.sub_session_id` (also in `<task_result session_id>`);
+  that becomes the child's Agent `agentId` so "Open subagent" works.
+  `agent_name` (mavis / explore / worker / verifier) is stored as
+  `variant_name`. Model prefers `extra_data_json.effectiveModel` and
+  falls back to the first assistant turn's `message.model`.
+
 ## [0.7.8] - 2026-08-17
 
 ### Fixed

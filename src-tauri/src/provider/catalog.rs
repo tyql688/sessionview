@@ -53,6 +53,10 @@ fn build_dsh_runtime() -> Option<Box<dyn SessionProvider>> {
     crate::providers::dsh::DshProvider::new().map(|p| Box::new(p) as Box<dyn SessionProvider>)
 }
 
+fn build_mcode_runtime() -> Option<Box<dyn SessionProvider>> {
+    crate::providers::mcode::McodeProvider::new().map(|p| Box::new(p) as Box<dyn SessionProvider>)
+}
+
 fn provider_entry(provider: &Provider) -> &'static ProviderCatalogEntry {
     // Exhaustive match: a new Provider variant fails to compile until added.
     // Indices must stay in lock-step with PROVIDER_CATALOG; enforced by
@@ -68,10 +72,11 @@ fn provider_entry(provider: &Provider) -> &'static ProviderCatalogEntry {
         Provider::Pi => &PROVIDER_CATALOG[7],
         Provider::Grok => &PROVIDER_CATALOG[8],
         Provider::Dsh => &PROVIDER_CATALOG[9],
+        Provider::Mcode => &PROVIDER_CATALOG[10],
     }
 }
 
-static PROVIDER_KINDS: [Provider; 10] = [
+static PROVIDER_KINDS: [Provider; 11] = [
     Provider::Claude,
     Provider::Codex,
     Provider::Antigravity,
@@ -82,9 +87,10 @@ static PROVIDER_KINDS: [Provider; 10] = [
     Provider::Pi,
     Provider::Grok,
     Provider::Dsh,
+    Provider::Mcode,
 ];
 
-static PROVIDER_CATALOG: [ProviderCatalogEntry; 10] = [
+static PROVIDER_CATALOG: [ProviderCatalogEntry; 11] = [
     ProviderCatalogEntry {
         kind: Provider::Claude,
         key: "claude",
@@ -154,6 +160,13 @@ static PROVIDER_CATALOG: [ProviderCatalogEntry; 10] = [
         label: "DSH",
         descriptor: &crate::providers::dsh::Descriptor,
         build_runtime: build_dsh_runtime,
+    },
+    ProviderCatalogEntry {
+        kind: Provider::Mcode,
+        key: "mcode",
+        label: "MiniMax Code",
+        descriptor: &crate::providers::mcode::Descriptor,
+        build_runtime: build_mcode_runtime,
     },
 ];
 

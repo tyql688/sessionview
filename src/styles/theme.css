@@ -103,6 +103,7 @@
   --color-provider-cc-mirror: var(--cc-mirror);
   --color-provider-pi: var(--pi);
   --color-provider-dsh: var(--dsh);
+  --color-provider-mcode: var(--mcode);
 
   /* Elevation — e-prefixed to avoid self-referencing the variables.css names */
   --shadow-e1: var(--shadow-1);

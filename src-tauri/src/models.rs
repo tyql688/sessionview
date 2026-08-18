@@ -17,6 +17,8 @@ pub enum Provider {
     Pi,
     Grok,
     Dsh,
+    #[serde(rename = "mcode")]
+    Mcode,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]

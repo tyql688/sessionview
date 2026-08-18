@@ -37,7 +37,8 @@
           "$HOME/.cc-mirror/**",
           "$HOME/.pi/**",
           "$HOME/.grok/**",
-          "$HOME/.dsh/sessions/**"
+          "$HOME/.dsh/sessions/**",
+          "$HOME/.minimax/v2/**"
         ]
       }
     }

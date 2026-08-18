@@ -105,6 +105,15 @@ const FALLBACK_PROVIDER_SNAPSHOTS: Record<Provider, ProviderSnapshot> = {
     exists: false,
     session_count: 0,
   },
+  mcode: {
+    key: "mcode",
+    label: "MiniMax Code",
+    color: "var(--mcode)",
+    sort_order: 13,
+    path: "",
+    exists: false,
+    session_count: 0,
+  },
 };
 
 let loadPromise: Promise<void> | null = null;

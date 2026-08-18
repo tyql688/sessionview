@@ -6,5 +6,6 @@ pub mod cursor;
 pub mod dsh;
 pub mod grok;
 pub mod kimi;
+pub mod mcode;
 pub mod opencode;
 pub mod pi;

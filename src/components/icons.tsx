@@ -1,4 +1,4 @@
-import { Antigravity, Claude, Codex, Cursor, DeepSeek, Grok, Kimi, OpenCode } from "@lobehub/icons";
+import { Antigravity, Claude, Codex, Cursor, DeepSeek, Grok, Kimi, Minimax, OpenCode } from "@lobehub/icons";
 import type { JSX } from "react";
 import type { Provider } from "@/lib/types";
 import { getProviderColor } from "@/stores/providerSnapshots";
@@ -61,6 +61,7 @@ const PROVIDER_ICONS: Record<Provider, (size: number) => JSX.Element> = {
     </span>
   ),
   dsh: (size) => <DeepSeek.Color size={size} />,
+  mcode: (size) => <Minimax.Color size={size} />,
 };
 
 export function ProviderIcon(props: { provider: Provider; size?: number }) {

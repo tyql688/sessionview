@@ -9,6 +9,7 @@ export const SUBAGENT_FILE_PROVIDERS = new Set([
   "cc-mirror",
   "antigravity",
   "grok",
+  "mcode",
 ]);
 
 /**

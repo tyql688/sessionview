@@ -73,6 +73,7 @@ describe("providerSnapshots store", () => {
       "pi",
       "grok",
       "dsh",
+      "mcode",
     ]);
   });
 

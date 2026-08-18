@@ -35,6 +35,7 @@ describe("subagent file providers", () => {
     expect(SUBAGENT_FILE_PROVIDERS.has("cursor")).toBe(true);
     expect(SUBAGENT_FILE_PROVIDERS.has("cc-mirror")).toBe(true);
     expect(SUBAGENT_FILE_PROVIDERS.has("antigravity")).toBe(true);
+    expect(SUBAGENT_FILE_PROVIDERS.has("mcode")).toBe(true);
     // Poll-only providers without per-subagent files are excluded.
     expect(SUBAGENT_FILE_PROVIDERS.has("opencode")).toBe(false);
   });

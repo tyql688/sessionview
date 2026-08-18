@@ -33,7 +33,7 @@ AI 编程工具会在你的机器上留下很多有价值的上下文：决策�
 
 ## 可以做什么
 
-- **把多工具历史放进一个工作台**：Claude Code、Codex CLI、Antigravity、Kimi Code、Cursor CLI、OpenCode、CC-Mirror、Pi、Grok Build 和 DSH（DeepSeek Harness）。
+- **把多工具历史放进一个工作台**：Claude Code、Codex CLI、Antigravity、Kimi Code、Cursor CLI、OpenCode、CC-Mirror、Pi、Grok Build、DSH（DeepSeek Harness）和 MiniMax Code。
 - **像读文档一样阅读会话**：Markdown、代码块、Mermaid、KaTeX、内嵌图片、推理块和结构化工具调用输出。
 - **不用翻目录也能搜索**：全局全文搜索，加上当前会话内查找。
 - **看懂一次工作的形状**：Token 时间线、工具调用分布、上下文/缓存压力、成本趋势和模型拆分。
@@ -59,7 +59,7 @@ AI 编程工具会在你的机器上留下很多有价值的上下文：决策�
 
 ## 支持的工具
 
-SessionView 当前读取 Claude Code、Codex CLI、Antigravity、Kimi Code、Cursor CLI、OpenCode、CC-Mirror、Pi、Grok Build 和 DSH（DeepSeek Harness）的本地历史。
+SessionView 当前读取 Claude Code、Codex CLI、Antigravity、Kimi Code、Cursor CLI、OpenCode、CC-Mirror、Pi、Grok Build、DSH（DeepSeek Harness）和 MiniMax Code 的本地历史。
 
 当源工具提供足够信息时，SessionView 也可以在对应终端代理中恢复所选会话；CC-Mirror 会跟随配置的变体。解析深度取决于各工具本地实际记录了什么；只要源数据提供，SessionView 会统一消息、工具调用、思考/推理块、Token 用量、图片和子会话。
 
