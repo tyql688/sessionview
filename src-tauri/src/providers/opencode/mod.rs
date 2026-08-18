@@ -289,18 +289,19 @@ impl SessionProvider for OpenCodeProvider {
             }
         }
 
-        // Batch: git branch per session from workspace
+        // Batch: git branch per session from workspace. Only exists in
+        // OpenCode v1's schema; v2's `workspace` table replaces the columns
+        // with provider bindings, so the column is absent after a v2 run.
         let mut branch_map: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         {
-            // Check if workspace table exists
-            let has_workspace: bool = conn
+            let has_branch_col: bool = conn
                 .prepare(
-                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='workspace'",
+                    "SELECT COUNT(*) FROM pragma_table_info('workspace') WHERE name = 'branch'",
                 )
                 .and_then(|mut s| s.query_row([], |row| row.get::<_, i64>(0)))?
                 > 0;
-            if has_workspace {
+            if has_branch_col {
                 let mut stmt = conn.prepare(
                     "SELECT s.id, w.branch
                      FROM session s
