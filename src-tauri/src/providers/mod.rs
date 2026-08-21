@@ -2,6 +2,7 @@ pub mod antigravity;
 pub mod cc_mirror;
 pub mod claude;
 pub mod codex;
+pub mod copilot;
 pub mod cursor;
 pub mod dsh;
 pub mod grok;

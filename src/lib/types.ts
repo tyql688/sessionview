@@ -12,6 +12,7 @@ type ProviderValues = [
   "grok",
   "dsh",
   "mcode",
+  "copilot",
 ];
 
 export type Provider = ProviderValues[number];
