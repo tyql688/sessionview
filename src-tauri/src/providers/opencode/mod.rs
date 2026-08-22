@@ -293,14 +293,18 @@ impl SessionProvider for OpenCodeProvider {
         let mut branch_map: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         {
-            // Check if workspace table exists
-            let has_workspace: bool = conn
+            // The `workspace` table's shape moved between OpenCode versions:
+            // older builds carried the session's git `branch` there, newer
+            // ones repurposed the table (provider/binding bookkeeping) and
+            // dropped the column. Gate on the column, not just the table,
+            // so either shape scans cleanly — branch is optional metadata.
+            let has_workspace_branch: bool = conn
                 .prepare(
-                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='workspace'",
+                    "SELECT COUNT(*) FROM pragma_table_info('workspace') WHERE name = 'branch'",
                 )
                 .and_then(|mut s| s.query_row([], |row| row.get::<_, i64>(0)))?
                 > 0;
-            if has_workspace {
+            if has_workspace_branch {
                 let mut stmt = conn.prepare(
                     "SELECT s.id, w.branch
                      FROM session s
@@ -559,6 +563,7 @@ impl SessionProvider for OpenCodeProvider {
 #[cfg(test)]
 mod tests {
     use super::OpenCodeProvider;
+    use crate::provider::SessionProvider;
 
     #[test]
     fn open_db_refuses_writes() {
@@ -577,5 +582,67 @@ mod tests {
                 .execute("INSERT INTO records VALUES (1)", [])
                 .is_err()
         );
+    }
+
+    /// Regression: newer OpenCode builds repurposed the `workspace` table
+    /// (provider/binding bookkeeping) and dropped its `branch` column. The
+    /// branch query used to gate on the table's existence alone, so every
+    /// scan failed with "no such column: w.branch" and the whole provider
+    /// was skipped. Branch is optional metadata; the scan must succeed.
+    #[test]
+    fn scan_all_tolerates_workspace_without_branch_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("opencode.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE project (
+                id TEXT PRIMARY KEY,
+                worktree TEXT,
+                name TEXT
+            );
+            CREATE TABLE session (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                directory TEXT,
+                time_created INTEGER NOT NULL,
+                time_updated INTEGER NOT NULL,
+                parent_id TEXT,
+                project_id TEXT,
+                version TEXT
+            );
+            CREATE TABLE message (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                data TEXT,
+                time_created INTEGER
+            );
+            CREATE TABLE part (
+                session_id TEXT NOT NULL,
+                data TEXT,
+                time_created INTEGER
+            );
+            -- Current wire shape: no `branch` column.
+            CREATE TABLE workspace (
+                id TEXT PRIMARY KEY,
+                provider TEXT NOT NULL,
+                binding TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                last_used_at INTEGER NOT NULL
+            );
+            INSERT INTO project (id, worktree, name) VALUES ('p1', '/tmp/proj', 'proj');
+            INSERT INTO session (id, title, directory, time_created, time_updated,
+                                 parent_id, project_id, version)
+            VALUES ('s1', 'hello', '/tmp/proj', 1_787_000_000_000, 1_787_000_100_000,
+                    NULL, 'p1', '0.14.0');
+            "#,
+        )
+        .unwrap();
+
+        let provider = OpenCodeProvider::with_db_path(path);
+        let sessions = provider.scan_all().expect("scan must not fail");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].meta.git_branch, None, "no branch source");
+        assert_eq!(sessions[0].meta.title, "hello");
     }
 }

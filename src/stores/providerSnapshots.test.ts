@@ -74,6 +74,7 @@ describe("providerSnapshots store", () => {
       "grok",
       "dsh",
       "mcode",
+      "copilot",
     ]);
   });
 

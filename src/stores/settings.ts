@@ -34,6 +34,7 @@ const PROVIDER_FLAGS: Record<Provider, true> = {
   grok: true,
   dsh: true,
   mcode: true,
+  copilot: true,
 };
 const VALID_PROVIDERS = Object.keys(PROVIDER_FLAGS) as Provider[];
 
