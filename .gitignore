@@ -15,3 +15,6 @@ docs/
 .agent/**/.local/
 .macos-signing/
 .playwright-mcp/
+
+# Tauri-generated capability schemas
+src-tauri/gen/

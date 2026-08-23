@@ -93,6 +93,20 @@ Headless 服务与桌面应用共用同一个 Rust 核心、同一套 UI 和同�
 localhost；如需对外暴露，请加 `--host 0.0.0.0 --token <secret>`（此后每个
 API 请求都必须携带该 token）。
 
+### WSL：同时索引 Windows 侧会话
+
+每个提供方都会扫描 `$HOME` 以及 `SESSIONVIEW_EXTRA_HOMES`（以 `:` 分隔）
+中列出的额外主目录，因此一份 Linux/WSL 构建即可同时索引挂载两侧的工具
+历史，无需再构建 Windows 版本：
+
+```bash
+SESSIONVIEW_EXTRA_HOMES=/mnt/c/Users/<you> npx sessionview
+```
+
+各主目录下会自动探测 Windows 风格路径（`AppData/Local`、`AppData/Roaming`）。
+`$DSH_HOME`、`$COPILOT_HOME`、`$MINIMAX_DATA_DIR` 等显式覆盖仍然直接替换
+对应目录。
+
 ## 快速开始
 
 1. 安装并启动 SessionView

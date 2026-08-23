@@ -1,5 +1,8 @@
+use std::path::PathBuf;
+
 use crate::models::Provider;
 
+use super::homes;
 use super::{ProviderDescriptor, SessionProvider};
 
 struct ProviderCatalogEntry {
@@ -10,56 +13,205 @@ struct ProviderCatalogEntry {
     build_runtime: fn() -> Option<Box<dyn SessionProvider>>,
 }
 
+/// Wrap one provider's per-home instances into the runtime the app sees.
+fn multi_home(
+    kind: Provider,
+    instances: Vec<Box<dyn SessionProvider>>,
+) -> Option<Box<dyn SessionProvider>> {
+    if instances.is_empty() {
+        // No home resolved (no HOME at all, no data anywhere) — mirror the
+        // old "provider unavailable" contract so callers log and skip.
+        return None;
+    }
+    Some(Box::new(homes::MultiHome::new(kind, instances)))
+}
+
+fn box_provider<P: SessionProvider + 'static>(provider: P) -> Box<dyn SessionProvider> {
+    Box::new(provider)
+}
+
 fn build_claude_runtime() -> Option<Box<dyn SessionProvider>> {
-    crate::providers::claude::ClaudeProvider::new().map(|p| Box::new(p) as Box<dyn SessionProvider>)
+    multi_home(
+        Provider::Claude,
+        homes::candidate_homes()
+            .into_iter()
+            .map(|home| box_provider(crate::providers::claude::ClaudeProvider::with_home(home)))
+            .collect(),
+    )
 }
 
 fn build_codex_runtime() -> Option<Box<dyn SessionProvider>> {
-    crate::providers::codex::CodexProvider::new().map(|p| Box::new(p) as Box<dyn SessionProvider>)
+    multi_home(
+        Provider::Codex,
+        homes::candidate_homes()
+            .into_iter()
+            .map(|home| box_provider(crate::providers::codex::CodexProvider::with_home(home)))
+            .collect(),
+    )
 }
 
 fn build_antigravity_runtime() -> Option<Box<dyn SessionProvider>> {
-    crate::providers::antigravity::AntigravityProvider::new()
-        .map(|p| Box::new(p) as Box<dyn SessionProvider>)
+    multi_home(
+        Provider::Antigravity,
+        homes::candidate_homes()
+            .into_iter()
+            .map(|home| {
+                box_provider(crate::providers::antigravity::AntigravityProvider::with_home(home))
+            })
+            .collect(),
+    )
 }
 
 fn build_opencode_runtime() -> Option<Box<dyn SessionProvider>> {
-    crate::providers::opencode::OpenCodeProvider::new()
-        .map(|p| Box::new(p) as Box<dyn SessionProvider>)
+    multi_home(
+        Provider::OpenCode,
+        crate::providers::opencode::db_candidates(homes::candidate_homes())
+            .into_iter()
+            .map(|db_path| {
+                box_provider(crate::providers::opencode::OpenCodeProvider::with_db_path(
+                    db_path,
+                ))
+            })
+            .collect(),
+    )
 }
 
 fn build_kimi_runtime() -> Option<Box<dyn SessionProvider>> {
-    crate::providers::kimi::KimiProvider::new().map(|p| Box::new(p) as Box<dyn SessionProvider>)
+    multi_home(
+        Provider::Kimi,
+        homes::candidate_homes()
+            .into_iter()
+            .map(|home| {
+                box_provider(crate::providers::kimi::KimiProvider::with_root(
+                    home.join(".kimi-code"),
+                ))
+            })
+            .collect(),
+    )
 }
 
 fn build_cursor_runtime() -> Option<Box<dyn SessionProvider>> {
-    crate::providers::cursor::CursorProvider::new().map(|p| Box::new(p) as Box<dyn SessionProvider>)
+    multi_home(
+        Provider::Cursor,
+        homes::candidate_homes()
+            .into_iter()
+            .map(|home| box_provider(crate::providers::cursor::CursorProvider::with_home(home)))
+            .collect(),
+    )
 }
 
 fn build_cc_mirror_runtime() -> Option<Box<dyn SessionProvider>> {
-    crate::providers::cc_mirror::CcMirrorProvider::new()
-        .map(|p| Box::new(p) as Box<dyn SessionProvider>)
+    multi_home(
+        Provider::CcMirror,
+        homes::candidate_homes()
+            .into_iter()
+            .map(|home| {
+                box_provider(
+                    crate::providers::cc_mirror::CcMirrorProvider::with_mirror_root(
+                        home.join(".cc-mirror"),
+                    ),
+                )
+            })
+            .collect(),
+    )
 }
 
 fn build_pi_runtime() -> Option<Box<dyn SessionProvider>> {
-    crate::providers::pi::PiProvider::new().map(|p| Box::new(p) as Box<dyn SessionProvider>)
+    multi_home(
+        Provider::Pi,
+        homes::candidate_homes()
+            .into_iter()
+            .map(|home| box_provider(crate::providers::pi::PiProvider::with_home(home)))
+            .collect(),
+    )
 }
 
 fn build_grok_runtime() -> Option<Box<dyn SessionProvider>> {
-    crate::providers::grok::GrokProvider::new().map(|p| Box::new(p) as Box<dyn SessionProvider>)
+    multi_home(
+        Provider::Grok,
+        homes::candidate_homes()
+            .into_iter()
+            .map(|home| {
+                box_provider(crate::providers::grok::GrokProvider::with_root(
+                    home.join(".grok"),
+                ))
+            })
+            .collect(),
+    )
 }
 
 fn build_dsh_runtime() -> Option<Box<dyn SessionProvider>> {
-    crate::providers::dsh::DshProvider::new().map(|p| Box::new(p) as Box<dyn SessionProvider>)
+    // Explicit override replaces discovery entirely. DSH's constructor is
+    // rooted at the tool dir ($DSH_HOME ≈ ~/.dsh), so join it per home.
+    let instances: Vec<Box<dyn SessionProvider>> = match std::env::var_os("DSH_HOME") {
+        Some(home) if !home.is_empty() => {
+            vec![box_provider(crate::providers::dsh::DshProvider::with_home(
+                PathBuf::from(home),
+            ))]
+        }
+        _ => homes::candidate_homes()
+            .into_iter()
+            .map(|home| {
+                box_provider(crate::providers::dsh::DshProvider::with_home(
+                    home.join(".dsh"),
+                ))
+            })
+            .collect(),
+    };
+    multi_home(Provider::Dsh, instances)
 }
 
 fn build_mcode_runtime() -> Option<Box<dyn SessionProvider>> {
-    crate::providers::mcode::McodeProvider::new().map(|p| Box::new(p) as Box<dyn SessionProvider>)
+    // Same override rule as DSH: $MINIMAX_DATA_DIR / $MAVIS_DATA_DIR replace
+    // home-based discovery (the CLI resolves them before ~/.minimax).
+    let instances: Vec<Box<dyn SessionProvider>> = match std::env::var_os("MINIMAX_DATA_DIR")
+        .filter(|v| !v.is_empty())
+    {
+        Some(dir) => vec![box_provider(
+            crate::providers::mcode::McodeProvider::with_data_root(PathBuf::from(dir).join("v2")),
+        )],
+        None => match std::env::var_os("MAVIS_DATA_DIR").filter(|v| !v.is_empty()) {
+            Some(dir) => vec![box_provider(
+                crate::providers::mcode::McodeProvider::with_data_root(
+                    PathBuf::from(dir).join("v2"),
+                ),
+            )],
+            None => homes::candidate_homes()
+                .into_iter()
+                .map(|home| {
+                    box_provider(crate::providers::mcode::McodeProvider::with_data_root(
+                        home.join(".minimax").join("v2"),
+                    ))
+                })
+                .collect(),
+        },
+    };
+    multi_home(Provider::Mcode, instances)
 }
 
 fn build_copilot_runtime() -> Option<Box<dyn SessionProvider>> {
-    crate::providers::copilot::CopilotProvider::new()
-        .map(|p| Box::new(p) as Box<dyn SessionProvider>)
+    // One instance per home pairs that home's `.copilot` with its VS Code
+    // transcript trees. An explicit $COPILOT_HOME adds a dedicated instance
+    // on top (it replaces only the CLI root it names).
+    let mut instances: Vec<Box<dyn SessionProvider>> = Vec::new();
+    if let Some(home) = std::env::var_os("COPILOT_HOME").filter(|v| !v.is_empty()) {
+        instances.push(box_provider(
+            crate::providers::copilot::CopilotProvider::with_roots(PathBuf::from(home), Vec::new()),
+        ));
+    }
+    for home in homes::candidate_homes() {
+        let code_user_dirs = homes::home_config_dirs(&home)
+            .into_iter()
+            .flat_map(|config| ["Code", "Code - Insiders"].map(|app| config.join(app).join("User")))
+            .collect();
+        instances.push(box_provider(
+            crate::providers::copilot::CopilotProvider::with_roots(
+                home.join(".copilot"),
+                code_user_dirs,
+            ),
+        ));
+    }
+    multi_home(Provider::Copilot, instances)
 }
 
 fn provider_entry(provider: &Provider) -> &'static ProviderCatalogEntry {

@@ -185,16 +185,21 @@ pub(crate) fn hydrate_variant_names(sessions: &mut [SessionMeta]) {
 impl CcMirrorProvider {
     pub(crate) fn new() -> Option<Self> {
         let home_dir = dirs::home_dir()?;
-        let mirror_root = home_dir.join(".cc-mirror");
-        if !mirror_root.exists() {
-            return Some(Self {
-                variants: Vec::new(),
-            });
-        }
+        Some(Self::with_mirror_root(home_dir.join(".cc-mirror")))
+    }
 
-        Some(Self {
+    /// Test/multi-home constructor: discover variants under an explicit
+    /// mirror root. A missing root yields a provider with no variants,
+    /// matching `new()`'s behavior for machines without `.cc-mirror`.
+    pub(crate) fn with_mirror_root(mirror_root: PathBuf) -> Self {
+        if !mirror_root.exists() {
+            return Self {
+                variants: Vec::new(),
+            };
+        }
+        Self {
             variants: discover_variants(&mirror_root),
-        })
+        }
     }
 
     fn collect_jsonl_files(&self) -> Vec<(PathBuf, Variant)> {

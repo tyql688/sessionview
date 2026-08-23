@@ -37,25 +37,35 @@ pub struct OpenCodeProvider {
     db_path: PathBuf,
 }
 
-impl OpenCodeProvider {
-    pub(crate) fn new() -> Option<Self> {
-        // OpenCode's data dir follows env-paths semantics:
-        // %LOCALAPPDATA%\opencode on Windows,
-        // XDG_DATA_HOME/opencode (~/.local/share/opencode) on macOS/Linux.
-        #[cfg(windows)]
-        let base = dirs::data_local_dir()?;
-        #[cfg(not(windows))]
-        let base = if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
-            PathBuf::from(xdg)
-        } else {
-            dirs::home_dir()?.join(".local").join("share")
-        };
-        let data_dir = base.join("opencode");
-        Some(Self {
-            db_path: data_dir.join("opencode.db"),
-        })
+/// Every existing OpenCode database for the given candidate homes.
+///
+/// OpenCode's data dir follows env-paths semantics per host OS:
+/// `%LOCALAPPDATA%\opencode` on Windows, `$XDG_DATA_HOME/opencode`
+/// (`~/.local/share/opencode`) on Linux, `~/Library/Application
+/// Support/opencode` on macOS. Each candidate home is probed under all
+/// three spellings so one process can index trees mounted from another OS
+/// (WSL reading `/mnt/c/Users/…`, say). `$XDG_DATA_HOME`, when set, adds an
+/// explicit location for the running environment.
+pub fn db_candidates(candidate_homes: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(xdg) = std::env::var("XDG_DATA_HOME")
+        && !xdg.is_empty()
+    {
+        candidates.push(PathBuf::from(xdg).join("opencode").join("opencode.db"));
     }
+    for home in candidate_homes {
+        for base in crate::provider::homes::home_data_dirs(&home) {
+            let candidate = base.join("opencode").join("opencode.db");
+            if !candidates.contains(&candidate) {
+                candidates.push(candidate);
+            }
+        }
+    }
+    candidates.retain(|path| path.is_file());
+    candidates
+}
 
+impl OpenCodeProvider {
     /// Construct a provider pointing at an explicit DB path. Used in tests.
     pub fn with_db_path(db_path: PathBuf) -> Self {
         Self { db_path }

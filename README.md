@@ -94,6 +94,20 @@ instantly visible in both. It binds localhost only by default; to expose it
 beyond localhost, pass `--host 0.0.0.0 --token <secret>` (every API request
 must then carry the token).
 
+### WSL: index your Windows sessions too
+
+Every provider scans `$HOME` plus any extra homes listed in
+`SESSIONVIEW_EXTRA_HOMES` (`:`-separated), so a single Linux/WSL build can
+index tool histories from both sides of the mount — no Windows build needed:
+
+```bash
+SESSIONVIEW_EXTRA_HOMES=/mnt/c/Users/<you> npx sessionview
+```
+
+Windows-spelled trees (`AppData/Local`, `AppData/Roaming`) are probed under
+each home automatically. Explicit per-tool overrides such as `$DSH_HOME`,
+`$COPILOT_HOME`, or `$MINIMAX_DATA_DIR` still replace their tree outright.
+
 ## Quick Start
 
 1. Install and open SessionView

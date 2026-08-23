@@ -38,12 +38,8 @@ pub struct PiProvider {
 }
 
 impl PiProvider {
-    pub(crate) fn new() -> Option<Self> {
-        let home_dir = dirs::home_dir()?;
-        Some(Self { home_dir })
-    }
-
-    /// Test constructor: point the provider at a fake home directory.
+    /// Test/multi-home constructor: point the provider at an explicit home
+    /// whose `.pi/` tree it should scan.
     pub fn with_home(home_dir: PathBuf) -> Self {
         Self { home_dir }
     }
@@ -206,11 +202,7 @@ mod tests {
             return;
         }
 
-        let provider = PiProvider::new();
-        let provider = match provider {
-            Some(p) => p,
-            None => return,
-        };
+        let provider = PiProvider::with_home(home);
 
         // Test scan_all
         let result = provider.scan_all();

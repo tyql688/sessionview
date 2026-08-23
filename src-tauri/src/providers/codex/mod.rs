@@ -43,6 +43,12 @@ impl CodexProvider {
         Some(Self { home_dir })
     }
 
+    /// Test/multi-home constructor: point the provider at an explicit home
+    /// whose `.codex/` tree it should scan.
+    pub fn with_home(home_dir: PathBuf) -> Self {
+        Self { home_dir }
+    }
+
     fn sessions_dir(&self) -> PathBuf {
         self.home_dir.join(".codex").join("sessions")
     }

@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 mod catalog;
+pub(crate) mod homes;
 mod state;
 mod tokens;
 mod traits;
