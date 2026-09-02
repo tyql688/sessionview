@@ -396,15 +396,27 @@ mod tests {
         let provider = CommandCodeProvider::with_root(root.path().to_path_buf());
         let first = provider.scan_all().unwrap();
         assert_eq!(first.len(), 2);
-        let source_path = path.to_string_lossy().to_string();
-        let known = HashMap::from([(source_path.clone(), parser::source_state(&path).unwrap())]);
+        let root_session = first
+            .iter()
+            .find(|session| !session.meta.is_sidechain)
+            .unwrap();
+        let source_path = root_session.meta.source_path.clone();
+        let discovered_path = PathBuf::from(&source_path);
+        let known = HashMap::from([(
+            source_path.clone(),
+            SourceState {
+                size: root_session.meta.file_size_bytes,
+                mtime: root_session.source_mtime,
+                title: None,
+            },
+        )]);
 
         let unchanged = provider.scan_incremental(&known).unwrap();
         assert!(unchanged.parsed.is_empty());
         assert_eq!(unchanged.unchanged_source_paths, [source_path]);
 
         std::fs::write(
-            path.with_extension("meta.json"),
+            discovered_path.with_extension("meta.json"),
             r#"{"title":"Changed title"}"#,
         )
         .unwrap();
