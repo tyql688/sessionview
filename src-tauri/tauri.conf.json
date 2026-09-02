@@ -39,10 +39,7 @@
           "$HOME/.grok/**",
           "$HOME/.dsh/sessions/**",
           "$HOME/.minimax/v2/**",
-          "$HOME/.copilot/**",
-          "$HOME/Library/Application Support/Code/User/workspaceStorage/**",
-          "$HOME/.config/Code/User/workspaceStorage/**",
-          "$HOME/AppData/Roaming/Code/User/workspaceStorage/**"
+          "$HOME/.copilot/**"
         ]
       }
     }

@@ -1,16 +1,9 @@
 //! GitHub Copilot `events.jsonl` parser.
 //!
-//! One session lives in a single JSONL event log. Two hosts write the same
-//! wire format (producer `copilot-agent`):
-//!
-//! - Copilot CLI: `$COPILOT_HOME/session-state/<uuid>/events.jsonl`
-//!   (`COPILOT_HOME` defaults to `~/.copilot`). CLI sessions carry
-//!   `data.context.{cwd,gitRoot,branch}` on the `session.start` event.
-//! - VS Code Copilot Chat / agent panel:
-//!   `<Code user dir>/workspaceStorage/<hash>/GitHub.copilot-chat/transcripts/<uuid>.jsonl`.
-//!   These transcripts omit `data.context`; the project comes from the
-//!   per-workspace `workspace.json` (`{"folder": "file:///..."}`) two
-//!   directories up.
+//! One session lives in a single JSONL event log (producer `copilot-agent`)
+//! at `$COPILOT_HOME/session-state/<uuid>/events.jsonl` (`COPILOT_HOME`
+//! defaults to `~/.copilot`). Sessions carry `data.context.{cwd,gitRoot,branch}`
+//! on the `session.start` event.
 //!
 //! Envelope: every line is `{"type", "data", "id", "timestamp", "parentId"}`
 //! with an RFC 3339 `timestamp`. The format is explicitly not a stable
@@ -40,8 +33,8 @@
 //!   (verified against GitHub staff statements and ecosystem parsers), so
 //!   the cached portions are subtracted back out to keep SessionView's
 //!   disjoint input / cache-read / cache-write invariant. Sessions that
-//!   never shut down cleanly (crash, SIGKILL, still running, or most VS
-//!   Code-hosted transcripts) carry no usage events at all — partial
+//!   never shut down cleanly (crash, SIGKILL, still running) carry no
+//!   usage events at all — partial
 //!   accounting is never fabricated from per-message `outputTokens`.
 
 use std::collections::HashMap;
@@ -88,8 +81,8 @@ struct ParseState {
     usage_events: Vec<UsageEvent>,
 }
 
-/// Sidecar metadata read next to the event log. Both fields are optional;
-/// the transcript wins for everything it carries.
+/// Sidecar `workspace.yaml` metadata read next to the event log. Both fields
+/// are optional; the transcript wins for everything it carries.
 struct WorkspaceSidecar {
     title: Option<String>,
     cwd: Option<String>,
@@ -511,93 +504,35 @@ fn extract_result_text(value: &Value) -> String {
     }
 }
 
-/// Read the optional sidecar metadata next to an event log.
-///
-/// - `workspace.yaml` (CLI / VS Code coding-agent session dirs): minimal
-///   flat `key: value` lines — parsed by hand because the interesting keys
-///   are a fixed handful and no YAML dependency exists.
-/// - `<hash>/workspace.json` (VS Code transcripts): `{"folder": "file:///..."}`,
-///   resolved from the transcript's grandparent directory.
-///
-/// Returns `(title, cwd)`; both `None` when neither sidecar exists.
+/// Read the optional `workspace.yaml` sidecar next to an event log: minimal
+/// flat `key: value` lines, parsed by hand because the interesting keys are
+/// a fixed handful and no YAML dependency exists.
 fn read_workspace_sidecar(events_path: &Path) -> WorkspaceSidecar {
-    let dir = match events_path.parent() {
-        Some(dir) => dir,
-        None => {
-            return WorkspaceSidecar {
-                title: None,
-                cwd: None,
-            };
-        }
-    };
-    let yaml_path = dir.join("workspace.yaml");
-    if let Ok(content) = std::fs::read_to_string(&yaml_path) {
-        let mut title = None;
-        let mut cwd = None;
-        for line in content.lines() {
-            let Some((key, value)) = line.split_once(':') else {
-                continue;
-            };
-            let value = value.trim().trim_matches('"');
-            if value.is_empty() {
-                continue;
-            }
-            match key.trim() {
-                "name" | "summary" => title = title.or_else(|| Some(value.to_string())),
-                "cwd" => cwd = cwd.or_else(|| Some(value.to_string())),
-                _ => {}
-            }
-        }
-        return WorkspaceSidecar { title, cwd };
-    }
-    // The transcript sits at `<hash>/GitHub.copilot-chat/transcripts/x.jsonl`
-    // while its folder URI lives in `<hash>/workspace.json` — two levels up.
-    let workspace_json_path = dir.ancestors().nth(2).unwrap_or(dir).join("workspace.json");
-    if let Ok(content) = std::fs::read_to_string(&workspace_json_path)
-        && let Ok(value) = serde_json::from_str::<Value>(&content)
-        && let Some(folder) = value.get("folder").and_then(Value::as_str)
-        && let Some(cwd) = folder_uri_to_path(folder)
-    {
-        return WorkspaceSidecar {
-            title: None,
-            cwd: Some(cwd),
-        };
-    }
-    WorkspaceSidecar {
+    let mut sidecar = WorkspaceSidecar {
         title: None,
         cwd: None,
-    }
-}
-
-/// Convert a VS Code workspace URI (`file:///c%3A/code/repo`) into a plain
-/// filesystem-ish path. Percent-decoding is hand-rolled; the Windows
-/// drive-letter form loses its fake POSIX root (`/c:/…` → `c:/…`) so paths
-/// look like the OS they came from.
-fn folder_uri_to_path(uri: &str) -> Option<String> {
-    let rest = uri.strip_prefix("file://")?;
-    let mut decoded = String::with_capacity(rest.len());
-    let bytes = rest.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%' && index + 2 < bytes.len() {
-            let hex = &rest[index + 1..index + 3];
-            if let Ok(byte) = u8::from_str_radix(hex, 16) {
-                decoded.push(byte as char);
-                index += 3;
-                continue;
-            }
+    };
+    let Some(dir) = events_path.parent() else {
+        return sidecar;
+    };
+    let Ok(content) = std::fs::read_to_string(dir.join("workspace.yaml")) else {
+        return sidecar;
+    };
+    for line in content.lines() {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let value = value.trim().trim_matches('"');
+        if value.is_empty() {
+            continue;
         }
-        let ch = rest[index..].chars().next()?;
-        decoded.push(ch);
-        index += ch.len_utf8();
+        match key.trim() {
+            "name" | "summary" => sidecar.title = sidecar.title.or_else(|| Some(value.to_string())),
+            "cwd" => sidecar.cwd = sidecar.cwd.or_else(|| Some(value.to_string())),
+            _ => {}
+        }
     }
-    let trimmed = decoded.replace('\\', "/");
-    let trimmed = trimmed.trim_start_matches('/');
-    if trimmed.len() > 2 && trimmed.as_bytes()[1] == b':' {
-        Some(trimmed.to_string())
-    } else {
-        Some(format!("/{trimmed}"))
-    }
+    sidecar
 }
 
 fn assemble_session_meta(
@@ -667,7 +602,7 @@ fn path_basename(path: &str) -> &str {
 }
 
 /// Fall back to the containing directory name when `session.start` was torn
-/// off (VS Code writes it as the first line, so this is vanishingly rare).
+/// off (the CLI writes it as the first line, so this is vanishingly rare).
 fn fallback_session_id(path: &Path) -> String {
     path.parent()
         .and_then(|parent| parent.file_name())
@@ -767,50 +702,6 @@ mod tests {
     }
 
     #[test]
-    fn vscode_transcript_falls_back_to_workspace_json() {
-        let dir = TempDir::new().unwrap();
-        let storage = dir
-            .path()
-            .join("workspaceStorage")
-            .join("hash1")
-            .join("GitHub.copilot-chat")
-            .join("transcripts");
-        std::fs::create_dir_all(&storage).unwrap();
-        // Real layout: workspace.json sits in the per-workspace <hash> dir,
-        // two levels above the transcripts dir.
-        std::fs::write(
-            storage.ancestors().nth(2).unwrap().join("workspace.json"),
-            r#"{"folder":"file:///c%3A/SAPDevelop/repos/support-agent7"}"#,
-        )
-        .unwrap();
-        let log = concat!(
-            r#"{"type":"session.start","data":{"sessionId":"0a0c94fd-5d39-4be7-8765-40a6523e8541","version":1,"producer":"copilot-agent","copilotVersion":"0.47.0","vscodeVersion":"1.119.0","startTime":"2026-05-08T17:53:26.742Z"},"id":"v0","timestamp":"2026-05-08T17:53:26.742Z","parentId":null}"#,
-            "\n",
-            r#"{"type":"user.message","data":{"content":"change these 3 textarea to dropdowns","attachments":[]},"id":"v1","timestamp":"2026-05-09T00:19:34.067Z","parentId":"v0"}"#,
-            "\n",
-            r#"{"type":"assistant.message","data":{"messageId":"vm1","content":"Done.","toolRequests":[{"toolCallId":"call_x","name":"file_search","arguments":"{\"query\":\"app/**/*.py\"}","type":"function"}]},"id":"v2","timestamp":"2026-05-09T00:20:00.000Z","parentId":"v1"}"#,
-            "\n",
-        );
-        let path = storage.join("t1.jsonl");
-        std::fs::write(&path, log).unwrap();
-
-        let parsed = parse_session_file(&path).expect("fixture must parse");
-        assert_eq!(parsed.meta.id, "0a0c94fd-5d39-4be7-8765-40a6523e8541");
-        assert_eq!(
-            parsed.meta.project_path,
-            "c:/SAPDevelop/repos/support-agent7"
-        );
-        assert_eq!(parsed.meta.project_name, "support-agent7");
-        // No shutdown event → no usage at all (never fabricated).
-        assert!(parsed.usage_events.is_empty());
-        assert_eq!(parsed.meta.input_tokens, 0);
-        // Announced-but-unexecuted toolRequests produce no Tool message.
-        assert!(parsed.messages.iter().all(|m| m.role != MessageRole::Tool));
-        // No sidecar title → first user message.
-        assert_eq!(parsed.meta.title, "change these 3 textarea to dropdowns");
-    }
-
-    #[test]
     fn attachment_only_user_message_renders_markers() {
         let parsed = parse_str(
             r#"{"type":"user.message","data":{"content":"","attachments":[{"name":"a.png"}]},"id":"u1","timestamp":"2026-03-02T15:10:45.058Z"}"#,
@@ -888,18 +779,5 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = write_session(&dir, "empty", "");
         assert!(parse_session_file(&path).is_none());
-    }
-
-    #[test]
-    fn folder_uri_decodes_percent_escapes() {
-        assert_eq!(
-            folder_uri_to_path("file:///c%3A/SAPDevelop/repos/repo7"),
-            Some("c:/SAPDevelop/repos/repo7".to_string())
-        );
-        assert_eq!(
-            folder_uri_to_path("file:///home/dev/my%20project"),
-            Some("/home/dev/my project".to_string())
-        );
-        assert_eq!(folder_uri_to_path("https://example.com/x"), None);
     }
 }
