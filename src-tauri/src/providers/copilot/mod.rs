@@ -21,11 +21,12 @@
 //! unreadable store degrades to the log's own `session.shutdown` totals
 //! with a warning, never to fabricated numbers.
 //!
-//! Freshness keys on each event log's `(size, mtime)` via
-//! `partition_files_by_freshness`, like DSH: every model call also appends
-//! to the log, so a store change never goes unnoticed for long. Legacy
-//! `~/.copilot/history-session-state/` pretty-printed JSON is not supported
-//! (upstream dropped it too).
+//! Freshness fingerprints every mutable input that affects a parsed session:
+//! `events.jsonl`, its optional `workspace.yaml`, and the shared
+//! `session-store.db` plus a non-empty WAL. A store-only usage update or a
+//! same-length sidecar rewrite therefore reparses the session immediately.
+//! Legacy `~/.copilot/history-session-state/` pretty-printed JSON is not
+//! supported (upstream dropped it too).
 
 pub(crate) mod parser;
 
@@ -114,13 +115,20 @@ impl CopilotProvider {
         path: &std::path::Path,
         rows: &HashMap<String, Vec<parser::UsageRow>>,
     ) -> Vec<ParsedSession> {
+        let Some(source_state) = parser::source_state(path, &self.session_store_path()) else {
+            log::warn!(
+                "failed to fingerprint Copilot session source '{}'",
+                path.display()
+            );
+            return Vec::new();
+        };
         let session_rows = path
             .parent()
             .and_then(|dir| dir.file_name())
             .and_then(|name| rows.get(name.to_string_lossy().as_ref()))
             .map(Vec::as_slice)
             .unwrap_or_default();
-        parser::parse_session_file(path, session_rows)
+        parser::parse_session_file(path, session_rows, &source_state)
     }
 
     /// Every candidate event-log path. Each file is one session; a resumed
@@ -238,7 +246,10 @@ impl SessionProvider for CopilotProvider {
         let mut stale = Vec::new();
         for file in files {
             let path_str = file.to_string_lossy().to_string();
-            match (known.get(&path_str), parser::source_state(&file)) {
+            match (
+                known.get(&path_str),
+                parser::source_state(&file, &self.session_store_path()),
+            ) {
                 (Some(known), Some(current))
                     if known.size == current.size && known.mtime == current.mtime =>
                 {
@@ -296,6 +307,71 @@ mod tests {
     use super::*;
     use crate::provider::ProviderDescriptor;
 
+    const SYNTHETIC_SESSION_ID: &str = "33333333-3333-4333-a333-333333333333";
+
+    fn write_session(home: &std::path::Path) -> PathBuf {
+        let session_dir = home.join("session-state").join(SYNTHETIC_SESSION_ID);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let path = session_dir.join("events.jsonl");
+        std::fs::write(
+            &path,
+            format!(
+                "{{\"type\":\"session.start\",\"data\":{{\"sessionId\":\"{SYNTHETIC_SESSION_ID}\"}},\"timestamp\":\"2026-09-02T00:00:00Z\"}}\n{{\"type\":\"user.message\",\"data\":{{\"content\":\"synthetic prompt\"}},\"timestamp\":\"2026-09-02T00:00:01Z\"}}\n{{\"type\":\"assistant.message\",\"data\":{{\"content\":\"synthetic reply\",\"model\":\"synthetic-model\"}},\"timestamp\":\"2026-09-02T00:00:02Z\"}}\n"
+            ),
+        )
+        .unwrap();
+        path
+    }
+
+    fn create_usage_store(home: &std::path::Path, wal: bool) -> Connection {
+        let conn = Connection::open(home.join("session-store.db")).unwrap();
+        if wal {
+            conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        }
+        conn.execute_batch(
+            "CREATE TABLE assistant_usage_events (
+                 id INTEGER PRIMARY KEY,
+                 session_id TEXT NOT NULL,
+                 parent_tool_call_id TEXT,
+                 model TEXT NOT NULL,
+                 input_tokens INTEGER,
+                 output_tokens INTEGER,
+                 cache_read_tokens INTEGER,
+                 cache_write_tokens INTEGER,
+                 created_at TEXT
+             );",
+        )
+        .unwrap();
+        if wal {
+            conn.pragma_update(None, "wal_checkpoint", "TRUNCATE")
+                .unwrap();
+        }
+        conn
+    }
+
+    fn insert_usage(conn: &Connection, id: i64) {
+        conn.execute(
+            "INSERT INTO assistant_usage_events (
+                 id, session_id, parent_tool_call_id, model,
+                 input_tokens, output_tokens, cache_read_tokens,
+                 cache_write_tokens, created_at
+             ) VALUES (?1, ?2, NULL, 'synthetic-model', 10, 2, 3, 0, '2026-09-02T00:00:02Z')",
+            rusqlite::params![id, SYNTHETIC_SESSION_ID],
+        )
+        .unwrap();
+    }
+
+    fn known_state(parsed: &ParsedSession) -> HashMap<String, SourceState> {
+        HashMap::from([(
+            parsed.meta.source_path.clone(),
+            SourceState {
+                size: parsed.meta.file_size_bytes,
+                mtime: parsed.source_mtime,
+                title: Some(parsed.meta.title.clone()),
+            },
+        )])
+    }
+
     #[test]
     fn descriptor_resume_command() {
         let descriptor = Descriptor;
@@ -330,61 +406,112 @@ mod tests {
         assert_eq!(files.len(), 1, "events.jsonl only: {files:?}");
     }
 
+    #[test]
+    fn incremental_scan_tracks_workspace_and_store_changes() {
+        let home = tempfile::tempdir().unwrap();
+        let event_path = write_session(home.path());
+        let store = create_usage_store(home.path(), false);
+        let provider = CopilotProvider::with_root(home.path().to_path_buf());
+
+        let first = provider.scan_incremental(&HashMap::new()).unwrap().parsed;
+        assert_eq!(first.len(), 1);
+        let expected = parser::source_state(&event_path, &provider.session_store_path()).unwrap();
+        assert_eq!(first[0].meta.file_size_bytes, expected.size);
+        assert_eq!(first[0].source_mtime, expected.mtime);
+
+        let unchanged = provider.scan_incremental(&known_state(&first[0])).unwrap();
+        assert!(unchanged.parsed.is_empty());
+        assert_eq!(unchanged.unchanged_source_paths.len(), 1);
+
+        std::fs::write(
+            event_path.parent().unwrap().join("workspace.yaml"),
+            "name: 'Synthetic renamed session'\n",
+        )
+        .unwrap();
+        let sidecar_changed = provider
+            .scan_incremental(&known_state(&first[0]))
+            .unwrap()
+            .parsed;
+        assert_eq!(sidecar_changed.len(), 1);
+        assert_eq!(sidecar_changed[0].meta.title, "Synthetic renamed session");
+
+        insert_usage(&store, 1);
+        let store_changed = provider
+            .scan_incremental(&known_state(&sidecar_changed[0]))
+            .unwrap()
+            .parsed;
+        assert_eq!(store_changed.len(), 1);
+        assert_eq!(store_changed[0].usage_events.len(), 1);
+    }
+
+    #[test]
+    fn incremental_scan_tracks_wal_only_usage_changes() {
+        let home = tempfile::tempdir().unwrap();
+        let event_path = write_session(home.path());
+        let store = create_usage_store(home.path(), true);
+        let provider = CopilotProvider::with_root(home.path().to_path_buf());
+        let first = provider.scan_incremental(&HashMap::new()).unwrap().parsed;
+        assert_eq!(first.len(), 1);
+
+        let db_before = std::fs::metadata(provider.session_store_path()).unwrap();
+        let db_mtime_before = db_before.modified().unwrap();
+        insert_usage(&store, 1);
+        let wal_path = PathBuf::from(format!(
+            "{}-wal",
+            provider.session_store_path().to_string_lossy()
+        ));
+        assert!(std::fs::metadata(&wal_path).unwrap().len() > 0);
+        let db_after = std::fs::metadata(provider.session_store_path()).unwrap();
+        assert_eq!(db_before.len(), db_after.len());
+        assert_eq!(db_mtime_before, db_after.modified().unwrap());
+
+        let changed = provider
+            .scan_incremental(&known_state(&first[0]))
+            .unwrap()
+            .parsed;
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0].usage_events.len(), 1);
+        let expected = parser::source_state(&event_path, &provider.session_store_path()).unwrap();
+        assert_eq!(changed[0].source_mtime, expected.mtime);
+    }
+
     /// End-to-end smoke test against real Copilot data on this machine.
     /// Point `COPILOT_HOME` at the `.copilot` tree if needed, then run:
-    ///   cargo test --lib copilot::tests::smoke_against_real_data -- --ignored --nocapture
+    ///   cargo test --lib copilot::tests::smoke_against_real_data -- --ignored
     #[test]
     #[ignore = "hits the real Copilot trees; run with --ignored"]
     fn smoke_against_real_data() {
         let Some(provider) = CopilotProvider::new() else {
-            eprintln!("no resolvable Copilot roots; skipping");
             return;
         };
-        eprintln!("roots: {:?}", provider.source_roots());
         let files = provider.collect_session_files();
-        eprintln!("candidate event logs: {}", files.len());
+        if files.is_empty() {
+            return;
+        }
 
-        let sessions = provider.scan_all().expect("scan_all");
+        let sessions = provider
+            .scan_all()
+            .unwrap_or_else(|_| panic!("Copilot real-data scan failed"));
         assert!(
             !sessions.is_empty(),
             "expected sessions from the real Copilot tree"
         );
-        let with_usage = sessions
-            .iter()
-            .filter(|s| !s.usage_events.is_empty())
-            .count();
-        eprintln!(
-            "scanned {} Copilot sessions ({} with usage events)",
-            sessions.len(),
-            with_usage
-        );
         for parsed in &sessions {
-            eprintln!(
-                "  {:<60} parent={:?} title={:?} msgs={} model={:?} in={} out={} cr={} cw={} events={}",
-                parsed.meta.id,
-                parsed.meta.parent_id,
-                parsed.meta.title.chars().take(40).collect::<String>(),
-                parsed.meta.message_count,
-                parsed.meta.model,
-                parsed.meta.input_tokens,
-                parsed.meta.output_tokens,
-                parsed.meta.cache_read_tokens,
-                parsed.meta.cache_write_tokens,
-                parsed.usage_events.len(),
-            );
+            assert_eq!(parsed.meta.provider, Provider::Copilot);
+            assert!(!parsed.meta.id.is_empty());
+            assert!(!parsed.meta.source_path.is_empty());
+            if parsed.meta.is_sidechain {
+                assert!(parsed.meta.parent_id.is_some());
+            }
         }
         if let Some(first) = sessions.iter().find(|s| s.meta.message_count > 2) {
             let fresh = CopilotProvider::new().unwrap();
             let loaded = fresh
                 .load_messages(&first.meta.id, &first.meta.source_path)
-                .expect("load_messages");
+                .unwrap_or_else(|_| panic!("Copilot real-data load failed"));
             assert_eq!(loaded.messages.len(), first.meta.message_count as usize);
-            eprintln!(
-                "reloaded {} -> {} messages, {} warnings",
-                first.meta.id,
-                loaded.messages.len(),
-                loaded.parse_warning_count
-            );
+            assert_eq!(loaded.token_totals.input_tokens, first.meta.input_tokens);
+            assert_eq!(loaded.token_totals.output_tokens, first.meta.output_tokens);
         }
     }
 }

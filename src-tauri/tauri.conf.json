@@ -39,7 +39,8 @@
           "$HOME/.grok/**",
           "$HOME/.dsh/sessions/**",
           "$HOME/.minimax/v2/**",
-          "$HOME/.copilot/**"
+          "$HOME/.copilot/**",
+          "$HOME/.commandcode/projects/**"
         ]
       }
     }

@@ -3,10 +3,9 @@
 //! MiniMax Code stores one session per directory under
 //! `{dataDir}/v2/sessions/YYYY/MM/DD/HH-MM-SS-mmm-session_<b64(sessionId)>/`.
 //! Session metadata lives in `sqlite/runtime-state.sqlite` (table
-//! `local_runtime_sessions`), but the full per-message wire is only in
-//! `messages.jsonl` — the SQLite `local_runtime_message_rows` mirror
-//! truncates assistant content and drops the `usage` blob. Load-time
-//! therefore reads the jsonl, never `data_json`.
+//! `local_runtime_sessions`). `messages.jsonl` is the canonical ordered wire
+//! used for transcript parsing; the runtime's SQLite message mirror is not a
+//! substitute for that source contract.
 //!
 //! ## Wire format (one JSON object per line)
 //!
@@ -57,14 +56,12 @@
 //!   `build_tool_metadata`. Usage attaches to the first assistant text
 //!   row of that wire entry.
 //! - `toolResult`           → folded into the matching `toolCall` by
-//!   `toolCallId`. Orphan results surface as a system note. A `task`
+//!   `toolCallId`. Orphan results surface as standalone Tool messages. A `task`
 //!   result's `details.sub_session_id` (or `<task_result session_id>`)
 //!   is the hidden child Agent id.
 
 use std::collections::HashMap;
 use std::path::Path;
-
-use serde::Deserialize;
 
 use crate::models::{Message, MessageRole, TokenUsage};
 use crate::provider::UsageEvent;
@@ -72,98 +69,7 @@ use crate::tool_metadata::{
     ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata,
 };
 
-/// The on-disk shape of a single `messages.jsonl` line.
-#[derive(Debug, Deserialize)]
-pub(crate) struct WireLine {
-    pub message_id: String,
-    pub message: WireMessage,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct WireMessage {
-    pub role: String,
-    #[serde(default)]
-    pub content: Vec<WireContent>,
-    pub model: Option<String>,
-    pub usage: Option<WireUsage>,
-    pub timestamp: Option<i64>,
-    pub canonical_text_range: Option<CanonicalTextRange>,
-    // toolResult-only:
-    pub tool_call_id: Option<String>,
-    pub tool_name: Option<String>,
-    pub is_error: Option<bool>,
-    /// Typed payload on `task` (and similar) results. Carries
-    /// `sub_session_id` for the hidden child Agent.
-    #[serde(default)]
-    pub details: Option<serde_json::Value>,
-}
-
-/// Character offsets into the concatenated text parts of a user turn.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CanonicalTextRange {
-    pub start_offset: usize,
-    pub end_offset: usize,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub(crate) enum WireContent {
-    Text {
-        text: String,
-    },
-    Thinking {
-        thinking: String,
-    },
-    ToolCall {
-        id: String,
-        name: String,
-        /// Tool arguments arrive as either an object (newer sessions) or a
-        /// raw JSON-encoded string (legacy / partial-stream chunks). Accept
-        /// both without forcing the parser to pick.
-        arguments: serde_json::Value,
-    },
-    Image {
-        #[serde(default)]
-        data: Option<String>,
-        #[serde(default, rename = "mimeType")]
-        mime_type: Option<String>,
-    },
-    #[serde(other)]
-    Unknown,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub(crate) struct WireUsage {
-    #[serde(default)]
-    pub input: u32,
-    #[serde(default)]
-    pub output: u32,
-    #[serde(default, rename = "cacheRead")]
-    pub cache_read: u32,
-    #[serde(default, rename = "cacheWrite")]
-    pub cache_write: u32,
-    #[serde(default)]
-    pub cost: Option<WireCost>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub(crate) struct WireCost {
-    #[serde(default)]
-    pub total: f64,
-}
-
-impl WireUsage {
-    fn into_token_usage(self) -> TokenUsage {
-        TokenUsage {
-            input_tokens: self.input,
-            output_tokens: self.output,
-            cache_creation_input_tokens: self.cache_write,
-            cache_read_input_tokens: self.cache_read,
-        }
-    }
-}
+use super::types::{KnownWireContent, WireContent, WireLine, WireMessage, WireUsage};
 
 /// Outcome of parsing one full `messages.jsonl` file.
 #[derive(Debug)]
@@ -230,7 +136,7 @@ pub(crate) fn parse_messages_file(path: &Path) -> Option<ParsedMessages> {
             continue;
         }
 
-        if let Err(error) = apply(&mut state, wire) {
+        if let Err(error) = apply(&mut state, wire, path, line_no + 1) {
             log::warn!(
                 "skipping unconvertible mcode record at line {} in '{}': {error}",
                 line_no + 1,
@@ -259,6 +165,12 @@ struct ParseState {
     first_assistant_model: Option<String>,
     usage_events: Vec<UsageEvent>,
     child_session_ids: Vec<String>,
+}
+
+#[derive(Clone, Copy)]
+struct RecordContext<'a> {
+    path: &'a Path,
+    line_no: usize,
 }
 
 impl ParseState {
@@ -308,6 +220,7 @@ impl ParseState {
         is_error: Option<bool>,
         timestamp: Option<String>,
         details: Option<&serde_json::Value>,
+        context: RecordContext<'_>,
     ) {
         if let Some(child_id) = child_session_id_from_result(details, text)
             && !self.child_session_ids.iter().any(|id| id == &child_id)
@@ -315,13 +228,27 @@ impl ParseState {
             self.child_session_ids.push(child_id);
         }
         let Some(call_id) = call_id else {
-            // Orphan result: render as a system note so the timeline
-            // surfaces the result without crashing the parser.
-            self.push(Message::system(format!("[tool result]\n{text}")));
+            self.push_orphan_tool_result(
+                None,
+                tool_name_fallback,
+                text,
+                is_error,
+                timestamp,
+                details,
+                context,
+            );
             return;
         };
         let Some(&idx) = self.tool_call_index.get(call_id) else {
-            self.push(Message::system(format!("[tool result]\n{text}")));
+            self.push_orphan_tool_result(
+                Some(call_id),
+                tool_name_fallback,
+                text,
+                is_error,
+                timestamp,
+                details,
+                context,
+            );
             return;
         };
         let message = &mut self.messages[idx];
@@ -356,9 +283,63 @@ impl ParseState {
             );
         }
     }
+
+    fn push_orphan_tool_result(
+        &mut self,
+        call_id: Option<&str>,
+        raw_name: Option<&str>,
+        text: &str,
+        is_error: Option<bool>,
+        timestamp: Option<String>,
+        details: Option<&serde_json::Value>,
+        context: RecordContext<'_>,
+    ) {
+        log::warn!(
+            "mcode tool result has no matching call at line {} in '{}'",
+            context.line_no,
+            context.path.display()
+        );
+        self.parse_warning_count = self.parse_warning_count.saturating_add(1);
+
+        let mut message = Message {
+            timestamp,
+            ..Message::new(MessageRole::Tool, text.to_string())
+        };
+        if let Some(raw_name) = raw_name.map(str::trim).filter(|name| !name.is_empty()) {
+            let mut metadata = build_tool_metadata(ToolCallFacts {
+                provider: crate::models::Provider::Mcode,
+                raw_name,
+                input: None,
+                call_id,
+                assistant_id: None,
+            });
+            let text_value = serde_json::Value::String(text.to_string());
+            let raw_result = match details {
+                Some(value) if value.is_object() => value,
+                _ => &text_value,
+            };
+            enrich_tool_metadata(
+                &mut metadata,
+                ToolResultFacts {
+                    raw_result: Some(raw_result),
+                    is_error,
+                    raw_output: Some(false),
+                    ..ToolResultFacts::default()
+                },
+            );
+            message.tool_name = Some(metadata.canonical_name.clone());
+            message.tool_metadata = Some(metadata);
+        }
+        self.push(message);
+    }
 }
 
-fn apply(state: &mut ParseState, wire: WireLine) -> Result<(), String> {
+fn apply(
+    state: &mut ParseState,
+    wire: WireLine,
+    path: &Path,
+    line_no: usize,
+) -> Result<(), String> {
     let role = match wire.message.role.as_str() {
         "user" => MessageRole::User,
         "assistant" => MessageRole::Assistant,
@@ -372,18 +353,27 @@ fn apply(state: &mut ParseState, wire: WireLine) -> Result<(), String> {
         .timestamp
         .and_then(crate::provider::util::epoch_ms_to_rfc3339);
 
+    if role != MessageRole::System {
+        warn_unknown_content(state, &wire.message.content, path, line_no);
+    }
+
     match role {
-        MessageRole::User => apply_user(state, &wire.message, timestamp),
+        MessageRole::User => apply_user(state, &wire.message, timestamp, path, line_no),
         MessageRole::System => {
             let mut m = Message::system(collect_text(&wire.message.content));
             m.timestamp = timestamp;
             state.push(m);
         }
-        MessageRole::Assistant => {
-            apply_assistant(state, &wire.message_id, &wire.message, timestamp)
-        }
+        MessageRole::Assistant => apply_assistant(
+            state,
+            &wire.message_id,
+            &wire.message,
+            timestamp,
+            path,
+            line_no,
+        ),
         MessageRole::Tool => {
-            let text = collect_user_visible(&wire.message.content);
+            let text = collect_user_visible(state, &wire.message.content, path, line_no);
             state.attach_tool_result(
                 wire.message.tool_call_id.as_deref(),
                 wire.message.tool_name.as_deref(),
@@ -391,6 +381,7 @@ fn apply(state: &mut ParseState, wire: WireLine) -> Result<(), String> {
                 wire.message.is_error,
                 timestamp,
                 wire.message.details.as_ref(),
+                RecordContext { path, line_no },
             );
         }
     }
@@ -398,7 +389,13 @@ fn apply(state: &mut ParseState, wire: WireLine) -> Result<(), String> {
     Ok(())
 }
 
-fn apply_user(state: &mut ParseState, message: &WireMessage, timestamp: Option<String>) {
+fn apply_user(
+    state: &mut ParseState,
+    message: &WireMessage,
+    timestamp: Option<String>,
+    path: &Path,
+    line_no: usize,
+) {
     let full_text = collect_text(&message.content);
     let user_text = match &message.canonical_text_range {
         Some(range) => slice_char_range(&full_text, range.start_offset, range.end_offset)
@@ -406,7 +403,7 @@ fn apply_user(state: &mut ParseState, message: &WireMessage, timestamp: Option<S
             .to_string(),
         None => full_text,
     };
-    let images = collect_image_markers(&message.content);
+    let images = collect_image_markers(state, &message.content, path, line_no);
     let mut parts: Vec<String> = Vec::new();
     if !user_text.is_empty() {
         parts.push(user_text);
@@ -427,6 +424,8 @@ fn apply_assistant(
     message_id: &str,
     message: &WireMessage,
     timestamp: Option<String>,
+    path: &Path,
+    line_no: usize,
 ) {
     // Assistant content mixes thinking + text + tool calls in one wire
     // entry. Emit in the order the wire gives so the timeline matches
@@ -438,13 +437,13 @@ fn apply_assistant(
 
     for part in &message.content {
         match part {
-            WireContent::Text { text } => {
+            WireContent::Known(KnownWireContent::Text { text }) => {
                 if !pending_text.is_empty() {
                     pending_text.push('\n');
                 }
                 pending_text.push_str(text);
             }
-            WireContent::Thinking { thinking } => {
+            WireContent::Known(KnownWireContent::Thinking { thinking }) => {
                 flush_assistant_text(
                     state,
                     &mut pending_text,
@@ -459,11 +458,11 @@ fn apply_assistant(
                     state.push(m);
                 }
             }
-            WireContent::ToolCall {
+            WireContent::Known(KnownWireContent::ToolCall {
                 id,
                 name,
                 arguments,
-            } => {
+            }) => {
                 flush_assistant_text(
                     state,
                     &mut pending_text,
@@ -474,15 +473,21 @@ fn apply_assistant(
                 );
                 state.make_tool_call(id, name, arguments, timestamp.clone());
             }
-            WireContent::Image { data, mime_type } => {
-                if let Some(marker) = image_marker(data.as_deref(), mime_type.as_deref()) {
+            WireContent::Known(KnownWireContent::Image { data, mime_type }) => {
+                if let Some(marker) = resolve_image_marker(
+                    state,
+                    data.as_deref(),
+                    mime_type.as_deref(),
+                    path,
+                    line_no,
+                ) {
                     if !pending_text.is_empty() {
                         pending_text.push('\n');
                     }
                     pending_text.push_str(&marker);
                 }
             }
-            WireContent::Unknown => {}
+            WireContent::Unknown(_) => {}
         }
     }
 
@@ -496,7 +501,15 @@ fn apply_assistant(
     );
 
     if let Some(usage) = &message.usage {
-        record_usage_event(state, message_id, message, timestamp.as_deref(), usage);
+        record_usage_event(
+            state,
+            message_id,
+            message,
+            timestamp.as_deref(),
+            usage,
+            path,
+            line_no,
+        );
     }
 
     if state.first_assistant_model.is_none() {
@@ -535,20 +548,30 @@ fn record_usage_event(
     message: &WireMessage,
     timestamp: Option<&str>,
     usage: &WireUsage,
+    path: &Path,
+    line_no: usize,
 ) {
-    let Some(model) = message
+    let model = message
         .model
         .as_deref()
         .map(str::trim)
         .filter(|model| !model.is_empty())
-    else {
-        log::debug!("skipping mcode usage event '{message_id}': missing model");
-        return;
-    };
-    let Some(timestamp) = timestamp.filter(|ts| !ts.is_empty()) else {
-        log::debug!("skipping mcode usage event '{message_id}': missing timestamp");
-        return;
-    };
+        .unwrap_or_default();
+    if model.is_empty() {
+        log::warn!(
+            "mcode usage has no model at line {line_no} in '{}'",
+            path.display()
+        );
+        state.parse_warning_count = state.parse_warning_count.saturating_add(1);
+    }
+    let timestamp = timestamp.filter(|ts| !ts.is_empty()).unwrap_or_default();
+    if timestamp.is_empty() {
+        log::warn!(
+            "mcode usage has no timestamp at line {line_no} in '{}'",
+            path.display()
+        );
+        state.parse_warning_count = state.parse_warning_count.saturating_add(1);
+    }
     let cost_usd = usage
         .cost
         .as_ref()
@@ -570,7 +593,7 @@ fn record_usage_event(
 fn collect_text(content: &[WireContent]) -> String {
     let mut out = String::new();
     for part in content {
-        if let WireContent::Text { text } = part {
+        if let WireContent::Known(KnownWireContent::Text { text }) = part {
             if !out.is_empty() {
                 out.push('\n');
             }
@@ -580,23 +603,40 @@ fn collect_text(content: &[WireContent]) -> String {
     out
 }
 
-fn collect_user_visible(content: &[WireContent]) -> String {
+fn collect_user_visible(
+    state: &mut ParseState,
+    content: &[WireContent],
+    path: &Path,
+    line_no: usize,
+) -> String {
     let mut out = String::new();
     for part in content {
         match part {
-            WireContent::Text { text } => {
+            WireContent::Known(KnownWireContent::Text { text }) => {
                 if !out.is_empty() {
                     out.push('\n');
                 }
                 out.push_str(text);
             }
-            WireContent::Image { data, mime_type } => {
-                if let Some(marker) = image_marker(data.as_deref(), mime_type.as_deref()) {
+            WireContent::Known(KnownWireContent::Image { data, mime_type }) => {
+                if let Some(marker) = resolve_image_marker(
+                    state,
+                    data.as_deref(),
+                    mime_type.as_deref(),
+                    path,
+                    line_no,
+                ) {
                     if !out.is_empty() {
                         out.push('\n');
                     }
                     out.push_str(&marker);
                 }
+            }
+            WireContent::Unknown(value) => {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(&serde_json::to_string(value).unwrap_or_default());
             }
             _ => {}
         }
@@ -604,25 +644,75 @@ fn collect_user_visible(content: &[WireContent]) -> String {
     out
 }
 
-fn collect_image_markers(content: &[WireContent]) -> Vec<String> {
+fn collect_image_markers(
+    state: &mut ParseState,
+    content: &[WireContent],
+    path: &Path,
+    line_no: usize,
+) -> Vec<String> {
     content
         .iter()
         .filter_map(|part| match part {
-            WireContent::Image { data, mime_type } => {
-                image_marker(data.as_deref(), mime_type.as_deref())
+            WireContent::Known(KnownWireContent::Image { data, mime_type }) => {
+                resolve_image_marker(state, data.as_deref(), mime_type.as_deref(), path, line_no)
             }
             _ => None,
         })
         .collect()
 }
 
-fn image_marker(data: Option<&str>, mime_type: Option<&str>) -> Option<String> {
-    let data = data.map(str::trim).filter(|d| !d.is_empty())?;
+fn image_marker(data: Option<&str>, mime_type: Option<&str>) -> Result<String, &'static str> {
+    let data = data
+        .map(str::trim)
+        .filter(|data| !data.is_empty())
+        .ok_or("image block has no base64 payload")?;
     let mime = mime_type
         .map(str::trim)
         .filter(|m| !m.is_empty())
-        .unwrap_or("image/png");
-    Some(format!("[Image: source: data:{mime};base64,{data}]"))
+        .ok_or("image block has no MIME type")?;
+    Ok(format!("[Image: source: data:{mime};base64,{data}]"))
+}
+
+fn resolve_image_marker(
+    state: &mut ParseState,
+    data: Option<&str>,
+    mime_type: Option<&str>,
+    path: &Path,
+    line_no: usize,
+) -> Option<String> {
+    match image_marker(data, mime_type) {
+        Ok(marker) => Some(marker),
+        Err(reason) => {
+            log::warn!(
+                "malformed mcode image at line {line_no} in '{}': {reason}",
+                path.display()
+            );
+            state.parse_warning_count = state.parse_warning_count.saturating_add(1);
+            None
+        }
+    }
+}
+
+fn warn_unknown_content(
+    state: &mut ParseState,
+    content: &[WireContent],
+    path: &Path,
+    line_no: usize,
+) {
+    for part in content {
+        let WireContent::Unknown(value) = part else {
+            continue;
+        };
+        let kind = value
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("<missing>");
+        log::warn!(
+            "unknown mcode content type '{kind}' at line {line_no} in '{}'",
+            path.display()
+        );
+        state.parse_warning_count = state.parse_warning_count.saturating_add(1);
+    }
 }
 
 /// Child session id from a `task` result. Prefer the typed
@@ -680,207 +770,4 @@ fn slice_char_range(text: &str, start: usize, end: usize) -> &str {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-
-    fn temp_messages(content: &str) -> (tempfile::TempDir, std::path::PathBuf) {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("messages.jsonl");
-        let mut f = std::fs::File::create(&path).unwrap();
-        f.write_all(content.as_bytes()).unwrap();
-        (dir, path)
-    }
-
-    #[test]
-    fn parses_user_assistant_tool_assistant_full_wire() {
-        let jsonl = r#"{"message_id":"m1","turn_id":"t1","message":{"role":"user","content":[{"type":"text","text":"list /tmp"}],"timestamp":1787049058794}}
-{"message_id":"m2","turn_id":"t1","message":{"role":"assistant","content":[{"type":"thinking","thinking":"run ls"},{"type":"toolCall","id":"c1","name":"bash","arguments":{"command":"ls -la /tmp"}}],"api":"anthropic-messages","provider":"minimax","model":"MiniMax-M3","usage":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0,"totalTokens":15,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"toolUse","timestamp":1787049058887}}
-{"message_id":"m3","turn_id":"t1","message":{"role":"toolResult","toolCallId":"c1","toolName":"bash","content":[{"type":"text","text":"file1\nfile2"}],"isError":false,"timestamp":1787049060860}}
-{"message_id":"m4","turn_id":"t1","message":{"role":"assistant","content":[{"type":"text","text":"here you go"}],"model":"MiniMax-M3","usage":{"input":1,"output":2,"cacheRead":0,"cacheWrite":0,"totalTokens":3},"stopReason":"endTurn","timestamp":1787049060900}}
-"#;
-        let (_dir, path) = temp_messages(jsonl);
-        let parsed = parse_messages_file(&path).expect("parse ok");
-        // Expected layout: user, [thinking], tool(call+result merged),
-        // assistant — 4 message rows. The toolResult wire entry is folded
-        // into the matching toolCall row rather than emitted separately.
-        assert_eq!(parsed.messages.len(), 4);
-        assert_eq!(parsed.parse_warning_count, 0);
-        assert_eq!(parsed.first_assistant_model.as_deref(), Some("MiniMax-M3"));
-
-        let thinking = &parsed.messages[1];
-        assert_eq!(thinking.role, MessageRole::System);
-        assert!(thinking.content.starts_with("[thinking]\n"));
-
-        let tool_call = &parsed.messages[2];
-        assert_eq!(tool_call.role, MessageRole::Tool);
-        assert_eq!(tool_call.tool_name.as_deref(), Some("Bash"));
-        assert!(tool_call.tool_input.as_deref().unwrap().contains("ls -la"));
-        assert!(tool_call.tool_metadata.is_some());
-        // The wire's toolResult row was folded into this row.
-        assert_eq!(tool_call.content, "file1\nfile2");
-        let metadata = tool_call.tool_metadata.as_ref().unwrap();
-        assert_eq!(metadata.status.as_deref(), Some("success"));
-
-        let final_assistant = &parsed.messages[3];
-        assert_eq!(final_assistant.role, MessageRole::Assistant);
-        assert_eq!(final_assistant.content, "here you go");
-        assert_eq!(
-            final_assistant.token_usage.as_ref().unwrap().input_tokens,
-            1
-        );
-    }
-
-    #[test]
-    fn normalizes_stringified_tool_arguments() {
-        let jsonl = r#"{"message_id":"m1","turn_id":"t1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"read","arguments":"{\"path\":\"/etc/hosts\"}"}],"timestamp":1}}
-{"message_id":"m2","turn_id":"t1","message":{"role":"toolResult","toolCallId":"c1","toolName":"read","content":[{"type":"text","text":"127.0.0.1 localhost"}],"isError":false,"timestamp":2}}
-"#;
-        let (_dir, path) = temp_messages(jsonl);
-        let parsed = parse_messages_file(&path).expect("parse ok");
-        // 1 tool call + result merged = 1 row.
-        assert_eq!(parsed.messages.len(), 1);
-        let tool = &parsed.messages[0];
-        let input = tool.tool_input.as_deref().unwrap();
-        assert!(
-            input.contains("/etc/hosts"),
-            "raw stringified args preserved: {input}"
-        );
-    }
-
-    #[test]
-    fn skips_malformed_lines_and_keeps_the_rest() {
-        let jsonl = "not json\n{\"message_id\":\"m1\",\"turn_id\":\"t1\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"timestamp\":1}}\n";
-        let (_dir, path) = temp_messages(jsonl);
-        let parsed = parse_messages_file(&path).expect("parse ok");
-        assert_eq!(parsed.messages.len(), 1);
-        assert_eq!(parsed.parse_warning_count, 1);
-    }
-
-    #[test]
-    fn deduplicates_repeated_message_id() {
-        let jsonl = r#"{"message_id":"m1","turn_id":"t1","message":{"role":"assistant","content":[{"type":"text","text":"a"}],"timestamp":1}}
-{"message_id":"m1","turn_id":"t1","message":{"role":"assistant","content":[{"type":"text","text":"a-dup"}],"timestamp":2}}
-"#;
-        let (_dir, path) = temp_messages(jsonl);
-        let parsed = parse_messages_file(&path).expect("parse ok");
-        assert_eq!(parsed.messages.len(), 1, "duplicate message_id dropped");
-        assert_eq!(parsed.messages[0].content, "a");
-        assert_eq!(
-            parsed.parse_warning_count, 0,
-            "stream-reconciliation duplicates are expected, not warnings"
-        );
-    }
-
-    #[test]
-    fn orphan_tool_result_becomes_system_note() {
-        // Result arrives without a matching call (e.g. session truncated).
-        let jsonl = r#"{"message_id":"m1","turn_id":"t1","message":{"role":"toolResult","toolCallId":"unknown","toolName":"bash","content":[{"type":"text","text":"orphan"}],"isError":false,"timestamp":1}}
-"#;
-        let (_dir, path) = temp_messages(jsonl);
-        let parsed = parse_messages_file(&path).expect("parse ok");
-        assert_eq!(parsed.messages.len(), 1);
-        assert_eq!(parsed.messages[0].role, MessageRole::System);
-        assert!(parsed.messages[0].content.contains("orphan"));
-    }
-
-    #[test]
-    fn emits_assistant_parts_in_wire_order() {
-        // Wire order is thinking, then prose, then the tool call.
-        let jsonl = r#"{"message_id":"m1","turn_id":"t1","message":{"role":"assistant","content":[{"type":"thinking","thinking":"look first"},{"type":"text","text":"here is /tmp:"},{"type":"toolCall","id":"c1","name":"bash","arguments":{"command":"ls"}}],"model":"MiniMax-M3","usage":{"input":10,"output":5,"cacheRead":2,"cacheWrite":0},"timestamp":1000}}
-"#;
-        let (_dir, path) = temp_messages(jsonl);
-        let parsed = parse_messages_file(&path).expect("parse ok");
-        assert_eq!(parsed.messages.len(), 3);
-        assert_eq!(parsed.messages[0].role, MessageRole::System);
-        assert!(parsed.messages[0].content.starts_with("[thinking]\n"));
-        assert_eq!(parsed.messages[1].role, MessageRole::Assistant);
-        assert_eq!(parsed.messages[1].content, "here is /tmp:");
-        assert_eq!(
-            parsed.messages[1]
-                .token_usage
-                .as_ref()
-                .unwrap()
-                .input_tokens,
-            10
-        );
-        assert_eq!(parsed.messages[2].role, MessageRole::Tool);
-        assert_eq!(parsed.usage_events.len(), 1);
-        assert_eq!(parsed.usage_events[0].model, "MiniMax-M3");
-        assert_eq!(parsed.usage_events[0].input_tokens, 10);
-        assert_eq!(parsed.usage_events[0].cache_read_input_tokens, 2);
-        assert_eq!(parsed.usage_events[0].usage_hash.as_deref(), Some("m1"));
-    }
-
-    #[test]
-    fn uses_canonical_text_range_for_user_prompt() {
-        let jsonl = r#"{"message_id":"m1","turn_id":"t1","message":{"role":"user","content":[{"type":"text","text":"<system-reminder>\nagent: Mavis\n</system-reminder>\n\nlist /tmp"}],"canonicalTextRange":{"startOffset":51,"endOffset":60},"timestamp":1}}
-"#;
-        let (_dir, path) = temp_messages(jsonl);
-        let parsed = parse_messages_file(&path).expect("parse ok");
-        assert_eq!(parsed.messages.len(), 1);
-        assert_eq!(parsed.messages[0].role, MessageRole::User);
-        assert_eq!(parsed.messages[0].content, "list /tmp");
-        assert!(
-            !parsed.messages[0].content.contains("<system-reminder>"),
-            "injected reminder must not ride along on the user bubble"
-        );
-    }
-
-    #[test]
-    fn drops_reminder_only_user_turn() {
-        let jsonl = r#"{"message_id":"m1","turn_id":"t1","message":{"role":"user","content":[{"type":"text","text":"<system-reminder>only</system-reminder>"}],"canonicalTextRange":{"startOffset":39,"endOffset":39},"timestamp":1}}
-"#;
-        let (_dir, path) = temp_messages(jsonl);
-        let parsed = parse_messages_file(&path).expect("parse ok");
-        assert!(parsed.messages.is_empty());
-    }
-
-    #[test]
-    fn embeds_user_image_as_data_uri_marker() {
-        let jsonl = r#"{"message_id":"m1","turn_id":"t1","message":{"role":"user","content":[{"type":"text","text":"<system-reminder>x</system-reminder>see this"},{"type":"image","data":"AAAA","mimeType":"image/jpeg"}],"canonicalTextRange":{"startOffset":36,"endOffset":44},"timestamp":1}}
-"#;
-        let (_dir, path) = temp_messages(jsonl);
-        let parsed = parse_messages_file(&path).expect("parse ok");
-        assert_eq!(parsed.messages.len(), 1);
-        assert_eq!(
-            parsed.messages[0].content,
-            "see this\n[Image: source: data:image/jpeg;base64,AAAA]"
-        );
-    }
-
-    #[test]
-    fn slice_char_range_handles_multibyte() {
-        let text = "你好世界";
-        assert_eq!(slice_char_range(text, 0, 2), "你好");
-        assert_eq!(slice_char_range(text, 2, 4), "世界");
-        assert_eq!(slice_char_range(text, 4, 4), "");
-        assert_eq!(slice_char_range(text, 3, 99), "界");
-    }
-
-    #[test]
-    fn task_result_exposes_child_session_id() {
-        let jsonl = r#"{"message_id":"m1","turn_id":"t1","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"task","arguments":{"description":"Inspect workspace","prompt":"list files","agent_name":"explore"}}],"model":"MiniMax-M3","timestamp":1}}
-{"message_id":"m2","turn_id":"t1","message":{"role":"toolResult","toolCallId":"c1","toolName":"task","content":[{"type":"text","text":"<task_result task_id=\"bg_1\" session_id=\"mvs_child1\">\nrun_status: succeeded\nfinal_text:\nok\n</task_result>"}],"isError":false,"details":{"agent_name":"explore","status":"succeeded","task_id":"bg_1","sub_session_id":"mvs_child1","resolved_agent_name":"explore"},"timestamp":2}}
-"#;
-        let (_dir, path) = temp_messages(jsonl);
-        let parsed = parse_messages_file(&path).expect("parse ok");
-        assert_eq!(parsed.child_session_ids, vec!["mvs_child1".to_string()]);
-        assert_eq!(parsed.messages.len(), 1);
-        let tool = &parsed.messages[0];
-        assert_eq!(tool.tool_name.as_deref(), Some("Agent"));
-        let structured = tool
-            .tool_metadata
-            .as_ref()
-            .and_then(|m| m.structured.as_ref())
-            .expect("structured");
-        assert_eq!(
-            structured.get("agentId").and_then(|v| v.as_str()),
-            Some("mvs_child1")
-        );
-        assert_eq!(
-            structured.get("sub_session_id").and_then(|v| v.as_str()),
-            Some("mvs_child1")
-        );
-    }
-}
+mod tests;

@@ -127,7 +127,8 @@ fn tail_parser_for(provider: &Provider) -> Option<TailParseFn> {
         | Provider::Grok
         | Provider::Dsh
         | Provider::Mcode
-        | Provider::Copilot => None,
+        | Provider::Copilot
+        | Provider::CommandCode => None,
     }
 }
 

@@ -62,6 +62,11 @@ fn build_copilot_runtime() -> Option<Box<dyn SessionProvider>> {
         .map(|p| Box::new(p) as Box<dyn SessionProvider>)
 }
 
+fn build_commandcode_runtime() -> Option<Box<dyn SessionProvider>> {
+    crate::providers::commandcode::CommandCodeProvider::new()
+        .map(|p| Box::new(p) as Box<dyn SessionProvider>)
+}
+
 fn provider_entry(provider: &Provider) -> &'static ProviderCatalogEntry {
     // Exhaustive match: a new Provider variant fails to compile until added.
     // Indices must stay in lock-step with PROVIDER_CATALOG; enforced by
@@ -79,10 +84,11 @@ fn provider_entry(provider: &Provider) -> &'static ProviderCatalogEntry {
         Provider::Dsh => &PROVIDER_CATALOG[9],
         Provider::Mcode => &PROVIDER_CATALOG[10],
         Provider::Copilot => &PROVIDER_CATALOG[11],
+        Provider::CommandCode => &PROVIDER_CATALOG[12],
     }
 }
 
-static PROVIDER_KINDS: [Provider; 12] = [
+static PROVIDER_KINDS: [Provider; 13] = [
     Provider::Claude,
     Provider::Codex,
     Provider::Antigravity,
@@ -95,9 +101,10 @@ static PROVIDER_KINDS: [Provider; 12] = [
     Provider::Dsh,
     Provider::Mcode,
     Provider::Copilot,
+    Provider::CommandCode,
 ];
 
-static PROVIDER_CATALOG: [ProviderCatalogEntry; 12] = [
+static PROVIDER_CATALOG: [ProviderCatalogEntry; 13] = [
     ProviderCatalogEntry {
         kind: Provider::Claude,
         key: "claude",
@@ -181,6 +188,13 @@ static PROVIDER_CATALOG: [ProviderCatalogEntry; 12] = [
         label: "GitHub Copilot",
         descriptor: &crate::providers::copilot::Descriptor,
         build_runtime: build_copilot_runtime,
+    },
+    ProviderCatalogEntry {
+        kind: Provider::CommandCode,
+        key: "commandcode",
+        label: "Command Code",
+        descriptor: &crate::providers::commandcode::Descriptor,
+        build_runtime: build_commandcode_runtime,
     },
 ];
 

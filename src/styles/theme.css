@@ -105,6 +105,7 @@
   --color-provider-dsh: var(--dsh);
   --color-provider-mcode: var(--mcode);
   --color-provider-copilot: var(--copilot);
+  --color-provider-commandcode: var(--commandcode);
 
   /* Elevation — e-prefixed to avoid self-referencing the variables.css names */
   --shadow-e1: var(--shadow-1);

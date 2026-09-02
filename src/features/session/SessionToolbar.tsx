@@ -104,7 +104,7 @@ export function SessionToolbar(props: SessionToolbarProps) {
               </TooltipTrigger>
               <TooltipContent side="bottom">{t("session.analytics")}</TooltipContent>
             </Tooltip>
-            {!(props.meta.is_sidechain && props.meta.provider === "kimi") && (
+            {!(props.meta.is_sidechain && ["kimi", "commandcode"].includes(props.meta.provider)) && (
               <>
                 <Tooltip>
                   <TooltipTrigger

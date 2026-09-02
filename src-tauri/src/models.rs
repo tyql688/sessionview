@@ -20,6 +20,8 @@ pub enum Provider {
     #[serde(rename = "mcode")]
     Mcode,
     Copilot,
+    #[serde(rename = "commandcode")]
+    CommandCode,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]

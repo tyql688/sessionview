@@ -1,7 +1,8 @@
 import type { Message, ToolMetadata } from "@/lib/types";
 
-/** Providers whose subagents are indexed as separate child sessions (can be opened).
- *  Copilot's run inline in the parent log but still surface as child sessions. */
+/** Providers whose subagents are indexed as openable child sessions.
+ *  Copilot and Command Code persist them inline in the parent source, but the
+ *  backend still materializes independently loadable normalized children. */
 export const SUBAGENT_FILE_PROVIDERS = new Set([
   "claude",
   "codex",
@@ -12,6 +13,7 @@ export const SUBAGENT_FILE_PROVIDERS = new Set([
   "grok",
   "mcode",
   "copilot",
+  "commandcode",
 ]);
 
 /**

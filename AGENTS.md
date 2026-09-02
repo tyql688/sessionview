@@ -2,7 +2,7 @@
 
 Guidance for Claude Code (claude.ai/code) and other agents working in this repository. `CLAUDE.md` includes this file via `@AGENTS.md`.
 
-SessionView is a desktop app that brings local AI coding sessions from many tools — Claude Code, Codex, Antigravity, Kimi Code, Cursor, OpenCode, CC-Mirror, Pi, Grok Build, DSH (DeepSeek Harness), MiniMax Code, and GitHub Copilot CLI — into one place to read, search, analyze usage, export, and resume.
+SessionView is a desktop app that brings local AI coding sessions from many tools — Claude Code, Codex, Antigravity, Kimi Code, Cursor, OpenCode, CC-Mirror, Pi, Grok Build, DSH (DeepSeek Harness), MiniMax Code, GitHub Copilot CLI, and Command Code — into one place to read, search, analyze usage, export, and resume.
 Stack: Tauri 2 + React 19 (with React Compiler) + Rust + SQLite (FTS5).
 Enforcement-mapped coding standards live in `style/ts.md` and `style/rust.md`; when this file and those disagree, those win.
 
@@ -69,6 +69,7 @@ No silent fallbacks: when a correct value can't be obtained, log a warning and s
 ## Conventions
 
 - Standards in `style/ts.md` / `style/rust.md` name their enforcing tool per rule (tsc / biome / eslint / knip / fmt / clippy / review).
+- Keep Markdown prose paragraphs on one physical line; do not hard-wrap `CHANGELOG.md`, READMEs, skills, or other Markdown documentation. Lists, tables, headings, and code blocks still use their structural line breaks.
 - Conventional commits (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`); one logical change per commit.
 - Rust unit tests go in `#[cfg(test)]` at file bottom, cross-file tests in `src-tauri/tests/`; frontend tests are `*.test.ts(x)` next to their source. Use golden fixtures for parser regressions and synthetic placeholder data — never real session ids, usernames, or paths.
 - `tauri.conf.json` sets `dangerousDisableAssetCspModification: ["style-src"]` because the app injects `<style>` elements at runtime (search highlighting, mermaid theming, shiki/katex); Tauri's nonce rewriting would make browsers ignore the `'unsafe-inline'` that those need. `script-src` keeps Tauri's nonce hardening — don't add it to that list.
