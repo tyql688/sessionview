@@ -4,6 +4,8 @@
 
 ### Added
 
+- GitHub Copilot CLI sessions: the provider reads `$COPILOT_HOME/session-state/<uuid>/events.jsonl` (`~/.copilot` by default). User turns use the wire's `content`, never the system-context-wrapped `transformedContent`; assistant reasoning stays out of the transcript; `tool.execution_start` / `tool.execution_complete` pair into one Tool message by `toolCallId`. Usage comes from `session.shutdown.modelMetrics`, whose cache-inclusive `inputTokens` are normalised to disjoint input / cache-read / cache-write; sessions that never shut down cleanly carry no usage rather than fabricated partials. Under auto mode the model is resolved from `assistant.message.model` (the selection is the literal `auto`). Resumes through `copilot --resume <id>`.
+
 - MiniMax Code (mcode) sessions: the provider reads the SQLite index and
   per-session `messages.jsonl` files under `~/.minimax/v2/` (or
   `$MINIMAX_DATA_DIR/v2`, with `$MAVIS_DATA_DIR` as the legacy fallback).
@@ -21,6 +23,10 @@
   `agent_name` (mavis / explore / worker / verifier) is stored as
   `variant_name`. Model prefers `extra_data_json.effectiveModel` and
   falls back to the first assistant turn's `message.model`.
+
+### Fixed
+
+- OpenCode: after the v2 `workspace_domain` migration the `workspace` table no longer has a `branch` column, so every scan failed with `no such column: w.branch` and the provider was skipped. The branch lookup now gates on the column, and the session simply has no branch when it is absent.
 
 ## [0.7.8] - 2026-08-17
 
