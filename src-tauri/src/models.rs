@@ -19,6 +19,7 @@ pub enum Provider {
     Dsh,
     #[serde(rename = "mcode")]
     Mcode,
+    Copilot,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]

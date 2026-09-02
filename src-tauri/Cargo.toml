@@ -5,7 +5,7 @@ version = "0.7.8"
 description = "High-performance desktop session explorer for local AI coding sessions"
 authors = ["yury <yury.zero.21@gmail.com>"]
 edition = "2024"
-rust-version = "1.91"
+rust-version = "1.95"
 default-run = "sessionview"
 
 [lib]
