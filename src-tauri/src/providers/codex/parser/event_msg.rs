@@ -6,17 +6,13 @@ use std::path::Path;
 use serde_json::Value;
 
 use crate::models::{Message, MessageRole, Provider};
-use crate::provider::UsageEvent;
 use crate::provider::util::{ContentPartsRender, render_content_parts};
 use crate::tool_metadata::{
     ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata,
 };
 
 use super::super::tools::*;
-use super::usage::{
-    add_usage_to_last_assistant, codex_token_usage_from_counts, codex_usage_from_info,
-    extract_codex_model,
-};
+use super::usage::{codex_usage_from_info, extract_codex_model};
 use super::value_helpers::{
     codex_call_id, codex_content_items_text, codex_exec_command_event_result,
     codex_image_generation_result, codex_mcp_tool_call_event_result, codex_patch_event_result,
@@ -54,9 +50,7 @@ impl CodexScanAccum {
             else {
                 return;
             };
-            let (input, cached, output, reasoning, total) = usage_counts;
-            let any_nonzero =
-                input != 0 || cached != 0 || output != 0 || reasoning != 0 || total != 0;
+            let any_nonzero = usage_counts.any_nonzero();
             let resolved_model = extract_codex_model(info)
                 .or_else(|| extract_codex_model(payload))
                 .or_else(|| self.current_model.clone())
@@ -77,10 +71,11 @@ impl CodexScanAccum {
                     // Defer instead of dropping: scan_lines backfills
                     // these once the file's model is known.
                     match entry.timestamp.as_ref() {
-                        Some(ts) => {
-                            self.pending_unresolved_usage
-                                .push((ts.clone(), input, cached, output))
-                        }
+                        Some(ts) => self.pending_unresolved_usage.push((
+                            ts.clone(),
+                            self.current_turn_id.clone(),
+                            usage_counts,
+                        )),
                         None => {
                             self.unresolved_usage_event_count =
                                 self.unresolved_usage_event_count.saturating_add(1);
@@ -91,43 +86,22 @@ impl CodexScanAccum {
             };
             self.models_seen.insert(resolved_model.clone());
             // Codex re-emits some token_count events verbatim. Count an
-            // event identical in (timestamp, model, input, cached,
-            // output, reasoning, total) only once.
+            // event identical in timestamp, model, and all token fields once.
             if let Some(ts) = entry.timestamp.as_ref() {
-                let key = (
-                    ts.clone(),
-                    resolved_model.clone(),
-                    input,
-                    cached,
-                    output,
-                    reasoning,
-                    total,
-                );
+                let key = (ts.clone(), resolved_model.clone(), usage_counts);
                 if !self.seen_token_events.insert(key) {
                     return;
                 }
             }
             if any_nonzero && let Some(ts) = entry.timestamp.as_ref() {
-                self.usage_events.push(UsageEvent {
-                    timestamp: ts.clone(),
-                    model: resolved_model.clone(),
-                    turn_count: 1,
-                    input_tokens: input.saturating_sub(cached.min(input)),
-                    output_tokens: output,
-                    cache_read_input_tokens: cached.min(input),
-                    cache_creation_input_tokens: 0,
-                    // Rollouts never repeat a token_count across
-                    // files; batch-scoped dedup would only make
-                    // incremental rescans nondeterministic.
-                    usage_hash: None,
-                    cost_usd: None,
-                });
+                self.ingest_token_count_usage(
+                    ts,
+                    resolved_model.clone(),
+                    usage_counts,
+                    self.current_turn_id.clone(),
+                );
             }
-            let Some(usage) = codex_token_usage_from_counts(usage_counts) else {
-                return;
-            };
-            self.current_model = Some(resolved_model.clone());
-            add_usage_to_last_assistant(&mut self.messages, usage, Some(resolved_model));
+            self.current_model = Some(resolved_model);
         }
     }
 

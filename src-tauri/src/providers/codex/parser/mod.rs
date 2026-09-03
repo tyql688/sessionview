@@ -1,10 +1,12 @@
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
 use crate::services::tail_reader::open_tail_reader;
 
+use memchr::memrchr;
+use memmap2::Mmap;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -23,7 +25,7 @@ mod response_item;
 mod usage;
 mod value_helpers;
 
-use usage::CodexRawUsageCounts;
+use usage::{CodexRawUsageCounts, CodexUsageFingerprint};
 use value_helpers::push_system_event;
 
 #[derive(Deserialize)]
@@ -66,9 +68,8 @@ pub(super) struct CodexScanAccum {
     /// token_count). Lets `scan_lines` backfill usage events that arrived
     /// before the file's first turn_context when the answer is unambiguous.
     pub(super) models_seen: std::collections::BTreeSet<String>,
-    /// token_count events with real totals but no resolvable model yet:
-    /// (timestamp, input, cached, output).
-    pub(super) pending_unresolved_usage: Vec<(String, u64, u64, u64)>,
+    /// token_count events with real totals but no resolvable model yet.
+    pub(super) pending_unresolved_usage: Vec<(String, Option<String>, CodexRawUsageCounts)>,
     /// Fork/replay files re-dump the parent lineage's token_count events in
     /// a single-second burst at file creation. Usage inside that second is
     /// the parent's, already counted in its own file — skip it while
@@ -79,10 +80,17 @@ pub(super) struct CodexScanAccum {
     pub(super) replay_second: Option<String>,
     pub(super) previous_token_totals: Option<CodexRawUsageCounts>,
     /// Codex re-emits some token_count events verbatim. Events identical in
-    /// (timestamp, model, input, cached, output, reasoning, total) are counted
-    /// once; this set tracks the ones already recorded.
-    pub(super) seen_token_events:
-        std::collections::HashSet<(String, String, u64, u64, u64, u64, u64)>,
+    /// timestamp, model, and every token component are counted once.
+    pub(super) seen_token_events: std::collections::HashSet<(String, String, CodexRawUsageCounts)>,
+    /// Active turn identity from `turn_context`, used to pair the new
+    /// token_usage_record channel with its legacy token_count duplicate.
+    pub(super) current_turn_id: Option<String>,
+    pub(super) unmatched_token_count_usage:
+        std::collections::HashMap<CodexUsageFingerprint, Vec<usize>>,
+    pub(super) unmatched_token_usage_records:
+        std::collections::HashMap<CodexUsageFingerprint, Vec<usize>>,
+    pub(super) seen_token_usage_record_ids:
+        std::collections::HashMap<String, CodexUsageFingerprint>,
     cc_version: Option<String>,
     git_branch: Option<String>,
     is_sidechain: bool,
@@ -121,6 +129,10 @@ impl CodexScanAccum {
             replay_second: None,
             previous_token_totals: None,
             seen_token_events: std::collections::HashSet::new(),
+            current_turn_id: None,
+            unmatched_token_count_usage: std::collections::HashMap::new(),
+            unmatched_token_usage_records: std::collections::HashMap::new(),
+            seen_token_usage_record_ids: std::collections::HashMap::new(),
             cc_version: None,
             git_branch: None,
             is_sidechain: false,
@@ -202,30 +214,12 @@ impl CodexScanAccum {
         if !pending.is_empty() {
             if self.models_seen.len() == 1 {
                 let model = self.models_seen.iter().next().cloned().unwrap_or_default();
-                for (timestamp, input, cached, output) in pending {
-                    let key = (
-                        timestamp.clone(),
-                        model.clone(),
-                        input,
-                        cached,
-                        output,
-                        0u64,
-                        0u64,
-                    );
+                for (timestamp, turn_id, counts) in pending {
+                    let key = (timestamp.clone(), model.clone(), counts);
                     if !self.seen_token_events.insert(key) {
                         continue;
                     }
-                    self.usage_events.push(UsageEvent {
-                        timestamp,
-                        model: model.clone(),
-                        turn_count: 1,
-                        input_tokens: input.saturating_sub(cached.min(input)),
-                        output_tokens: output,
-                        cache_read_input_tokens: cached.min(input),
-                        cache_creation_input_tokens: 0,
-                        usage_hash: None,
-                        cost_usd: None,
-                    });
+                    self.ingest_token_count_usage(&timestamp, model.clone(), counts, turn_id);
                 }
             } else {
                 self.unresolved_usage_event_count = self
@@ -324,8 +318,9 @@ impl CodexScanAccum {
             "response_item" => self.handle_response_item(entry, payload, path),
             "turn_context" => self.handle_turn_context(payload),
             "event_msg" => self.handle_event_msg(entry, payload, path),
-            // Environment snapshots and agent-team turn bookkeeping; no
-            // transcript content.
+            "token_usage_record" => self.handle_token_usage_record(entry, payload, path),
+            // Environment snapshots and agent-team turn bookkeeping carry no
+            // transcript or usage data.
             "world_state" | "inter_agent_communication_metadata" => {}
             unknown => {
                 log::warn!("skipping unknown Codex record type '{unknown}'");
@@ -446,6 +441,7 @@ impl CodexScanAccum {
             &mut self.content_parts,
             &mut self.first_user_message,
         );
+        self.begin_usage_turn(payload.get("turn_id").and_then(Value::as_str));
         // Extract actual self.model name (e.g. "gpt-5.4") from turn_context
         if let Some(m) = payload.get("model").and_then(|v| v.as_str())
             && !m.is_empty()
@@ -530,6 +526,10 @@ impl CodexProvider {
             replay_second: _,
             previous_token_totals: _,
             seen_token_events: _,
+            current_turn_id: _,
+            unmatched_token_count_usage: _,
+            unmatched_token_usage_records: _,
+            seen_token_usage_record_ids: _,
             cc_version,
             git_branch,
             is_sidechain,
@@ -636,6 +636,59 @@ fn source_mtime_epoch_seconds(metadata: &std::fs::Metadata) -> i64 {
         .unwrap_or(0)
 }
 
+/// Seed a partial tail parse from the nearest preceding turn context. Current
+/// `token_usage_record` rows intentionally omit the model, so starting midway
+/// through a long turn without this context would misclassify valid usage as
+/// malformed. The reverse mmap walk touches only the pages needed to reach the
+/// preceding context and preserves the tail fast path for very large rollouts.
+fn prime_tail_turn_context(path: &Path, start_offset: u64, accum: &mut CodexScanAccum) -> bool {
+    let Ok(file) = File::open(path) else {
+        return false;
+    };
+    // SAFETY: `file` remains open for the lifetime of this read-only mapping,
+    // and the mapping is dropped before `file` when the function returns.
+    let Ok(mmap) = (unsafe { Mmap::map(&file) }) else {
+        return false;
+    };
+    let Ok(mut line_end) = usize::try_from(start_offset) else {
+        return false;
+    };
+    let bytes: &[u8] = mmap.as_ref();
+    if line_end > bytes.len() {
+        return false;
+    }
+
+    while line_end > 0 && bytes[line_end - 1] == b'\n' {
+        line_end -= 1;
+    }
+    while line_end > 0 {
+        let previous_newline = memrchr(b'\n', &bytes[..line_end]);
+        let line_start = previous_newline.map_or(0, |index| index + 1);
+        if let Ok(entry) = serde_json::from_slice::<CodexLine>(&bytes[line_start..line_end])
+            && entry.line_type == "turn_context"
+            && let Some(payload) = entry.payload.as_ref()
+        {
+            let has_model = payload
+                .get("model")
+                .and_then(Value::as_str)
+                .is_some_and(|model| !model.is_empty());
+            if !has_model {
+                return false;
+            }
+            accum.handle_turn_context(payload);
+            return true;
+        }
+        let Some(newline) = previous_newline else {
+            break;
+        };
+        line_end = newline;
+        while line_end > 0 && bytes[line_end - 1] == b'\n' {
+            line_end -= 1;
+        }
+    }
+    false
+}
+
 /// Tail-only Codex parse result. Carries the most recent N messages
 /// plus the warning count from the tail region so the caller can
 /// assemble a `SessionMessagesWindow` without paying for a full-file
@@ -673,10 +726,22 @@ pub(crate) fn parse_session_tail(path: &Path, target_messages: usize) -> Option<
     // actual message-emit further into the file than expected.
     let safety_buffer = target_messages / 2 + 100;
     let scan_lines = target_messages.saturating_add(safety_buffer);
-    let (reader, _window) = open_tail_reader(path, scan_lines, "Codex")?;
+    let (reader, window) = open_tail_reader(path, scan_lines, "Codex")?;
 
     let mut accum = CodexScanAccum::new();
-    accum.scan_lines(reader, path);
+    if !window.covers_whole_file && !prime_tail_turn_context(path, window.start_offset, &mut accum)
+    {
+        log::debug!(
+            "Codex tail parse could not resolve preceding turn context for '{}'; falling back to full parse",
+            path.display()
+        );
+        return None;
+    }
+    // Freeze the same file prefix used to calculate the tail offset. A live
+    // Codex process may append another record while this reader is active;
+    // consuming beyond the captured size would reintroduce a partial-line race.
+    let stable_tail_bytes = window.file_size.saturating_sub(window.start_offset);
+    accum.scan_lines(reader.take(stable_tail_bytes), path);
 
     flush_pending_user_message(
         &mut accum.pending_user_message,

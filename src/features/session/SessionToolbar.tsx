@@ -195,6 +195,14 @@ export function SessionToolbar(props: SessionToolbarProps) {
             </span>
           </>
         )}
+        {props.meta.variant_name && props.meta.provider !== "cc-mirror" && (
+          <>
+            <span className="info-sep">&middot;</span>
+            <span className="session-info-variant" title={`${t("session.agent")}: ${props.meta.variant_name}`}>
+              {t("session.agent")}: {props.meta.variant_name}
+            </span>
+          </>
+        )}
         {props.meta.cc_version && (
           <>
             <span className="info-sep">&middot;</span>

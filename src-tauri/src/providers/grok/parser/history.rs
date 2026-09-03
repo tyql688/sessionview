@@ -134,7 +134,9 @@ impl HistoryBuilder {
             | "task_backgrounded"
             | "task_completed"
             | "subagent_spawned"
-            | "subagent_finished" => {}
+            | "subagent_finished"
+            | "hooks_changed"
+            | "plugins_changed" => {}
             unknown => {
                 log::warn!("skipping unknown Grok session update '{unknown}'");
                 self.warnings = self.warnings.saturating_add(1);
@@ -523,5 +525,15 @@ mod tests {
                 .map(|presentation| presentation.result_mode),
             Some(ToolResultMode::Raw)
         );
+    }
+
+    #[test]
+    fn catalog_change_updates_are_known_bookkeeping() {
+        let mut history = HistoryBuilder::new(1);
+        history.push_update("hooks_changed", &json!({}), None);
+        history.push_update("plugins_changed", &json!({}), None);
+
+        assert_eq!(history.warnings, 0);
+        assert!(history.into_messages().is_empty());
     }
 }

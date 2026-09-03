@@ -1,5 +1,6 @@
 use super::{CodexProvider, parse_session_tail};
 use crate::models::ToolResultMode;
+use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -821,6 +822,46 @@ fn parse_session_tail_returns_full_file_when_smaller_than_window() {
 }
 
 #[test]
+fn parse_session_tail_primes_usage_model_from_preceding_turn_context() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("codex.jsonl");
+    let mut lines = vec![
+        r#"{"timestamp":"2026-09-03T04:36:40Z","type":"turn_context","payload":{"turn_id":"turn-test","model":"gpt-5.6-sol"}}"#.to_string(),
+    ];
+    for ordinal in 0..130 {
+        lines.push(format!(
+            r#"{{"timestamp":"2026-09-03T04:36:41Z","type":"world_state","ordinal":{ordinal},"payload":{{}}}}"#
+        ));
+    }
+    lines.push(
+        r#"{"timestamp":"2026-09-03T04:36:42Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"tail answer"}]}}"#.to_string(),
+    );
+    lines.push(token_usage_record_line(
+        "2026-09-03T04:36:43Z",
+        "tail-response",
+        100,
+        40,
+        10,
+        20,
+    ));
+    fs::write(&file, format!("{}\n", lines.join("\n"))).unwrap();
+
+    let tail = parse_session_tail(&file, 1).expect("tail parse");
+
+    assert_eq!(tail.parse_warning_count, 0);
+    assert_eq!(tail.messages.len(), 1);
+    assert_eq!(tail.messages[0].model.as_deref(), Some("gpt-5.6-sol"));
+    let usage = tail.messages[0]
+        .token_usage
+        .as_ref()
+        .expect("usage attached to tail message");
+    assert_eq!(usage.input_tokens, 50);
+    assert_eq!(usage.cache_read_input_tokens, 40);
+    assert_eq!(usage.cache_creation_input_tokens, 10);
+    assert_eq!(usage.output_tokens, 20);
+}
+
+#[test]
 fn parse_session_links_sub_agent_activity_to_spawn_tool_call() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("codex.jsonl");
@@ -956,4 +997,212 @@ fn parse_session_marks_thread_rollback() {
             .any(|m| m.content.contains("[turn_aborted] rolled back 2 turn(s)")),
         "rollback marker missing"
     );
+}
+
+fn token_usage_record_line(
+    timestamp: &str,
+    response_id: &str,
+    input: u64,
+    cache_read: u64,
+    cache_write: u64,
+    output: u64,
+) -> String {
+    let usage = json!({
+        "input_tokens": input,
+        "cached_input_tokens": cache_read,
+        "cache_write_input_tokens": cache_write,
+        "output_tokens": output,
+        "reasoning_output_tokens": 2,
+        "total_tokens": input + output,
+    });
+    json!({
+        "timestamp": timestamp,
+        "type": "token_usage_record",
+        "ordinal": 4,
+        "payload": {
+            "thread_id": "thread-test",
+            "turn_id": "turn-test",
+            "session_id": "session-test",
+            "root_turn_id": "root-test",
+            "response_id": response_id,
+            "usage": usage,
+            "turn_token_usage": usage,
+            "thread_token_usage": usage,
+        },
+    })
+    .to_string()
+}
+
+#[test]
+fn token_usage_record_without_legacy_event_surfaces_usage() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("codex.jsonl");
+    let record = token_usage_record_line("2026-09-03T04:36:42Z", "response-only", 100, 40, 10, 10);
+    let lines = [
+        r#"{"timestamp":"2026-09-03T04:36:40Z","type":"turn_context","payload":{"turn_id":"turn-test","model":"gpt-5.6-sol"}}"#.to_string(),
+        r#"{"timestamp":"2026-09-03T04:36:41Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}}"#.to_string(),
+        record,
+    ];
+    fs::write(&file, format!("{}\n", lines.join("\n"))).unwrap();
+
+    let provider = CodexProvider {
+        home_dir: PathBuf::from("/tmp"),
+    };
+    let parsed = provider.parse_session_file(&file).expect("parsed session");
+
+    assert_eq!(parsed.parse_warning_count, 0);
+    assert_eq!(parsed.usage_events.len(), 1);
+    assert_eq!(parsed.usage_events[0].input_tokens, 50);
+    assert_eq!(parsed.usage_events[0].cache_read_input_tokens, 40);
+    assert_eq!(parsed.usage_events[0].cache_creation_input_tokens, 10);
+    assert_eq!(parsed.usage_events[0].output_tokens, 10);
+    assert_eq!(
+        parsed.usage_events[0].usage_hash.as_deref(),
+        Some("codex-response:response-only")
+    );
+    let assistant = parsed
+        .messages
+        .iter()
+        .find(|message| message.role == crate::models::MessageRole::Assistant)
+        .expect("assistant message");
+    let usage = assistant.token_usage.as_ref().expect("display usage");
+    assert_eq!(usage.input_tokens, 50);
+    assert_eq!(usage.cache_read_input_tokens, 40);
+    assert_eq!(usage.cache_creation_input_tokens, 10);
+    assert_eq!(usage.output_tokens, 10);
+}
+
+#[test]
+fn token_usage_record_before_legacy_event_is_deduplicated() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("codex.jsonl");
+    let record = token_usage_record_line("2026-09-03T04:36:42Z", "response-before", 100, 40, 0, 10);
+    let lines = [
+        r#"{"timestamp":"2026-09-03T04:36:40Z","type":"turn_context","payload":{"turn_id":"turn-test","model":"gpt-5.6-sol"}}"#.to_string(),
+        r#"{"timestamp":"2026-09-03T04:36:41Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}}"#.to_string(),
+        record,
+        r#"{"timestamp":"2026-09-03T04:36:43Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":110}}}}"#.to_string(),
+    ];
+    fs::write(&file, format!("{}\n", lines.join("\n"))).unwrap();
+
+    let provider = CodexProvider {
+        home_dir: PathBuf::from("/tmp"),
+    };
+    let parsed = provider.parse_session_file(&file).expect("parsed session");
+
+    assert_eq!(parsed.parse_warning_count, 0);
+    assert_eq!(parsed.usage_events.len(), 1);
+    assert_eq!(parsed.usage_events[0].input_tokens, 60);
+    assert_eq!(
+        parsed.usage_events[0].usage_hash.as_deref(),
+        Some("codex-response:response-before")
+    );
+}
+
+#[test]
+fn token_usage_record_after_matching_legacy_event_enriches_existing_usage() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("codex.jsonl");
+    let record = token_usage_record_line("2026-09-03T04:36:43Z", "response-after", 100, 40, 0, 10);
+    let lines = [
+        r#"{"timestamp":"2026-09-03T04:36:40Z","type":"turn_context","payload":{"turn_id":"turn-test","model":"gpt-5.6-sol"}}"#.to_string(),
+        r#"{"timestamp":"2026-09-03T04:36:41Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}}"#.to_string(),
+        r#"{"timestamp":"2026-09-03T04:36:42Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":110}}}}"#.to_string(),
+        record,
+    ];
+    fs::write(&file, format!("{}\n", lines.join("\n"))).unwrap();
+
+    let provider = CodexProvider {
+        home_dir: PathBuf::from("/tmp"),
+    };
+    let parsed = provider.parse_session_file(&file).expect("parsed session");
+
+    assert_eq!(parsed.parse_warning_count, 0);
+    assert_eq!(parsed.usage_events.len(), 1);
+    assert_eq!(
+        parsed.usage_events[0].usage_hash.as_deref(),
+        Some("codex-response:response-after")
+    );
+}
+
+#[test]
+fn token_usage_record_distinct_from_legacy_event_surfaces_both_calls() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("codex.jsonl");
+    let record = token_usage_record_line("2026-09-03T04:36:43Z", "response-distinct", 30, 10, 0, 5);
+    let lines = [
+        r#"{"timestamp":"2026-09-03T04:36:40Z","type":"turn_context","payload":{"turn_id":"turn-test","model":"gpt-5.6-sol"}}"#.to_string(),
+        r#"{"timestamp":"2026-09-03T04:36:41Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}}"#.to_string(),
+        r#"{"timestamp":"2026-09-03T04:36:42Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":110}}}}"#.to_string(),
+        record,
+    ];
+    fs::write(&file, format!("{}\n", lines.join("\n"))).unwrap();
+
+    let provider = CodexProvider {
+        home_dir: PathBuf::from("/tmp"),
+    };
+    let parsed = provider.parse_session_file(&file).expect("parsed session");
+
+    assert_eq!(parsed.parse_warning_count, 0);
+    assert_eq!(parsed.usage_events.len(), 2);
+    assert_eq!(
+        parsed
+            .usage_events
+            .iter()
+            .map(|event| event.input_tokens)
+            .sum::<u64>(),
+        80
+    );
+    assert_eq!(
+        parsed
+            .usage_events
+            .iter()
+            .map(|event| event.output_tokens)
+            .sum::<u64>(),
+        15
+    );
+}
+
+#[test]
+fn malformed_token_usage_record_remains_a_parse_warning() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("codex.jsonl");
+    fs::write(
+        &file,
+        concat!(
+            "{\"timestamp\":\"2026-09-03T04:36:40Z\",\"type\":\"turn_context\",\"payload\":{\"turn_id\":\"turn-test\",\"model\":\"gpt-5.6-sol\"}}\n",
+            "{\"timestamp\":\"2026-09-03T04:36:41Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n",
+            "{\"timestamp\":\"2026-09-03T04:36:42Z\",\"type\":\"token_usage_record\",\"payload\":{\"turn_id\":\"turn-test\",\"response_id\":\"response-malformed\"}}\n"
+        ),
+    )
+    .unwrap();
+
+    let provider = CodexProvider {
+        home_dir: PathBuf::from("/tmp"),
+    };
+    let parsed = provider.parse_session_file(&file).expect("parsed session");
+
+    assert_eq!(parsed.parse_warning_count, 1);
+    assert!(parsed.usage_events.is_empty());
+}
+
+#[test]
+fn unknown_top_level_record_remains_a_parse_warning() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("codex.jsonl");
+    fs::write(
+        &file,
+        concat!(
+            "{\"timestamp\":\"2026-09-03T04:36:40Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"hello\"}}\n",
+            "{\"timestamp\":\"2026-09-03T04:36:41Z\",\"type\":\"future_record\",\"payload\":{}}\n"
+        ),
+    )
+    .unwrap();
+
+    let provider = CodexProvider {
+        home_dir: PathBuf::from("/tmp"),
+    };
+    let parsed = provider.parse_session_file(&file).expect("parsed session");
+
+    assert_eq!(parsed.parse_warning_count, 1);
 }

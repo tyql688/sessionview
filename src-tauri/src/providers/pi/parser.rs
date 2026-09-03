@@ -137,18 +137,23 @@ fn parse_entries(path: &Path) -> Option<(PiSessionHeader, Vec<PiEntry>, u32)> {
         }
     };
     let mut entry_values = Vec::new();
-    let stats = crate::provider::util::for_each_jsonl_record_from(
-        std::io::Cursor::new(entry_lines),
-        path,
-        2,
-        |_, value: Value| {
-            entry_values.push(value);
-            std::ops::ControlFlow::Continue(())
-        },
-    );
-    let mut parse_warning_count = stats
-        .read_error_count
-        .saturating_add(stats.parse_error_count);
+    let mut parse_warning_count = 0u32;
+    for (index, line) in entry_lines.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        match parse_pi_json_value(line) {
+            Ok(value) => entry_values.push(value),
+            Err(error) => {
+                parse_warning_count = parse_warning_count.saturating_add(1);
+                log::warn!(
+                    "skipping malformed Pi JSONL at line {} in '{}': {error}",
+                    index + 2,
+                    path.display()
+                );
+            }
+        }
+    }
     migrate_pi_entry_values(&mut entry_values, original_version);
 
     let mut entries: Vec<PiEntry> = Vec::new();
@@ -167,6 +172,93 @@ fn parse_entries(path: &Path) -> Option<(PiSessionHeader, Vec<PiEntry>, u32)> {
     }
 
     Some((header, entries, parse_warning_count))
+}
+
+/// Pi persists strings through JavaScript's `JSON.stringify`, which permits
+/// lone UTF-16 surrogate code units as `\uD800`-style escapes. Rust strings
+/// cannot represent those code units and `serde_json` correctly rejects the
+/// record, but dropping the whole message is unnecessarily destructive.
+/// Retry only that narrow incompatibility after replacing each unpaired
+/// surrogate with Unicode's replacement character; every other JSON error
+/// still follows the normal warning-and-skip path.
+fn parse_pi_json_value(line: &str) -> serde_json::Result<Value> {
+    match serde_json::from_str(line) {
+        Ok(value) => Ok(value),
+        Err(original_error) => {
+            let Some(repaired) = repair_unpaired_surrogate_escapes(line) else {
+                return Err(original_error);
+            };
+            serde_json::from_str(&repaired).map_err(|_| original_error)
+        }
+    }
+}
+
+fn repair_unpaired_surrogate_escapes(line: &str) -> Option<String> {
+    let bytes = line.as_bytes();
+    let parse_escape = |start: usize| -> Option<u16> {
+        if bytes.get(start) != Some(&b'\\') || bytes.get(start + 1) != Some(&b'u') {
+            return None;
+        }
+        let digits = std::str::from_utf8(bytes.get(start + 2..start + 6)?).ok()?;
+        u16::from_str_radix(digits, 16).ok()
+    };
+    let mut repaired = String::with_capacity(line.len());
+    let mut changed = false;
+    let mut in_string = false;
+    let mut index = 0usize;
+
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte >= 0x80 {
+            let character = line[index..].chars().next()?;
+            repaired.push(character);
+            index += character.len_utf8();
+            continue;
+        }
+        if byte == b'"' {
+            in_string = !in_string;
+            repaired.push('"');
+            index += 1;
+            continue;
+        }
+        if !in_string || byte != b'\\' {
+            repaired.push(char::from(byte));
+            index += 1;
+            continue;
+        }
+
+        let Some(code_unit) = parse_escape(index) else {
+            repaired.push('\\');
+            index += 1;
+            if let Some(&escaped) = bytes.get(index) {
+                if escaped.is_ascii() {
+                    repaired.push(char::from(escaped));
+                    index += 1;
+                } else {
+                    let character = line[index..].chars().next()?;
+                    repaired.push(character);
+                    index += character.len_utf8();
+                }
+            }
+            continue;
+        };
+        if (0xD800..=0xDBFF).contains(&code_unit)
+            && parse_escape(index + 6).is_some_and(|low| (0xDC00..=0xDFFF).contains(&low))
+        {
+            repaired.push_str(&line[index..index + 12]);
+            index += 12;
+            continue;
+        }
+        if (0xD800..=0xDFFF).contains(&code_unit) {
+            repaired.push_str("\\uFFFD");
+            changed = true;
+        } else {
+            repaired.push_str(&line[index..index + 6]);
+        }
+        index += 6;
+    }
+
+    changed.then_some(repaired)
 }
 
 fn migrate_pi_header_value(header: &mut Value) {

@@ -8,7 +8,7 @@
 //!   (`DSH_HOME` defaults to `~/.dsh`). The artifact is zstd-compressed JSONL
 //!   when the suffix is `.jsonl.zstd`; uncompressed `.jsonl` is also accepted.
 //! - The first record is the immutable session header
-//!   `{type:"session", version, id, createdAt, cwd?, parentSession?, origin?, ...}`.
+//!   `{type:"session", version, id, createdAt, cwd?, parentSession?, origin?, agentPreset?, ...}`.
 //! - Every following record is a session event `{type, seq, time, data}` or a
 //!   packed chunk row (`text-chunks` / `reasoning-chunks` / `tool-call-chunks`)
 //!   that replays raw stream deltas in one storage line.
@@ -32,6 +32,8 @@
 //! - `tool/result` content is attached to the Tool message whose `callId` the
 //!   `assistant/message` (or `tool/call`) surfaced; an orphan result creates a
 //!   standalone Tool message.
+//! - The creation-time `agentPreset` and later `agent-preset/selected` commits
+//!   fold into `SessionMeta.variant_name`; the later committed selection wins.
 //! - Usage (`assistant/message.usage`) is attached to the event's last
 //!   non-System message, mirroring the Claude provider; a thinking-only step
 //!   still gets a placeholder so accounting is never silently dropped.
@@ -102,6 +104,8 @@ struct DshHeader {
     parent_session: Option<String>,
     #[serde(default)]
     origin: Option<String>,
+    #[serde(default, rename = "agentPreset")]
+    agent_preset: Option<String>,
 }
 
 /// Buffered stream deltas for one step whose `assistant/message` never
@@ -139,6 +143,9 @@ struct ParseState {
     descriptor_label: Option<String>,
     last_event_time_ms: Option<i64>,
     model: Option<String>,
+    /// Effective agent preset. A committed `agent-preset/selected` event
+    /// overrides the immutable creation-time header value.
+    agent_preset: Option<String>,
     /// Chunk deltas per (turn, step), dropped once the step's
     /// `assistant/message` arrives or flushed at `step/end` when it never does.
     chunk_bufs: HashMap<(u32, u32), StepChunkBuf>,
@@ -363,6 +370,18 @@ fn handle_record(record: &Value, state: &mut ParseState) {
                 state.descriptor_label = Some(label.to_string());
             }
         }
+        "agent-preset/selected" => {
+            if let Some(agent_preset) = data
+                .get("agentPreset")
+                .and_then(Value::as_str)
+                .filter(|name| !name.trim().is_empty())
+            {
+                state.agent_preset = Some(agent_preset.to_string());
+            } else {
+                log::warn!("skipping malformed DSH agent-preset/selected event");
+                state.parse_warning_count = state.parse_warning_count.saturating_add(1);
+            }
+        }
         "step/end" => {
             if let (Some(turn), Some(step)) = (
                 data.get("turn").and_then(Value::as_u64),
@@ -403,7 +422,8 @@ fn handle_record(record: &Value, state: &mut ParseState) {
         | "tool/code-dispatch"
         | "tool/code-dispatch-start"
         | "session/created"
-        | "session/event" => {}
+        | "session/event"
+        | "web/deepseek-search-llm-request" => {}
         unknown => {
             let ignorable = record
                 .get("ignorable")
@@ -1203,7 +1223,10 @@ fn assemble_session_meta(
         file_size_bytes: file_size,
         source_path: path.to_string_lossy().to_string(),
         is_sidechain,
-        variant_name: None,
+        variant_name: state
+            .agent_preset
+            .clone()
+            .or_else(|| header.agent_preset.clone()),
         model: state.model.clone(),
         cc_version: None,
         git_branch: None,
@@ -1881,6 +1904,42 @@ mod tests {
             &user_message_line(1, 1, r#"{"kind":"user"}"#, r#""ok""#),
             &event_line("mystery/event", 2, 2, r#"{"x":1}"#),
         ]);
+        assert_eq!(session.parse_warning_count, 1);
+    }
+
+    #[test]
+    fn current_metadata_and_log_only_events_are_handled() {
+        let session = parse_lines(&[
+            &header_line("/tmp/p"),
+            &user_message_line(1, 1, r#"{"kind":"user"}"#, r#""ok""#),
+            &event_line(
+                "web/deepseek-search-llm-request",
+                2,
+                2,
+                r#"{"model":"deepseek-search"}"#,
+            ),
+            &event_line(
+                "agent-preset/selected",
+                3,
+                3,
+                r#"{"agentPreset":"reviewer"}"#,
+            ),
+        ]);
+
+        assert_eq!(session.messages.len(), 1);
+        assert_eq!(session.meta.variant_name.as_deref(), Some("reviewer"));
+        assert_eq!(session.parse_warning_count, 0);
+    }
+
+    #[test]
+    fn malformed_agent_preset_selection_remains_a_parse_warning() {
+        let session = parse_lines(&[
+            &header_line("/tmp/p"),
+            &user_message_line(1, 1, r#"{"kind":"user"}"#, r#""ok""#),
+            &event_line("agent-preset/selected", 2, 2, r#"{}"#),
+        ]);
+
+        assert_eq!(session.meta.variant_name.as_deref(), Some("standard"));
         assert_eq!(session.parse_warning_count, 1);
     }
 

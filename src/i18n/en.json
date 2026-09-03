@@ -72,6 +72,7 @@
     "searchPlaceholder": "Find in session...",
     "searchNoMatch": "No matches",
     "subagent": "Subagent",
+    "agent": "Agent",
     "duration": "Duration",
     "parseWarningBadge": "{count} parse warning(s)",
     "parseWarningTooltip": "{count} line(s) could not be parsed and were skipped — the rest of the session is intact",

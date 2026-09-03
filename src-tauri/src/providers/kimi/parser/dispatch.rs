@@ -42,10 +42,20 @@ pub(super) struct ScanAccum {
     /// Tracks the most recently observed model alias so usage records and
     /// assistant messages can be tagged correctly.
     pub(super) current_model: Option<String>,
+    /// Effective kimi-code profile from config/profile binding records.
+    pub(super) current_profile: Option<String>,
     pub(super) usage_events: Vec<UsageEvent>,
-    /// Message index that owns usage for the current turn.
-    current_turn_usage_idx: Option<usize>,
-    current_turn_usage_event_idx: Option<usize>,
+    /// Message index and fallback event that own usage for the current model
+    /// step. A user turn can contain several steps separated by tool calls.
+    current_step_usage_idx: Option<usize>,
+    current_step_usage_event_idx: Option<usize>,
+    /// Newer kimi-code versions persist `usage.record` before the assistant
+    /// content it belongs to. Hold the display copy until that message or
+    /// tool call arrives; session accounting is already in `usage_events`.
+    pending_message_usage: Option<(TokenUsage, Option<String>)>,
+    /// Once the authoritative per-step `usage.record` has arrived, ignore a
+    /// later `step.end.usage` replay of the same counts. Reset at `step.begin`.
+    current_step_has_authoritative_usage: bool,
     pub(super) parse_warning_count: u32,
     /// Snapshot of state at the last turn.prompt, used to roll back on
     /// turn.cancel. protocol_version 1.4+ emits turn.cancel when the
@@ -70,9 +80,12 @@ impl ScanAccum {
             fallback_time_secs: None,
             fallback_time_rfc: None,
             current_model: None,
+            current_profile: None,
             usage_events: Vec::new(),
-            current_turn_usage_idx: None,
-            current_turn_usage_event_idx: None,
+            current_step_usage_idx: None,
+            current_step_usage_event_idx: None,
+            pending_message_usage: None,
+            current_step_has_authoritative_usage: false,
             parse_warning_count: 0,
             turn_snapshot: None,
             cancel_without_snapshot: false,
@@ -82,13 +95,16 @@ impl ScanAccum {
 
     /// Capture a snapshot of current state at turn boundary (turn.prompt).
     fn snapshot_turn(&mut self) {
+        self.finish_pending_usage();
         self.turn_snapshot = Some(TurnSnapshot {
             messages_len: self.messages.len(),
             content_parts_len: self.content_parts.len(),
             first_user_message: self.first_user_message.clone(),
         });
-        self.current_turn_usage_idx = None;
-        self.current_turn_usage_event_idx = None;
+        self.current_step_usage_idx = None;
+        self.current_step_usage_event_idx = None;
+        self.pending_message_usage = None;
+        self.current_step_has_authoritative_usage = false;
     }
 
     /// Roll back to the last turn snapshot, discarding everything
@@ -103,8 +119,10 @@ impl ScanAccum {
         // Rebuild call_id_map by keeping only entries whose message still exists.
         self.call_id_map.retain_below(snap.messages_len);
         self.first_user_message = snap.first_user_message;
-        self.current_turn_usage_idx = None;
-        self.current_turn_usage_event_idx = None;
+        self.current_step_usage_idx = None;
+        self.current_step_usage_event_idx = None;
+        self.pending_message_usage = None;
+        self.current_step_has_authoritative_usage = false;
     }
 
     fn note_time(&mut self, ms: Option<i64>) -> Option<String> {
@@ -130,8 +148,22 @@ impl ScanAccum {
     }
 
     fn begin_visible_turn(&mut self) {
-        self.current_turn_usage_idx = None;
-        self.current_turn_usage_event_idx = None;
+        self.finish_pending_usage();
+        self.current_step_usage_idx = None;
+        self.current_step_usage_event_idx = None;
+        self.pending_message_usage = None;
+        self.current_step_has_authoritative_usage = false;
+    }
+
+    /// A Kimi user turn can run multiple LLM steps around tool calls. Both
+    /// `usage.record` and `step.end.usage` describe one such step, so their
+    /// pairing/attachment state must not leak into the next `step.begin`.
+    fn begin_model_step(&mut self) {
+        self.finish_pending_usage();
+        self.current_step_usage_idx = None;
+        self.current_step_usage_event_idx = None;
+        self.pending_message_usage = None;
+        self.current_step_has_authoritative_usage = false;
     }
 
     fn note_title_candidate(&mut self, text: &str) {
@@ -177,24 +209,26 @@ impl ScanAccum {
             return;
         }
         self.content_parts.push(text.to_string());
-        // The turn's usage belongs on its assistant text. If a step fallback
+        // The step's usage belongs on its assistant text. If a step fallback
         // already landed it on a tool message, move it here so exactly one
-        // message per turn carries the usage.
+        // message per model step carries the usage.
         let tool_owner = self
-            .current_turn_usage_idx
+            .current_step_usage_idx
             .and_then(|index| self.messages.get_mut(index))
             .filter(|message| message.role == MessageRole::Tool);
         let owner_is_tool = tool_owner.is_some();
         let moved_usage = tool_owner.and_then(|owner| owner.token_usage.take());
-        if self.current_turn_usage_idx.is_none() || owner_is_tool {
-            self.current_turn_usage_idx = Some(self.messages.len());
+        if self.current_step_usage_idx.is_none() || owner_is_tool {
+            self.current_step_usage_idx = Some(self.messages.len());
         }
+        let index = self.messages.len();
         self.messages.push(Message {
             timestamp: ts,
             model: self.current_model.clone(),
             token_usage: moved_usage,
             ..Message::assistant(text.to_string())
         });
+        self.attach_pending_usage(index);
     }
 
     fn push_thinking(&mut self, text: &str, ts: Option<String>) {
@@ -233,10 +267,11 @@ impl ScanAccum {
         }
         let display_name = metadata.canonical_name.clone();
         let tool_input = args.map(|v| v.to_string());
-        if self.current_turn_usage_idx.is_none() {
-            self.current_turn_usage_idx = Some(self.messages.len());
+        if self.current_step_usage_idx.is_none() {
+            self.current_step_usage_idx = Some(self.messages.len());
         }
-        self.call_id_map.register(call_id, self.messages.len());
+        let index = self.messages.len();
+        self.call_id_map.register(call_id, index);
         self.messages.push(Message {
             timestamp: ts,
             tool_name: Some(display_name),
@@ -245,6 +280,7 @@ impl ScanAccum {
             tool_metadata: Some(metadata),
             ..Message::new(MessageRole::Tool, String::new())
         });
+        self.attach_pending_usage(index);
     }
 
     /// Merge a tool result onto the matching call, or push a standalone
@@ -279,42 +315,55 @@ impl ScanAccum {
             message.content = rendered_output;
             return;
         }
-        if self.current_turn_usage_idx.is_none() {
-            self.current_turn_usage_idx = Some(self.messages.len());
+        if self.current_step_usage_idx.is_none() {
+            self.current_step_usage_idx = Some(self.messages.len());
         }
+        let index = self.messages.len();
         self.messages.push(Message {
             timestamp: ts,
             ..Message::new(MessageRole::Tool, rendered_output)
         });
+        self.attach_pending_usage(index);
     }
 
-    /// Attach token totals to the turn's first assistant text, or its
-    /// trailing tool for tool-only turns. A step fallback keeps the target
-    /// so the authoritative turn record overwrites it instead of duplicating it.
-    fn attach_usage(&mut self, usage: TokenUsage, model: Option<&str>, finish_turn: bool) {
-        let target_idx = if finish_turn {
-            self.current_turn_usage_idx.take()
+    fn attach_pending_usage(&mut self, index: usize) {
+        let Some((usage, model)) = self.pending_message_usage.take() else {
+            return;
+        };
+        let Some(message) = self.messages.get_mut(index) else {
+            return;
+        };
+        message.token_usage = Some(usage);
+        if message.model.is_none() {
+            message.model = model.or_else(|| self.current_model.clone());
+        }
+    }
+
+    pub(super) fn finish_pending_usage(&mut self) {
+        if self.pending_message_usage.take().is_some() && !self.is_tail {
+            log::warn!("Kimi usage.record had no assistant/tool message in its turn");
+            self.note_warning();
+        }
+    }
+
+    /// Attach token totals to the step's first assistant text, or its
+    /// trailing tool for tool-only turns. If usage precedes content, retain
+    /// the display copy until the first eligible message arrives.
+    fn attach_usage(&mut self, usage: TokenUsage, model: Option<&str>, authoritative: bool) {
+        let target_idx = if authoritative {
+            self.current_step_usage_idx.take()
         } else {
-            self.current_turn_usage_idx
+            self.current_step_usage_idx
         };
         let Some(idx) = target_idx else {
-            // Usage record with no anchor message. Session totals still
-            // come from usage_events; only the per-message badge is lost.
-            if !self.is_tail {
-                log::warn!(
-                    "Kimi usage.record (output={}, input_other={}) had no assistant/tool message to attach to",
-                    usage.output_tokens,
-                    usage.input_tokens
-                );
-                self.note_warning();
-            }
+            self.pending_message_usage = Some((usage, model.map(str::to_string)));
             return;
         };
         let Some(msg) = self.messages.get_mut(idx) else {
             return;
         };
-        if !finish_turn {
-            self.current_turn_usage_idx = Some(idx);
+        if !authoritative {
+            self.current_step_usage_idx = Some(idx);
         }
         msg.token_usage = Some(usage);
         if let Some(m) = model {
@@ -324,19 +373,21 @@ impl ScanAccum {
         }
     }
 
-    /// Fold a usage record into the current turn's event. Per-step usages
-    /// (`finish_turn == false`) accumulate, so a turn that never sees its
-    /// closing record (crash, live session) still totals every step; the
-    /// closing `usage.record` replaces the accumulated value with the
-    /// authoritative turn total. Returns the usage to attach to the turn's
-    /// owner message.
+    /// Fold usage into the current model step's event. `step.end.usage`
+    /// (`authoritative == false`) is a fallback; a neighboring `usage.record`
+    /// replaces it with the authoritative counts. Consecutive fallbacks
+    /// without an explicit `step.begin` still accumulate for legacy logs.
+    /// Returns the usage to attach to the step's owner message.
     fn record_usage_event(
         &mut self,
         usage: &TokenUsage,
         timestamp: Option<String>,
         model: Option<&str>,
-        finish_turn: bool,
+        authoritative: bool,
     ) -> Option<TokenUsage> {
+        if !authoritative && self.current_step_has_authoritative_usage {
+            return None;
+        }
         let (Some(timestamp), Some(model)) = (timestamp, model) else {
             if !self.is_tail {
                 log::warn!("skipping Kimi usage record without timestamp or model");
@@ -355,24 +406,27 @@ impl ScanAccum {
             usage_hash: None,
             cost_usd: None,
         };
-        if let Some(index) = self.current_turn_usage_event_idx.take() {
-            if !finish_turn {
+        if let Some(index) = self.current_step_usage_event_idx.take() {
+            if !authoritative {
                 let prev = &self.usage_events[index];
                 event.input_tokens += prev.input_tokens;
                 event.output_tokens += prev.output_tokens;
                 event.cache_read_input_tokens += prev.cache_read_input_tokens;
                 event.cache_creation_input_tokens += prev.cache_creation_input_tokens;
-                self.current_turn_usage_event_idx = Some(index);
+                self.current_step_usage_event_idx = Some(index);
             }
             self.usage_events[index] = event;
         } else {
             self.usage_events.push(event);
-            if !finish_turn {
-                self.current_turn_usage_event_idx = Some(self.usage_events.len() - 1);
+            if !authoritative {
+                self.current_step_usage_event_idx = Some(self.usage_events.len() - 1);
             }
         }
+        if authoritative {
+            self.current_step_has_authoritative_usage = true;
+        }
         let attached = self
-            .current_turn_usage_event_idx
+            .current_step_usage_event_idx
             .map_or(usage.clone(), |index| {
                 let event = &self.usage_events[index];
                 let clamp = |value: u64| u32::try_from(value).unwrap_or(u32::MAX);
@@ -493,6 +547,91 @@ fn text_from_parts(parts: &[Value]) -> String {
     chunks.join("\n")
 }
 
+fn handle_turn_ended(accum: &mut ScanAccum, entry: &Value, line_time_ms: Option<i64>) {
+    let timestamp = accum.note_time(line_time_ms);
+    let Some(reason) = entry
+        .get("reason")
+        .and_then(Value::as_str)
+        .filter(|reason| !reason.is_empty())
+    else {
+        log::warn!("Kimi turn.ended without a reason");
+        accum.note_warning();
+        return;
+    };
+    if reason == "completed" {
+        return;
+    }
+
+    let detail = entry
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .filter(|message| !message.is_empty())
+        .or_else(|| {
+            entry
+                .get("interruptReason")
+                .and_then(Value::as_str)
+                .filter(|message| !message.is_empty())
+        });
+    let content = detail.map_or_else(
+        || format!("[turn_{reason}]"),
+        |detail| format!("[turn_{reason}]\n{detail}"),
+    );
+    accum.push_system_context(content, detail.unwrap_or(reason), timestamp);
+}
+
+fn handle_step_interrupted(accum: &mut ScanAccum, entry: &Value, line_time_ms: Option<i64>) {
+    let timestamp = accum.note_time(line_time_ms);
+    let Some(reason) = entry
+        .get("reason")
+        .and_then(Value::as_str)
+        .filter(|reason| !reason.is_empty())
+    else {
+        log::warn!("Kimi turn.step.interrupted without a reason");
+        accum.note_warning();
+        return;
+    };
+    let detail = entry
+        .get("message")
+        .and_then(Value::as_str)
+        .filter(|message| !message.is_empty());
+    let content = detail.map_or_else(
+        || format!("[step_interrupted] {reason}"),
+        |detail| format!("[step_interrupted] {reason}\n{detail}"),
+    );
+    accum.push_system_context(content, detail.unwrap_or(reason), timestamp);
+}
+
+fn handle_step_retrying(accum: &mut ScanAccum, entry: &Value, line_time_ms: Option<i64>) {
+    let timestamp = accum.note_time(line_time_ms);
+    let fields = (
+        entry.get("nextAttempt").and_then(Value::as_u64),
+        entry.get("maxAttempts").and_then(Value::as_u64),
+        entry.get("delayMs").and_then(Value::as_u64),
+        entry
+            .get("errorName")
+            .and_then(Value::as_str)
+            .filter(|name| !name.is_empty()),
+        entry
+            .get("errorMessage")
+            .and_then(Value::as_str)
+            .filter(|message| !message.is_empty()),
+    );
+    let (Some(next_attempt), Some(max_attempts), Some(delay_ms), Some(error_name), error_message) =
+        fields
+    else {
+        log::warn!("Kimi turn.step.retrying has malformed retry details");
+        accum.note_warning();
+        return;
+    };
+    let summary =
+        format!("attempt {next_attempt}/{max_attempts} after {delay_ms} ms ({error_name})");
+    let content = error_message.map_or_else(
+        || format!("[retry] {summary}"),
+        |message| format!("[retry] {summary}\n{message}"),
+    );
+    accum.push_system_context(content, error_message.unwrap_or(&summary), timestamp);
+}
+
 pub(super) fn dispatch_line(accum: &mut ScanAccum, entry: &Value) {
     let line_type = match entry.get("type").and_then(|v| v.as_str()) {
         Some(t) => t,
@@ -520,13 +659,20 @@ pub(super) fn dispatch_line(accum: &mut ScanAccum, entry: &Value) {
             }
         }
 
-        "config.update" => {
+        "config.update" | "profile.bind" => {
             if let Some(model) = entry
                 .get("modelAlias")
                 .and_then(|v| v.as_str())
                 .filter(|s| !s.is_empty())
             {
                 accum.current_model = Some(model.to_string());
+            }
+            if let Some(profile) = entry
+                .get("profileName")
+                .and_then(Value::as_str)
+                .filter(|profile| !profile.is_empty())
+            {
+                accum.current_profile = Some(profile.to_string());
             }
             // Soak up the time anyway so first/last span the whole file.
             let _ = accum.note_time(line_time_ms);
@@ -617,6 +763,13 @@ pub(super) fn dispatch_line(accum: &mut ScanAccum, entry: &Value) {
             accum.push_system_context(format!("[context_compacted]\n{summary}"), summary, ts);
         }
 
+        // Abnormal lifecycle records carry user-visible status. Completed
+        // turns are ordinary boundaries, but failures, interruptions, and
+        // retries retain their reason/error text in the transcript.
+        "turn.ended" => handle_turn_ended(accum, entry, line_time_ms),
+        "turn.step.interrupted" => handle_step_interrupted(accum, entry, line_time_ms),
+        "turn.step.retrying" => handle_step_retrying(accum, entry, line_time_ms),
+
         // ---- Events that produce no visible transcript content ----
         "tools.set_active_tools"
         | "tools.update_store"
@@ -634,7 +787,38 @@ pub(super) fn dispatch_line(accum: &mut ScanAccum, entry: &Value) {
         | "full_compaction.complete"
         | "full_compaction.cancel"
         | "swarm_mode.enter"
-        | "swarm_mode.exit" => {
+        | "swarm_mode.exit"
+        // Current kimi-code runtime, replay, prompt-queue, and measurement
+        // state. None adds unique transcript or billable usage: steering is
+        // rendered from `turn.steer`, interactions/tasks from their tool and
+        // context records, and usage from `usage.record`/`step.end.usage`.
+        | "runtime.set_binding"
+        | "prompt.accepted"
+        | "prompt.aborted"
+        | "prompt.completed"
+        | "prompt.steered"
+        | "token_counting.measured"
+        | "token_counting.truncated"
+        | "token_counting.rebased"
+        | "token_counting.turn_recorded"
+        | "plugin.session_start"
+        | "forked"
+        | "interaction.request"
+        | "interaction.resolved"
+        | "task.started"
+        | "task.terminated"
+        | "task.waitDelivered"
+        | "cron.add"
+        | "cron.cursor"
+        | "cron.delete"
+        | "plan.revision"
+        | "staleGuard.recorded"
+        | "staleGuard.cleared"
+        | "interruptionReminder.recorded"
+        | "tools.register_user_tool"
+        | "tools.unregister_user_tool"
+        | "tools.reset_active_tools"
+        | "mcp.tools_discovered" => {
             // These are UI/state bookkeeping events; they don't carry
             // messages we want in the transcript. Soak up the time so
             // first/last timestamps still span the whole file.
@@ -954,11 +1138,10 @@ fn handle_native_event(accum: &mut ScanAccum, entry: &Value, line_time_ms: Optio
             );
         }
         "step.end" => {
-            // `usage.record` carries the same totals plus the
-            // canonical model alias and fires right after
-            // step.end. Prefer `usage.record` when present, but
-            // fall back to `step.end.usage` when the record is
-            // missing (older protocol versions or edge cases).
+            // `usage.record` carries the same totals plus the canonical model
+            // alias. Kimi versions place it either before the streamed content
+            // or just after step.end; prefer it whenever present, with
+            // `step.end.usage` as the legacy/crash fallback.
             let model = event
                 .get("usage")
                 .and_then(|u| u.get("model"))
@@ -973,9 +1156,11 @@ fn handle_native_event(accum: &mut ScanAccum, entry: &Value, line_time_ms: Optio
                 accum.attach_usage(total, model_ref, false);
             }
         }
-        // step.begin carries no transcript content; step.end above owns
-        // the usage fallback.
-        "step.begin" => {}
+        // `step.begin` carries no transcript content, but it is the boundary
+        // between model calls inside one user turn. Reset usage pairing here
+        // so an authoritative record from the previous step cannot suppress
+        // or overwrite this step's usage.
+        "step.begin" => accum.begin_model_step(),
         unknown => {
             log::warn!("skipping unknown Kimi loop event type '{unknown}'");
             accum.note_warning();

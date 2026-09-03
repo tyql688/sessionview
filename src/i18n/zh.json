@@ -72,6 +72,7 @@
     "searchPlaceholder": "在会话中搜索...",
     "searchNoMatch": "无匹配",
     "subagent": "子代理",
+    "agent": "智能体",
     "duration": "持续时间",
     "parseWarningBadge": "{count} 行解析失败",
     "parseWarningTooltip": "有 {count} 行无法解析已跳过，其余消息完整",

@@ -16,6 +16,57 @@ fn parse_session_header() {
 }
 
 #[test]
+fn parse_session_file_repairs_unpaired_javascript_surrogate_escape() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("session.jsonl");
+    std::fs::write(
+        &path,
+        concat!(
+            "{\"type\":\"session\",\"version\":3,\"id\":\"session-1\",\"timestamp\":\"2026-06-10T07:00:00.000Z\",\"cwd\":\"/tmp/project\"}\n",
+            "{\"type\":\"message\",\"id\":\"user-1\",\"parentId\":null,\"timestamp\":\"2026-06-10T07:00:01.000Z\",\"message\":{\"role\":\"user\",\"content\":\"before \\uD83D after\",\"timestamp\":1781074801000}}\n"
+        ),
+    )
+    .unwrap();
+
+    let session = parse_session_file(&path).expect("session remains readable");
+
+    assert_eq!(session.parse_warning_count, 0);
+    assert_eq!(session.messages.len(), 1);
+    assert_eq!(session.messages[0].content, "before \u{FFFD} after");
+}
+
+#[test]
+fn parse_session_file_still_warns_and_skips_other_malformed_json() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("session.jsonl");
+    std::fs::write(
+        &path,
+        concat!(
+            "{\"type\":\"session\",\"version\":3,\"id\":\"session-1\",\"timestamp\":\"2026-06-10T07:00:00.000Z\",\"cwd\":\"/tmp/project\"}\n",
+            "{\"type\":\"message\",\"id\":\"broken\"\n",
+            "{\"type\":\"message\",\"id\":\"user-1\",\"parentId\":null,\"timestamp\":\"2026-06-10T07:00:01.000Z\",\"message\":{\"role\":\"user\",\"content\":\"kept\",\"timestamp\":1781074801000}}\n"
+        ),
+    )
+    .unwrap();
+
+    let session = parse_session_file(&path).expect("valid records remain readable");
+
+    assert_eq!(session.parse_warning_count, 1);
+    assert_eq!(session.messages.len(), 1);
+    assert_eq!(session.messages[0].content, "kept");
+}
+
+#[test]
+fn surrogate_repair_preserves_pairs_and_escaped_literals() {
+    let repaired_pair = parse_pi_json_value(r#"{"value":"\uD83D\uDE00"}"#).unwrap();
+    let escaped_literal = parse_pi_json_value(r#"{"value":"\\uD83D"}"#).unwrap();
+
+    assert_eq!(repaired_pair["value"], "😀");
+    assert_eq!(escaped_literal["value"], r"\uD83D");
+    assert!(repair_unpaired_surrogate_escapes(r#"{"value":"ordinary"}"#).is_none());
+}
+
+#[test]
 fn parse_user_message() {
     let json = r#"{"type":"message","id":"a1b2c3d4","parentId":null,"timestamp":"2024-12-03T14:00:01.000Z","message":{"role":"user","content":"Hello","timestamp":1733236801000}}"#;
     let entry: PiEntry = serde_json::from_str(json).unwrap();
