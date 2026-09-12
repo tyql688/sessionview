@@ -163,6 +163,7 @@ fn audit_codex_token_usage_materialization(sessions: &[ParsedSession]) {
                     "CommandExecution"
                         | "FileChange"
                         | "McpToolCall"
+                        | "WebSearch"
                         | "ImageView"
                         | "DynamicToolCall"
                         | "FunctionCallOutput"

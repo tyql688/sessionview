@@ -66,6 +66,85 @@ fn completed_clock_sleep_preserves_duration_and_deduplicates() {
 }
 
 #[test]
+fn completed_web_search_preserves_actions_results_and_deduplicates() {
+    for action in [
+        json!({"type":"search","query":"sample query"}),
+        json!({"type":"search","queries":["first query","second query"]}),
+        json!({"type":"open_page","url":"https://example.com/page"}),
+        json!({"type":"find_in_page","pattern":"sample phrase"}),
+        json!({"type":"other"}),
+    ] {
+        let results = json!([{
+            "type":"web_search_result","ref_id":"result-one","title":"Sample page",
+            "url":"https://example.com/page","domain":"example.com","snippet":"Sample result"
+        }]);
+        let item = completed(json!({
+            "type":"WebSearch","id":"web-one","query":"sample query",
+            "action":action,"results":results
+        }));
+        let parsed = parse(&[item.clone(), item]);
+        assert_eq!(parsed.parse_warning_count, 0);
+        assert_eq!(parsed.messages.len(), 1);
+        let message = &parsed.messages[0];
+        assert_eq!(message.role, MessageRole::Tool);
+        assert_eq!(message.tool_name.as_deref(), Some("WebSearch"));
+        assert_eq!(message.content, "sample query");
+        assert_eq!(
+            serde_json::from_str::<Value>(message.tool_input.as_deref().unwrap()).unwrap(),
+            action
+        );
+        let metadata = message.tool_metadata.as_ref().unwrap();
+        assert_eq!(metadata.ids["tool_use_id"], "web-one");
+        let structured = metadata.structured.as_ref().unwrap();
+        assert_eq!(structured["action"], action);
+        assert_eq!(structured["results"], results);
+        assert!(parsed.content_text.contains("sample query"));
+    }
+}
+
+#[test]
+fn completed_web_search_merges_legacy_events_and_response_calls() {
+    let item = completed(json!({
+        "type":"WebSearch","id":"web-one","query":"sample query",
+        "action":{"type":"search","query":"sample query"},"results":[]
+    }));
+    let event = json!({"type":"event_msg","payload":{
+        "type":"web_search_end","call_id":"web-one","query":"sample query",
+        "action":{"type":"search","query":"sample query"},"results":[]
+    }});
+    let extension = completed(json!({
+        "type":"Extension","kind":"web.search","id":"web-one","query":"sample query",
+        "action":{"type":"search","query":"sample query"},"results":[]
+    }));
+    let response = json!({"type":"response_item","payload":{
+        "type":"web_search_call","id":"web-one","status":"completed",
+        "action":{"type":"search","query":"sample query"}
+    }});
+    for rows in [
+        vec![event.clone(), item.clone()],
+        vec![item.clone(), event],
+        vec![extension.clone(), item.clone()],
+        vec![item.clone(), extension],
+        vec![response, item],
+    ] {
+        let parsed = parse(&rows);
+        assert_eq!(parsed.parse_warning_count, 0);
+        assert_eq!(parsed.messages.len(), 1);
+        assert_eq!(parsed.messages[0].content, "sample query");
+        assert_eq!(
+            parsed.messages[0]
+                .tool_metadata
+                .as_ref()
+                .unwrap()
+                .structured
+                .as_ref()
+                .unwrap()["results"],
+            json!([])
+        );
+    }
+}
+
+#[test]
 fn image_generation_end_without_call_preserves_media_and_merges_completed_mirror() {
     let end = json!({"type":"event_msg","payload":{
         "type":"image_generation_end","call_id":"image-event","status":"completed",
@@ -303,8 +382,9 @@ fn malformed_and_unknown_completed_items_remain_warnings() {
         completed(json!({"type":"McpToolCall","id":"bad-mcp","server":"sample"})),
         completed(json!({"type":"FutureTool","id":"unknown-item"})),
         completed(json!({"type":"FileChange"})),
+        completed(json!({"type":"WebSearch","query":"sample query","results":[]})),
     ]);
-    assert_eq!(parsed.parse_warning_count, 4);
+    assert_eq!(parsed.parse_warning_count, 5);
     assert_eq!(parsed.messages.len(), 1);
 }
 

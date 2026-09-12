@@ -4,6 +4,8 @@
 //! text. Older lifecycle events reuse their call ids and can enrich the
 //! same rows. Assistant response mirrors share a response id; user and
 //! compaction mirrors are already represented by their transcript records.
+//! Web tools use either `WebSearch` or the older `Extension/web.search`
+//! shape; both carry the query, action, and results of `web_search_end`.
 
 use std::path::Path;
 
@@ -98,6 +100,7 @@ impl CodexScanAccum {
                 }
                 event["type"] = json!("dynamic_tool_call_response");
             }
+            "WebSearch" => event["type"] = json!("web_search_end"),
             "Extension" => match item.get("kind").and_then(Value::as_str) {
                 Some("clock.sleep") => {
                     let Some(duration) = item.get("durationMs").and_then(Value::as_u64) else {
