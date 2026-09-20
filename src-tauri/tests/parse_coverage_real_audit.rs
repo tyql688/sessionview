@@ -148,6 +148,7 @@ fn audit_codex_token_usage_materialization(sessions: &[ParsedSession]) {
                 continue;
             }
         }
+        let mut seen_response_ids = HashSet::new();
         for line in content.lines() {
             let Ok(row) = serde_json::from_str::<Value>(line) else {
                 continue;
@@ -187,6 +188,9 @@ fn audit_codex_token_usage_materialization(sessions: &[ParsedSession]) {
             let Some(response_id) = payload.get("response_id").and_then(Value::as_str) else {
                 continue;
             };
+            if !seen_response_ids.insert(response_id.to_string()) {
+                continue;
+            }
             let Some(usage) = payload.get("usage") else {
                 continue;
             };
