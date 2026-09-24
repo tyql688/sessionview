@@ -32,6 +32,9 @@ impl crate::provider::ProviderDescriptor for Descriptor {
     fn cli_command(&self) -> &'static str {
         "codex"
     }
+    fn parser_revision(&self) -> Option<&'static str> {
+        Some("7")
+    }
 }
 
 pub struct CodexProvider {

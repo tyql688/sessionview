@@ -4,7 +4,7 @@ use rusqlite::{params, params_from_iter};
 
 use crate::models::SessionMeta;
 
-use super::super::row_mapper::row_to_session_meta;
+use super::super::row_mapper::{SESSION_META_COLUMNS, row_to_session_meta};
 use super::Database;
 use super::search::list_sessions_from_query;
 
@@ -13,17 +13,12 @@ impl Database {
         let conn = self.lock_read()?;
         list_sessions_from_query(
             &conn,
-            "SELECT id, provider, title, project_path, project_name,
-                    created_at, updated_at, message_count, file_size_bytes, source_path, is_sidechain,
-                    variant_name, model, cc_version, git_branch, parent_id,
-                    input_tokens,
-                    output_tokens,
-                    cache_read_tokens,
-                    cache_write_tokens
-             FROM sessions
-             WHERE parent_id IS NULL
-             ORDER BY updated_at DESC
-             LIMIT ?1",
+            &format!(
+                "SELECT {SESSION_META_COLUMNS} FROM sessions s
+                 WHERE s.parent_id IS NULL
+                 ORDER BY s.updated_at DESC
+                 LIMIT ?1"
+            ),
             params![limit as i64],
         )
     }
@@ -34,17 +29,11 @@ impl Database {
         parent_id: &str,
     ) -> Result<Vec<SessionMeta>, rusqlite::Error> {
         let conn = self.lock_read()?;
-        let mut stmt = conn.prepare(
-            "SELECT id, provider, title, project_path, project_name,
-                    created_at, updated_at, message_count, file_size_bytes, source_path, is_sidechain,
-                    variant_name, model, cc_version, git_branch, parent_id,
-                    input_tokens,
-                    output_tokens,
-                    cache_read_tokens,
-                    cache_write_tokens
-             FROM sessions WHERE parent_id = ?1
-             ORDER BY created_at",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {SESSION_META_COLUMNS} FROM sessions s
+             WHERE s.parent_id = ?1
+             ORDER BY s.created_at"
+        ))?;
         let rows = stmt.query_map(params![parent_id], row_to_session_meta)?;
         let mut sessions = Vec::new();
         for row in rows {

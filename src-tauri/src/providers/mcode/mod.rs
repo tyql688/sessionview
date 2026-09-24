@@ -566,7 +566,7 @@ impl SessionRow {
             .unwrap_or_default();
         let content_text = parsed_jsonl
             .as_ref()
-            .map(|parsed| content_text_from_messages(&parsed.messages))
+            .map(|parsed| crate::provider::util::dialogue_text(&parsed.messages))
             .unwrap_or_default();
         let child_session_ids = parsed_jsonl
             .as_ref()
@@ -672,38 +672,6 @@ fn attach_children_from_parent_links(sessions: &mut [ParsedSession]) {
             }
         }
     }
-}
-
-fn content_text_from_messages(messages: &[crate::models::Message]) -> String {
-    let mut out = String::new();
-    for message in messages {
-        match message.role {
-            crate::models::MessageRole::User | crate::models::MessageRole::Assistant => {
-                if message.content.trim().is_empty() {
-                    continue;
-                }
-                if !out.is_empty() {
-                    out.push('\n');
-                }
-                out.push_str(&message.content);
-            }
-            crate::models::MessageRole::System => {
-                let Some(thinking) = message.content.strip_prefix("[thinking]\n") else {
-                    continue;
-                };
-                let snippet: String = thinking.chars().take(1000).collect();
-                if snippet.trim().is_empty() {
-                    continue;
-                }
-                if !out.is_empty() {
-                    out.push('\n');
-                }
-                out.push_str(&snippet);
-            }
-            crate::models::MessageRole::Tool => {}
-        }
-    }
-    out
 }
 
 #[cfg(test)]

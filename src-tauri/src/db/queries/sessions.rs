@@ -4,23 +4,16 @@ use rusqlite::params;
 
 use crate::models::{SearchFilters, SearchResult, SessionMeta, TokenTotals};
 
-use super::super::row_mapper::row_to_session_meta;
+use super::super::row_mapper::{SESSION_META_COLUMNS, row_to_session_meta};
 use super::Database;
 use super::search::{build_fts_query, list_sessions_from_query, search_with_fts, search_with_like};
 
 impl Database {
     pub(crate) fn get_session(&self, id: &str) -> Result<Option<SessionMeta>, rusqlite::Error> {
         let conn = self.lock_read()?;
-        let mut stmt = conn.prepare(
-            "SELECT id, provider, title, project_path, project_name,
-                    created_at, updated_at, message_count, file_size_bytes, source_path, is_sidechain,
-                    variant_name, model, cc_version, git_branch, parent_id,
-                    input_tokens,
-                    output_tokens,
-                    cache_read_tokens,
-                    cache_write_tokens
-             FROM sessions WHERE id = ?1",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {SESSION_META_COLUMNS} FROM sessions s WHERE s.id = ?1"
+        ))?;
         let mut rows = stmt.query_map(params![id], row_to_session_meta)?;
         match rows.next() {
             Some(Ok(meta)) => Ok(Some(meta)),
@@ -62,14 +55,7 @@ impl Database {
         let conn = self.lock_read()?;
         list_sessions_from_query(
             &conn,
-            "SELECT id, provider, title, project_path, project_name,
-                    created_at, updated_at, message_count, file_size_bytes, source_path, is_sidechain,
-                    variant_name, model, cc_version, git_branch, parent_id,
-                    input_tokens,
-                    output_tokens,
-                    cache_read_tokens,
-                    cache_write_tokens
-             FROM sessions ORDER BY updated_at DESC",
+            &format!("SELECT {SESSION_META_COLUMNS} FROM sessions s ORDER BY s.updated_at DESC"),
             [],
         )
     }

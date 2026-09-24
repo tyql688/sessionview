@@ -604,7 +604,7 @@ fn indexable_msg(
 }
 
 #[test]
-fn indexable_content_indexes_dialogue_thinking_and_tools() {
+fn indexable_content_indexes_only_dialogue() {
     use crate::models::MessageRole;
 
     let messages = vec![
@@ -625,25 +625,10 @@ fn indexable_content_indexes_dialogue_thinking_and_tools() {
         indexable_msg(MessageRole::System, "普通系统消息不索引", None, None),
     ];
 
-    let text = super::indexable_content_text(&messages, "fallback");
-    assert!(text.contains("用户问题"));
-    assert!(text.contains("助手回复"));
-    // Tool name, input summary, and result body are now indexed.
-    assert!(text.contains("Bash"), "tool name must be indexed");
-    assert!(text.contains("grep 配置"), "tool input must be indexed");
-    assert!(
-        text.contains("工具输出里有中文命中"),
-        "tool result body must be indexed"
+    assert_eq!(
+        super::indexable_content_text(&messages, "fallback"),
+        "用户问题\n助手回复"
     );
-    // Thinking is indexed with its prefix stripped.
-    assert!(text.contains("模型在思考问题"), "thinking must be indexed");
-    assert!(
-        !text.contains("[thinking]"),
-        "thinking prefix must be stripped"
-    );
-    // Plain (non-thinking) system messages stay excluded.
-    assert!(!text.contains("普通系统消息不索引"));
-    assert!(!text.contains("fallback"));
 }
 
 #[test]
@@ -653,76 +638,52 @@ fn indexable_content_preserves_exact_part_separators_and_whitespace() {
     let messages = vec![
         indexable_msg(MessageRole::User, " user ", None, None),
         indexable_msg(MessageRole::Tool, "  result  ", Some("Bash"), Some(" cmd ")),
-        indexable_msg(MessageRole::System, "[thinking]\n  thought ", None, None),
+        indexable_msg(MessageRole::Assistant, " answer ", None, None),
     ];
 
     assert_eq!(
         super::indexable_content_text(&messages, "fallback"),
-        " user \nBash\n cmd \nresult\nthought "
+        " user \n answer "
     );
 }
 
 #[test]
-fn indexable_content_truncates_thinking_at_char_boundary() {
+fn indexable_content_never_falls_back_when_messages_carry_text() {
     use crate::models::MessageRole;
 
-    // 1200 multi-byte chars: byte-based truncation at 1000 would panic or
-    // split a character; char-based keeps exactly 1000 chars.
-    let thinking_body: String = "思".repeat(1200);
-    let messages = vec![indexable_msg(
-        MessageRole::System,
-        &format!("[thinking]\n{thinking_body}"),
-        None,
-        None,
-    )];
-
-    let text = super::indexable_content_text(&messages, "");
-    assert_eq!(text.chars().count(), 1000);
-    assert!(text.chars().all(|c| c == '思'));
-}
-
-#[test]
-fn indexable_content_truncates_tool_input_and_output() {
-    use crate::models::MessageRole;
-
-    let long_input = format!(r#"{{"text":"{}"}}"#, "多".repeat(400));
-    let long_output = "出".repeat(400);
-    let messages = vec![indexable_msg(
+    // Providers that join every message into their content_text would carry
+    // tool output and thinking back in through the fallback.
+    let tool_only = vec![indexable_msg(
         MessageRole::Tool,
-        &long_output,
-        Some("Write"),
-        Some(&long_input),
+        "工具输出",
+        Some("Bash"),
+        Some("ls"),
     )];
-
-    let text = super::indexable_content_text(&messages, "");
-    let lines: Vec<&str> = text.lines().collect();
-    assert_eq!(lines[0], "Write");
-    assert_eq!(lines[1].chars().count(), 300, "tool input capped at 300");
-    assert_eq!(lines[2].chars().count(), 300, "tool output capped at 300");
+    assert_eq!(
+        super::indexable_content_text(&tool_only, "Bash ls 工具输出"),
+        ""
+    );
+    let thinking_only = vec![indexable_msg(
+        MessageRole::System,
+        "[thinking]\n思考",
+        None,
+        None,
+    )];
+    assert_eq!(
+        super::indexable_content_text(&thinking_only, "[thinking]\n思考"),
+        ""
+    );
 }
 
 #[test]
-fn indexable_content_falls_back_when_nothing_indexable() {
+fn indexable_content_falls_back_for_message_stubs() {
     use crate::models::MessageRole;
 
-    let messages = vec![indexable_msg(
-        MessageRole::System,
-        "plain system",
-        None,
-        None,
-    )];
-    let text = super::indexable_content_text(&messages, "provider text");
-    assert_eq!(text, "provider text");
-}
-
-#[test]
-fn truncate_chars_is_multibyte_safe_at_boundary() {
-    // "a✓" repeated: boundary falls between 1- and 3-byte chars.
-    let mixed: String = "a✓".repeat(10);
-    assert_eq!(super::truncate_chars(&mixed, 3), "a✓a");
-    assert_eq!(super::truncate_chars(&mixed, 20), mixed.as_str());
-    assert_eq!(super::truncate_chars(&mixed, 21), mixed.as_str());
-    assert_eq!(super::truncate_chars("", 5), "");
+    let stubs = vec![indexable_msg(MessageRole::Assistant, "", None, None)];
+    assert_eq!(
+        super::indexable_content_text(&stubs, "provider text"),
+        "provider text"
+    );
 }
 
 #[test]
@@ -968,7 +929,8 @@ fn compact_if_bloated_skips_lean_files_and_shrinks_after_mass_delete() {
     let dir = TempDir::new().unwrap();
     let db = Database::open(dir.path()).unwrap();
 
-    // Fresh DB: nothing to reclaim.
+    // The first pass records a baseline; a lean file then has nothing to reclaim.
+    assert!(db.compact_if_bloated().unwrap());
     assert!(!db.compact_if_bloated().unwrap());
 
     // Index enough content that deleting it leaves a large freelist.
@@ -1004,5 +966,55 @@ fn compact_if_bloated_skips_lean_files_and_shrinks_after_mass_delete() {
     );
 
     // Second pass is a no-op: freelist already reclaimed.
+    assert!(!db.compact_if_bloated().unwrap());
+}
+
+#[test]
+fn compact_if_bloated_merges_an_fts_index_grown_by_rewrites() {
+    let dir = TempDir::new().unwrap();
+    let db = Database::open(dir.path()).unwrap();
+    let file_len = || {
+        std::fs::metadata(dir.path().join("sessions.db"))
+            .unwrap()
+            .len()
+    };
+    let snapshot = |round: usize| -> Vec<ParsedSession> {
+        (0..100)
+            .map(|i| ParsedSession {
+                meta: sample_meta(&format!("churn-{i}")),
+                messages: Vec::new(),
+                content_text: format!("round{round} words{i} ").repeat(400),
+                parse_warning_count: 0,
+                child_session_ids: Vec::new(),
+                usage_events: Vec::new(),
+                source_mtime: 0,
+            })
+            .collect()
+    };
+    db.sync_provider_snapshot(&Provider::Claude, &snapshot(0), true, &[])
+        .unwrap();
+    db.checkpoint_truncate().unwrap();
+    assert!(db.compact_if_bloated().unwrap());
+    let baseline = file_len();
+
+    // Rewriting every session keeps the old postings in unmerged segments:
+    // the file grows while the freelist stays small.
+    for round in 1..=6 {
+        db.sync_provider_snapshot(&Provider::Claude, &snapshot(round), true, &[])
+            .unwrap();
+        db.checkpoint_truncate().unwrap();
+    }
+    let grown = file_len();
+    assert!(
+        grown >= baseline * 2,
+        "rewrites should grow the index: baseline={baseline} grown={grown}"
+    );
+
+    assert!(db.compact_if_bloated().unwrap());
+    let compacted = file_len();
+    assert!(
+        compacted * 2 < grown,
+        "expected the merged index to shrink the file: grown={grown} compacted={compacted}"
+    );
     assert!(!db.compact_if_bloated().unwrap());
 }

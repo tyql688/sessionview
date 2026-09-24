@@ -6,6 +6,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use rayon::prelude::*;
 
 use crate::db::Database;
+use crate::db::sync::INDEX_CONTENT_REVISION;
 use crate::models::{Provider, SessionMeta, TreeNode, TreeNodeType};
 use crate::pricing::{
     self, PRICING_CATALOG_JSON_KEY, PRICING_CATALOG_UPDATED_AT_KEY, PricingCatalog,
@@ -14,11 +15,18 @@ use crate::provider::{ParsedSession, SessionProvider, TokenStatRow};
 use crate::services::error::{ServiceError, ServiceResult};
 use crate::services::image_cache::ImageCacheService;
 
-// History resolution and completed items change the transcript, search text
-// and tool counts even when a Codex source file has not changed. Advance only
-// after its snapshot commits, so the first scan with this parser refreshes old data.
-const CODEX_PARSER_REVISION_KEY: &str = "codex_parser_revision";
-const CODEX_PARSER_REVISION: &str = "7";
+/// Meta key holding the `ProviderDescriptor::parser_revision` whose snapshot
+/// last committed. It advances only after a commit, so the first scan with a
+/// new parser refreshes old data.
+fn parser_revision_key(provider: &Provider) -> String {
+    format!("{}_parser_revision", provider.key())
+}
+
+/// Meta key holding the `INDEX_CONTENT_REVISION` a provider's stored search
+/// content was last committed with; a mismatch re-parses the provider once.
+fn index_content_revision_key(provider: &Provider) -> String {
+    format!("{}_index_content_revision", provider.key())
+}
 
 #[derive(Clone)]
 pub struct Indexer {
@@ -33,6 +41,9 @@ struct ProviderWork {
     unchanged_source_paths: Vec<String>,
     stats_batch: Vec<(String, Vec<TokenStatRow>)>,
     pricing_revision: String,
+    /// Re-parsed for an `INDEX_CONTENT_REVISION` change: every session's
+    /// indexed content is rewritten.
+    rewrites_index: bool,
 }
 
 fn epoch_millis(time: SystemTime) -> ServiceResult<i64> {
@@ -179,12 +190,18 @@ impl Indexer {
             log::warn!("post-reindex WAL checkpoint failed: {error}");
         }
 
-        // Reclaim freelist bloat (mass deletions, clear+rebuild churn). The
-        // 10% threshold inside makes this a no-op on ordinary passes; when it
-        // does fire it shrinks the file to live data. Best-effort like the
-        // checkpoint above.
-        match self.db.compact_if_bloated() {
-            Ok(true) => log::info!("post-reindex compaction reclaimed freelist pages"),
+        // Reclaim file bloat (mass deletions, clear+rebuild churn, FTS
+        // postings left behind by rewritten sessions). The thresholds inside
+        // make this a no-op on ordinary passes; when it does fire it shrinks
+        // the file to live data. A pass that rewrote a provider's whole index
+        // compacts regardless. Best-effort like the checkpoint above.
+        let compaction = if works.iter().any(|work| work.rewrites_index) {
+            self.db.compact().map(|()| true)
+        } else {
+            self.db.compact_if_bloated()
+        };
+        match compaction {
+            Ok(true) => log::info!("post-reindex compaction shrank the database to its live data"),
             Ok(false) => {}
             Err(error) => log::warn!("post-reindex compaction failed: {error}"),
         }
@@ -256,30 +273,28 @@ impl Indexer {
         // already indexed". A forced parse hands the provider an empty
         // snapshot instead: every file reads as changed and gets re-parsed,
         // without the destructive mtime-zeroing the old refresh path used.
-        let codex_parser_changed = provider_kind == Provider::Codex
-            && self
-                .db
-                .get_meta(CODEX_PARSER_REVISION_KEY)
-                .map_err(|e| {
-                    ServiceError::LoadProviderSourceSnapshot(
-                        provider_kind.key().to_string(),
-                        e.to_string(),
-                    )
-                })?
-                .as_deref()
-                != Some(CODEX_PARSER_REVISION);
-        let pricing_changed = self
-            .db
-            .get_meta(&format!("usage_pricing_revision:{}", provider_kind.key()))
-            .map_err(|e| {
+        let meta_differs = |key: &str, expected: &str| -> ServiceResult<bool> {
+            let stored = self.db.get_meta(key).map_err(|e| {
                 ServiceError::LoadProviderSourceSnapshot(
                     provider_kind.key().to_string(),
                     e.to_string(),
                 )
-            })?
-            .as_deref()
-            != Some(pricing_revision);
-        let known = if force_parse || codex_parser_changed || pricing_changed {
+            })?;
+            Ok(stored.as_deref() != Some(expected))
+        };
+        let parser_changed = match provider_kind.descriptor().parser_revision() {
+            Some(revision) => meta_differs(&parser_revision_key(&provider_kind), revision)?,
+            None => false,
+        };
+        let pricing_changed = meta_differs(
+            &format!("usage_pricing_revision:{}", provider_kind.key()),
+            pricing_revision,
+        )?;
+        let content_changed = meta_differs(
+            &index_content_revision_key(&provider_kind),
+            INDEX_CONTENT_REVISION,
+        )?;
+        let known = if force_parse || parser_changed || pricing_changed || content_changed {
             HashMap::new()
         } else {
             self.db
@@ -304,6 +319,7 @@ impl Indexer {
             unchanged_source_paths,
             stats_batch,
             pricing_revision: pricing_revision.to_string(),
+            rewrites_index: content_changed,
         })
     }
 
@@ -339,9 +355,20 @@ impl Indexer {
                 ServiceError::SyncProvider(work.provider_kind.key().to_string(), e.to_string())
             })?;
 
-        if work.provider_kind == Provider::Codex && !work.sessions.is_empty() {
+        self.db
+            .set_meta(
+                &index_content_revision_key(&work.provider_kind),
+                INDEX_CONTENT_REVISION,
+            )
+            .map_err(|e| {
+                ServiceError::SyncProvider(work.provider_kind.key().to_string(), e.to_string())
+            })?;
+
+        if let Some(revision) = work.provider_kind.descriptor().parser_revision()
+            && !work.sessions.is_empty()
+        {
             self.db
-                .set_meta(CODEX_PARSER_REVISION_KEY, CODEX_PARSER_REVISION)
+                .set_meta(&parser_revision_key(&work.provider_kind), revision)
                 .map_err(|e| {
                     ServiceError::SyncProvider(work.provider_kind.key().to_string(), e.to_string())
                 })?;

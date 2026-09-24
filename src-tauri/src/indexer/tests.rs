@@ -118,6 +118,39 @@ fn pricing_revision_reprices_unchanged_sources_and_survives_failed_refresh() {
 }
 
 #[test]
+fn index_content_revision_refreshes_unchanged_sources_once() {
+    let dir = TempDir::new().unwrap();
+    let db = Arc::new(Database::open(dir.path()).unwrap());
+    let indexer = super::Indexer::new(
+        db.clone(),
+        vec![Box::new(IncrementalCodexProvider)],
+        dir.path().to_path_buf(),
+    );
+    assert_eq!(indexer.reindex().unwrap(), 1);
+    assert_eq!(indexer.reindex().unwrap(), 0);
+    // Content stored under an older definition of what gets indexed, and a
+    // compaction baseline no growth reaches: only the rewrite compacts.
+    let revision_key = super::index_content_revision_key(&Provider::Codex);
+    db.set_meta(&revision_key, "0").unwrap();
+    let out_of_reach = i64::MAX.to_string();
+    db.set_meta(crate::db::COMPACTED_PAGE_COUNT_KEY, &out_of_reach)
+        .unwrap();
+    assert_eq!(indexer.reindex().unwrap(), 1);
+    assert_eq!(
+        db.get_meta(&revision_key).unwrap().as_deref(),
+        Some(crate::db::sync::INDEX_CONTENT_REVISION)
+    );
+    assert_ne!(
+        db.get_meta(crate::db::COMPACTED_PAGE_COUNT_KEY)
+            .unwrap()
+            .as_deref(),
+        Some(out_of_reach.as_str()),
+        "a rewritten index is compacted"
+    );
+    assert_eq!(indexer.reindex().unwrap(), 0);
+}
+
+#[test]
 fn codex_parser_revision_refreshes_unchanged_sources_once() {
     let dir = TempDir::new().unwrap();
     let db = Arc::new(Database::open(dir.path()).unwrap());
@@ -125,7 +158,8 @@ fn codex_parser_revision_refreshes_unchanged_sources_once() {
     old.meta.provider = Provider::Codex;
     db.sync_provider_snapshot(&Provider::Codex, &[old], false, &[])
         .unwrap();
-    db.set_meta(super::CODEX_PARSER_REVISION_KEY, "1").unwrap();
+    let revision_key = super::parser_revision_key(&Provider::Codex);
+    db.set_meta(&revision_key, "1").unwrap();
     let indexer = super::Indexer::new(
         db.clone(),
         vec![Box::new(IncrementalCodexProvider)],
@@ -139,10 +173,8 @@ fn codex_parser_revision_refreshes_unchanged_sources_once() {
     );
     assert_eq!(db.list_sessions().unwrap()[0].message_count, 1);
     assert_eq!(
-        db.get_meta(super::CODEX_PARSER_REVISION_KEY)
-            .unwrap()
-            .as_deref(),
-        Some(super::CODEX_PARSER_REVISION)
+        db.get_meta(&revision_key).unwrap().as_deref(),
+        Provider::Codex.descriptor().parser_revision()
     );
     assert_eq!(
         indexer

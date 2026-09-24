@@ -6,13 +6,115 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use rusqlite::{Connection, TransactionBehavior, params_from_iter};
+use rusqlite::functions::FunctionFlags;
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params, params_from_iter};
 
 /// Number of read-only connections in the pool. SQLite WAL allows
 /// concurrent readers across distinct connections, so each connection in
 /// the pool can serve a query in parallel; we serialize within a single
 /// connection via its Mutex.
 const READ_POOL_SIZE: usize = 4;
+/// Meta key holding the page count the last compaction left behind.
+pub(crate) const COMPACTED_PAGE_COUNT_KEY: &str = "compacted_page_count";
+
+/// `sessions.content_text` is a virtual generated column over the
+/// zstd-compressed `content_zst` blob (the search text is ~3.8x smaller
+/// compressed). Every connection registers this function before touching
+/// the table; one that lacks it fails loudly instead of misreading content.
+const CONTENT_TEXT_FUNCTION: &str = "session_content_text";
+
+/// Keeps the external-content FTS index in step with `sessions`. The
+/// `UPDATE OF` list keeps token-total/mtime-only updates from churning the
+/// trigram index (it is ~2x the indexed content).
+const SESSIONS_FTS_TRIGGERS: &str = "
+    CREATE TRIGGER IF NOT EXISTS sessions_ai AFTER INSERT ON sessions BEGIN
+        INSERT INTO sessions_fts(rowid, title, content_text, project_name)
+        VALUES (new.rowid, new.title, new.content_text, new.project_name);
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS sessions_ad AFTER DELETE ON sessions BEGIN
+        INSERT INTO sessions_fts(sessions_fts, rowid, title, content_text, project_name)
+        VALUES ('delete', old.rowid, old.title, old.content_text, old.project_name);
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS sessions_au
+    AFTER UPDATE OF title, content_zst, project_name ON sessions BEGIN
+        INSERT INTO sessions_fts(sessions_fts, rowid, title, content_text, project_name)
+        VALUES ('delete', old.rowid, old.title, old.content_text, old.project_name);
+        INSERT INTO sessions_fts(rowid, title, content_text, project_name)
+        VALUES (new.rowid, new.title, new.content_text, new.project_name);
+    END;";
+
+pub(crate) fn compress_content(text: &str) -> Result<Vec<u8>, rusqlite::Error> {
+    zstd::bulk::compress(text.as_bytes(), zstd::DEFAULT_COMPRESSION_LEVEL)
+        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))
+}
+
+/// An empty blob is the column default and reads as empty text.
+fn decompress_content(blob: &[u8]) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    if blob.is_empty() {
+        return Ok(String::new());
+    }
+    Ok(String::from_utf8(zstd::decode_all(blob)?)?)
+}
+
+fn register_content_function(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.create_scalar_function(
+        CONTENT_TEXT_FUNCTION,
+        1,
+        FunctionFlags::SQLITE_UTF8
+            | FunctionFlags::SQLITE_DETERMINISTIC
+            | FunctionFlags::SQLITE_INNOCUOUS,
+        |ctx| {
+            let blob = ctx
+                .get_raw(0)
+                .as_blob()
+                .map_err(|error| rusqlite::Error::UserFunctionError(error.into()))?;
+            decompress_content(blob).map_err(rusqlite::Error::UserFunctionError)
+        },
+    )
+}
+
+/// Whether `sessions.content_text` is still a stored text column (false for
+/// the generated column, and for a fresh file without a `sessions` table).
+fn has_plain_content(conn: &Connection) -> Result<bool, rusqlite::Error> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_xinfo('sessions')
+                        WHERE name = 'content_text' AND hidden = 0)",
+        [],
+        |row| row.get(0),
+    )
+}
+
+/// Move stored content into `content_zst` and turn `content_text` into the
+/// generated column. The FTS index stays valid as is: the column reads back
+/// the exact text it was built from.
+fn compress_plain_content(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "DROP TRIGGER IF EXISTS sessions_ai;
+         DROP TRIGGER IF EXISTS sessions_ad;
+         DROP TRIGGER IF EXISTS sessions_au;
+         ALTER TABLE sessions ADD COLUMN content_zst BLOB NOT NULL DEFAULT x'';",
+    )?;
+    {
+        let rowids: Vec<i64> = conn
+            .prepare("SELECT rowid FROM sessions")?
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        let mut read = conn.prepare("SELECT content_text FROM sessions WHERE rowid = ?1")?;
+        let mut write = conn.prepare("UPDATE sessions SET content_zst = ?1 WHERE rowid = ?2")?;
+        for rowid in rowids {
+            let text: String = read.query_row([rowid], |row| row.get(0))?;
+            write.execute(params![compress_content(&text)?, rowid])?;
+        }
+    }
+    conn.execute_batch(&format!(
+        "ALTER TABLE sessions DROP COLUMN content_text;
+         ALTER TABLE sessions ADD COLUMN content_text TEXT
+             GENERATED ALWAYS AS ({CONTENT_TEXT_FUNCTION}(content_zst)) VIRTUAL;
+         {SESSIONS_FTS_TRIGGERS}"
+    ))
+}
 
 pub struct Database {
     write_conn: Mutex<Connection>,
@@ -67,6 +169,26 @@ fn has_legacy_date_stats(conn: &Connection) -> Result<bool, rusqlite::Error> {
     Ok(count > 0)
 }
 
+/// Merge the FTS index's b-trees into one and VACUUM, then record the
+/// resulting page count as the baseline `compact_if_bloated` measures growth
+/// against.
+fn compact_on(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch("INSERT INTO sessions_fts(sessions_fts) VALUES('optimize')")?;
+    conn.execute("VACUUM", [])?;
+    // In WAL mode the rewritten pages land in the WAL; the main file only
+    // shrinks once they are checkpointed back and the WAL is truncated.
+    conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+    let compacted: i64 = conn.query_row("SELECT page_count FROM pragma_page_count", [], |row| {
+        row.get(0)
+    })?;
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![COMPACTED_PAGE_COUNT_KEY, compacted.to_string()],
+    )?;
+    Ok(())
+}
+
 impl Database {
     /// Fold the WAL back into the main file and truncate it. Heavy sync
     /// passes append hundreds of MB of WAL, and the passive autocheckpoint
@@ -81,11 +203,16 @@ impl Database {
     }
 
     /// Reclaim file-level bloat after heavy churn. Skips quickly unless the
-    /// freelist exceeds ~10% of the file; then merges the FTS index's
-    /// incremental b-trees and VACUUMs, shrinking the file to its live data
-    /// (observed 20x growth on long-lived DBs that never vacuumed). VACUUM
-    /// waits on the busy timeout if a reader holds the file; callers treat
-    /// failure as best-effort and retry on a later maintenance pass.
+    /// freelist exceeds ~10% of the file or the file has grown to twice the
+    /// size the last compaction left (or was never compacted): FTS5 keeps
+    /// deleted postings until its segments merge, so rewriting sessions — a
+    /// live session on every change, every session after an index-content
+    /// revision — grows the index without freeing a page. Then merges the FTS
+    /// index's incremental b-trees and VACUUMs, shrinking the file to its live
+    /// data (observed 20x growth on long-lived DBs that never vacuumed), and
+    /// records the result as the next baseline. VACUUM waits on the busy
+    /// timeout if a reader holds the file; callers treat failure as
+    /// best-effort and retry on a later maintenance pass.
     pub fn compact_if_bloated(&self) -> Result<bool, rusqlite::Error> {
         let conn = self.lock_write()?;
         let (page_count, freelist_count): (i64, i64) = conn.query_row(
@@ -93,15 +220,28 @@ impl Database {
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
-        if page_count == 0 || freelist_count * 10 < page_count {
+        let baseline: Option<i64> = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = ?1",
+                [COMPACTED_PAGE_COUNT_KEY],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .and_then(|value| value.parse().ok());
+        let grown = baseline.is_none_or(|pages| page_count >= pages * 2);
+        if page_count == 0 || (freelist_count * 10 < page_count && !grown) {
             return Ok(false);
         }
-        conn.execute_batch("INSERT INTO sessions_fts(sessions_fts) VALUES('optimize')")?;
-        conn.execute("VACUUM", [])?;
-        // In WAL mode the rewritten pages land in the WAL; the main file only
-        // shrinks once they are checkpointed back and the WAL is truncated.
-        conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        compact_on(&conn)?;
         Ok(true)
+    }
+
+    /// Compact unconditionally: after a pass that rewrote every session's
+    /// indexed content, the old postings sit in FTS segments below any growth
+    /// threshold a compacted file would cross.
+    pub fn compact(&self) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_write()?;
+        compact_on(&conn)
     }
 
     pub fn with_transaction<T, F>(&self, f: F) -> Result<T, rusqlite::Error>
@@ -132,6 +272,7 @@ impl Database {
              PRAGMA synchronous = NORMAL;
              PRAGMA cache_size = -2000;",
         )?;
+        register_content_function(&write_conn)?;
 
         // Stats are derived: drop the pre-bucket shape and reset the totals
         // and `source_mtime` so the next scan rebuilds them. The probe stays
@@ -163,7 +304,19 @@ impl Database {
             }
         }
 
-        write_conn.execute_batch(
+        // Same probe / re-check-under-lock shape as above. The freed text
+        // pages return to the freelist; `compact_if_bloated` reclaims them
+        // after the next index pass.
+        if has_plain_content(&write_conn)? {
+            let transaction =
+                rusqlite::Transaction::new_unchecked(&write_conn, TransactionBehavior::Immediate)?;
+            if has_plain_content(&transaction)? {
+                compress_plain_content(&transaction)?;
+            }
+            transaction.commit()?;
+        }
+
+        write_conn.execute_batch(&format!(
             "CREATE TABLE IF NOT EXISTS sessions (
                 id                 TEXT PRIMARY KEY,
                 provider           TEXT NOT NULL,
@@ -175,7 +328,9 @@ impl Database {
                 message_count      INTEGER NOT NULL DEFAULT 0,
                 file_size_bytes    INTEGER NOT NULL DEFAULT 0,
                 source_path        TEXT NOT NULL DEFAULT '',
-                content_text       TEXT NOT NULL DEFAULT '',
+                content_zst        BLOB NOT NULL DEFAULT x'',
+                content_text       TEXT
+                    GENERATED ALWAYS AS ({CONTENT_TEXT_FUNCTION}(content_zst)) VIRTUAL,
                 title_custom       INTEGER NOT NULL DEFAULT 0,
                 is_sidechain       INTEGER NOT NULL DEFAULT 0,
                 variant_name       TEXT,
@@ -203,26 +358,7 @@ impl Database {
                 content_rowid='rowid',
                 tokenize='trigram'
             );
-
-            CREATE TRIGGER IF NOT EXISTS sessions_ai AFTER INSERT ON sessions BEGIN
-                INSERT INTO sessions_fts(rowid, title, content_text, project_name)
-                VALUES (new.rowid, new.title, new.content_text, new.project_name);
-            END;
-
-            CREATE TRIGGER IF NOT EXISTS sessions_ad AFTER DELETE ON sessions BEGIN
-                INSERT INTO sessions_fts(sessions_fts, rowid, title, content_text, project_name)
-                VALUES ('delete', old.rowid, old.title, old.content_text, old.project_name);
-            END;
-
-            -- UPDATE OF: token-total/mtime-only updates must not churn the
-            -- trigram index (it is ~10x the indexed content).
-            CREATE TRIGGER IF NOT EXISTS sessions_au
-            AFTER UPDATE OF title, content_text, project_name ON sessions BEGIN
-                INSERT INTO sessions_fts(sessions_fts, rowid, title, content_text, project_name)
-                VALUES ('delete', old.rowid, old.title, old.content_text, old.project_name);
-                INSERT INTO sessions_fts(rowid, title, content_text, project_name)
-                VALUES (new.rowid, new.title, new.content_text, new.project_name);
-            END;
+            {SESSIONS_FTS_TRIGGERS}
 
             CREATE TABLE IF NOT EXISTS meta (
                 key   TEXT PRIMARY KEY,
@@ -280,7 +416,7 @@ impl Database {
                 DELETE FROM session_tool_stats WHERE session_id = OLD.id;
                 DELETE FROM session_tool_index WHERE session_id = OLD.id;
             END;",
-        )?;
+        ))?;
 
         // Additive migration: retain old totals until each provider is repriced.
         // Recheck under the write lock so simultaneous new-version opens agree.
@@ -344,6 +480,7 @@ impl Database {
             conn.pragma_update(None, "busy_timeout", 5000)?;
             conn.pragma_update(None, "journal_mode", "WAL")?;
             conn.pragma_update(None, "query_only", "ON")?;
+            register_content_function(&conn)?;
             read_pool.push(Mutex::new(conn));
         }
 
@@ -353,5 +490,109 @@ impl Database {
             read_cursor: AtomicUsize::new(0),
             db_path,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Database, compress_content, has_plain_content};
+    use crate::models::SearchFilters;
+
+    const SESSION_ID: &str = "11111111-1111-4111-a111-111111111111";
+
+    /// `sessions`, its FTS index and triggers as stored before `content_zst`.
+    const PLAIN_CONTENT_SCHEMA: &str = "
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY, provider TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
+            project_path TEXT NOT NULL DEFAULT '', project_name TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0,
+            message_count INTEGER NOT NULL DEFAULT 0, file_size_bytes INTEGER NOT NULL DEFAULT 0,
+            source_path TEXT NOT NULL DEFAULT '', content_text TEXT NOT NULL DEFAULT '',
+            title_custom INTEGER NOT NULL DEFAULT 0, is_sidechain INTEGER NOT NULL DEFAULT 0,
+            variant_name TEXT, model TEXT, cc_version TEXT, git_branch TEXT, parent_id TEXT,
+            source_mtime INTEGER NOT NULL DEFAULT 0, input_tokens INTEGER NOT NULL DEFAULT 0,
+            output_tokens INTEGER NOT NULL DEFAULT 0, cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+            cache_write_tokens INTEGER NOT NULL DEFAULT 0);
+        CREATE VIRTUAL TABLE sessions_fts USING fts5(title, content_text, project_name,
+            content='sessions', content_rowid='rowid', tokenize='trigram');
+        CREATE TRIGGER sessions_ai AFTER INSERT ON sessions BEGIN
+            INSERT INTO sessions_fts(rowid, title, content_text, project_name)
+            VALUES (new.rowid, new.title, new.content_text, new.project_name);
+        END;
+        CREATE TRIGGER sessions_ad AFTER DELETE ON sessions BEGIN
+            INSERT INTO sessions_fts(sessions_fts, rowid, title, content_text, project_name)
+            VALUES ('delete', old.rowid, old.title, old.content_text, old.project_name);
+        END;
+        CREATE TRIGGER sessions_au AFTER UPDATE OF title, content_text, project_name ON sessions
+        BEGIN
+            INSERT INTO sessions_fts(sessions_fts, rowid, title, content_text, project_name)
+            VALUES ('delete', old.rowid, old.title, old.content_text, old.project_name);
+            INSERT INTO sessions_fts(rowid, title, content_text, project_name)
+            VALUES (new.rowid, new.title, new.content_text, new.project_name);
+        END;
+        CREATE TABLE favorites (session_id TEXT PRIMARY KEY, added_at INTEGER NOT NULL);
+        INSERT INTO sessions (id, provider, title, project_name, content_text, title_custom)
+            VALUES ('11111111-1111-4111-a111-111111111111', 'claude', 'Renamed', 'demo',
+                    'alpha 需要 beta', 1);
+        INSERT INTO favorites VALUES ('11111111-1111-4111-a111-111111111111', 1);";
+
+    fn search(db: &Database, query: &str) -> Vec<(String, String)> {
+        let filters = SearchFilters {
+            query: query.into(),
+            ..SearchFilters::default()
+        };
+        db.search_filtered(&filters)
+            .unwrap()
+            .into_iter()
+            .map(|result| (result.session.id, result.snippet))
+            .collect()
+    }
+
+    #[test]
+    fn open_moves_plain_content_into_compressed_column_with_fts_intact() {
+        let dir = tempfile::TempDir::new().unwrap();
+        rusqlite::Connection::open(dir.path().join("sessions.db"))
+            .unwrap()
+            .execute_batch(PLAIN_CONTENT_SCHEMA)
+            .unwrap();
+
+        let db = Database::open(dir.path()).unwrap();
+
+        // Trigram FTS serves >= 3-char queries, LIKE the shorter ones.
+        assert_eq!(
+            search(&db, "alpha"),
+            [(
+                SESSION_ID.to_string(),
+                "<mark>alpha</mark> 需要 beta".to_string()
+            )]
+        );
+        assert_eq!(
+            search(&db, "需要"),
+            [(
+                SESSION_ID.to_string(),
+                "alpha <mark>需要</mark> beta".to_string()
+            )]
+        );
+        db.with_transaction(|conn| {
+            assert!(!has_plain_content(conn)?);
+            conn.execute(
+                "INSERT INTO sessions_fts(sessions_fts, rank) VALUES('integrity-check', 1)",
+                [],
+            )?;
+            let (title, favorites): (String, i64) = conn.query_row(
+                "SELECT title, (SELECT COUNT(*) FROM favorites) FROM sessions WHERE title_custom = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            assert_eq!((title.as_str(), favorites), ("Renamed", 1));
+            conn.execute(
+                "UPDATE sessions SET content_zst = ?1",
+                [compress_content("gamma delta")?],
+            )
+        })
+        .unwrap();
+
+        assert!(search(&db, "alpha").is_empty());
+        assert_eq!(search(&db, "gamma").len(), 1);
     }
 }

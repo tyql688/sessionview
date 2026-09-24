@@ -7,85 +7,26 @@ use crate::provider::ParsedSession;
 
 use super::Database;
 
-/// Prefix marking thinking content stored as `MessageRole::System`.
-const THINKING_PREFIX: &str = "[thinking]";
-/// Max chars of each thinking block indexed for search.
-const THINKING_INDEX_CHARS: usize = 1000;
-/// Max chars of a tool's input summary / result content indexed for search.
-const TOOL_INDEX_CHARS: usize = 300;
+/// Version of what `indexable_content_text` puts into the search index. Bump
+/// it whenever that changes: the indexer then re-parses each provider once so
+/// its stored content matches.
+pub(crate) const INDEX_CONTENT_REVISION: &str = "3";
 
-/// Truncate to at most `max_chars` characters on a char boundary (never
-/// slices inside a multi-byte character).
-fn truncate_chars(text: &str, max_chars: usize) -> &str {
-    match text.char_indices().nth(max_chars) {
-        Some((byte_index, _)) => &text[..byte_index],
-        None => text,
-    }
-}
-
-fn append_indexable_part(content: &mut String, part: &str) {
-    if part.is_empty() {
-        return;
-    }
-    if !content.is_empty() {
-        content.push('\n');
-    }
-    content.push_str(part);
-}
-
-/// Build the FTS content text from typed messages: full user + assistant
-/// dialogue, plus truncated excerpts of thinking blocks (`[thinking]`-prefixed
-/// System messages) and tool calls (tool name + compact input summary + result
-/// snippet), so global search also reaches tool activity and reasoning.
-/// Falls back to the provider-supplied content_text when messages carry no
-/// indexable content (e.g. OpenCode emits Assistant stubs only for token
-/// accounting).
+/// Build the FTS content text from typed messages: the user + assistant
+/// dialogue, which is all that search covers (tool calls and thinking are not
+/// indexed). Falls back to the provider-supplied content_text only when the
+/// messages are empty stubs or absent (OpenCode emits Assistant stubs for
+/// token accounting, MiniMax Code none; both keep the dialogue in that text);
+/// several providers join tool output and thinking into that text, so no
+/// other session takes it.
 fn indexable_content_text(messages: &[Message], fallback: &str) -> String {
-    let mut content = String::new();
-    for message in messages {
-        match message.role {
-            MessageRole::User | MessageRole::Assistant => {
-                if !message.content.trim().is_empty() {
-                    append_indexable_part(&mut content, &message.content);
-                }
-            }
-            MessageRole::System => {
-                let Some(thinking) = message.content.strip_prefix(THINKING_PREFIX) else {
-                    continue;
-                };
-                let thinking = thinking.trim_start();
-                if !thinking.is_empty() {
-                    append_indexable_part(
-                        &mut content,
-                        truncate_chars(thinking, THINKING_INDEX_CHARS),
-                    );
-                }
-            }
-            MessageRole::Tool => {
-                if let Some(name) = message.tool_name.as_deref() {
-                    append_indexable_part(&mut content, name);
-                }
-                if let Some(input) = message.tool_input.as_deref()
-                    && !input.trim().is_empty()
-                {
-                    append_indexable_part(&mut content, truncate_chars(input, TOOL_INDEX_CHARS));
-                }
-                let tool_output = message.content.trim();
-                if !tool_output.is_empty() {
-                    append_indexable_part(
-                        &mut content,
-                        truncate_chars(tool_output, TOOL_INDEX_CHARS),
-                    );
-                }
-            }
-        }
-    }
-
-    if content.is_empty() {
+    if messages
+        .iter()
+        .all(|message| message.role != MessageRole::Tool && message.content.trim().is_empty())
+    {
         return fallback.to_string();
     }
-
-    content
+    crate::provider::util::dialogue_text(messages)
 }
 
 pub use crate::provider::TokenStatRow;
@@ -596,7 +537,7 @@ fn upsert_session_on(
 
     conn.execute(
         "INSERT INTO sessions (id, provider, title, project_path, project_name,
-            created_at, updated_at, message_count, file_size_bytes, source_path, content_text, is_sidechain,
+            created_at, updated_at, message_count, file_size_bytes, source_path, content_zst, is_sidechain,
             variant_name, model, cc_version, git_branch, parent_id, source_mtime)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
          ON CONFLICT(id) DO UPDATE SET
@@ -609,7 +550,7 @@ fn upsert_session_on(
             message_count = excluded.message_count,
             file_size_bytes = excluded.file_size_bytes,
             source_path = excluded.source_path,
-            content_text = excluded.content_text,
+            content_zst = excluded.content_zst,
             is_sidechain = CASE
                 WHEN excluded.provider = 'pi' THEN excluded.is_sidechain
                 WHEN excluded.is_sidechain = 1 OR sessions.is_sidechain = 1 THEN 1
@@ -635,7 +576,7 @@ fn upsert_session_on(
             meta.message_count,
             meta.file_size_bytes,
             meta.source_path,
-            content_text,
+            super::compress_content(content_text)?,
             meta.is_sidechain as i64,
             meta.variant_name,
             meta.model,

@@ -169,8 +169,9 @@ impl SessionProvider for OpenCodeProvider {
             }
         }
 
-        // Batch: content text per session from text parts (avoids N+1)
-        // We collect up to 50 text parts per session using a window function.
+        // Batch: each session's dialogue from its text parts (avoids N+1).
+        // The scan emits message stubs, so this text is what search indexes:
+        // every part, in order.
         let mut content_map: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         {
@@ -182,21 +183,12 @@ impl SessionProvider for OpenCodeProvider {
             let rows = stmt.query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
             })?;
-            let mut counts: std::collections::HashMap<String, usize> =
-                std::collections::HashMap::new();
             for r in rows {
-                let r = r?;
-                let (sid, text) = r;
-                let count = counts.entry(sid.clone()).or_insert(0);
-                if *count >= 50 {
-                    continue;
-                }
-                *count += 1;
+                let (sid, text) = r?;
                 if let Some(t) = text {
-                    content_map
-                        .entry(sid)
-                        .or_default()
-                        .push_str(&format!("{}\n", t));
+                    let content = content_map.entry(sid).or_default();
+                    content.push_str(&t);
+                    content.push('\n');
                 }
             }
         }
