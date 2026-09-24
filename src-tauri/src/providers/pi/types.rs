@@ -12,8 +12,12 @@ pub enum PiEntry {
     ModelChange(PiModelChangeEntry),
     #[serde(rename = "thinking_level_change")]
     ThinkingLevelChange(PiThinkingLevelChangeEntry),
+    #[serde(rename = "usage")]
+    Usage(PiUsageEntry),
     #[serde(rename = "compaction")]
     Compaction(PiCompactionEntry),
+    #[serde(rename = "context_edit")]
+    ContextEdit(PiContextEditEntry),
     #[serde(rename = "branch_summary")]
     BranchSummary(PiBranchSummaryEntry),
     #[serde(rename = "custom")]
@@ -24,6 +28,13 @@ pub enum PiEntry {
     Label(PiLabelEntry),
     #[serde(rename = "session_info")]
     SessionInfo(PiSessionInfoEntry),
+    /// An entry whose payload failed to parse (unknown type or shape), kept
+    /// only for its tree link so one unreadable entry cannot cut the branch.
+    #[serde(skip)]
+    Unparsed {
+        id: String,
+        parent_id: Option<String>,
+    },
 }
 
 /// Session header (first line of JSONL)
@@ -92,6 +103,29 @@ pub struct PiCompactionEntry {
     pub first_kept_entry_index: Option<usize>,
     #[serde(rename = "tokensBefore")]
     pub tokens_before: Option<u64>,
+    /// Usage of generating the summary.
+    pub usage: Option<PiUsage>,
+    /// Summary written by an extension, possibly with its own model.
+    #[serde(rename = "fromHook", default)]
+    pub from_hook: bool,
+}
+
+/// Model usage that is not an assistant message (e.g. cache warming). Hidden
+/// from the transcript; counts toward session usage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PiUsageEntry {
+    #[serde(flatten)]
+    pub base: PiEntryBase,
+    pub model: String,
+    pub usage: PiUsage,
+}
+
+/// Edit of what later requests send the model. The target entry stays
+/// unchanged in history, so the transcript ignores it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PiContextEditEntry {
+    #[serde(flatten)]
+    pub base: PiEntryBase,
 }
 
 /// Branch summary entry
@@ -100,8 +134,14 @@ pub struct PiBranchSummaryEntry {
     #[serde(flatten)]
     pub base: PiEntryBase,
     pub summary: String,
+    /// Leaf of the summarized (abandoned) branch.
     #[serde(rename = "fromId")]
     pub from_id: String,
+    /// Usage of generating the summary.
+    pub usage: Option<PiUsage>,
+    /// Summary written by an extension, possibly with its own model.
+    #[serde(rename = "fromHook", default)]
+    pub from_hook: bool,
 }
 
 /// Custom entry (extension state, not in LLM context)
@@ -163,7 +203,14 @@ pub enum PiAgentMessage {
     BranchSummary(PiBranchSummaryMessage),
     #[serde(rename = "compactionSummary")]
     CompactionSummary(PiCompactionSummaryMessage),
+    #[serde(rename = "system")]
+    System(PiSystemMessage),
 }
+
+/// System-prompt snapshot (`sections`, `toolsAdded`). Parsed only so the
+/// entry tree stays linked through it; it is not part of the transcript.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PiSystemMessage {}
 
 /// User message
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,6 +244,11 @@ pub struct PiToolResultMessage {
     pub content: Vec<PiContentBlock>,
     #[serde(default)]
     pub details: Option<serde_json::Value>,
+    /// Nested model work done by the tool. Only its presence is read (it
+    /// names no model), so it stays untyped: a tool's nonconforming shape
+    /// must not drop the tool result.
+    #[serde(default)]
+    pub usage: Option<serde_json::Value>,
     #[serde(rename = "isError")]
     pub is_error: bool,
     pub timestamp: u64,

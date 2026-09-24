@@ -1,12 +1,15 @@
 pub mod parser;
 pub mod types;
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use rayon::prelude::*;
+use serde_json::Value;
 use walkdir::WalkDir;
-
-use std::collections::HashMap;
 
 use crate::models::Provider;
 use crate::provider::{
@@ -30,6 +33,9 @@ impl crate::provider::ProviderDescriptor for Descriptor {
     }
     fn cli_command(&self) -> &'static str {
         "pi"
+    }
+    fn parser_revision(&self) -> Option<&'static str> {
+        Some("2")
     }
 }
 
@@ -79,9 +85,55 @@ impl PiProvider {
                 }
             }
         }
-        files.sort();
-        files
+
+        // A session file copied into another project directory keeps its
+        // header `id`, so one session can have several files. The index holds
+        // one row per id: scan only the most recently modified copy (the one
+        // Pi continues), or incremental scans alternate between the copies
+        // and re-parse the other one on every pass.
+        let mut newest: HashMap<String, (SystemTime, PathBuf)> = HashMap::new();
+        let mut kept = Vec::with_capacity(files.len());
+        for path in files {
+            let Some((id, modified)) = session_identity(&path) else {
+                // No readable session header: the parser decides and reports.
+                kept.push(path);
+                continue;
+            };
+            match newest.entry(id) {
+                Entry::Vacant(slot) => {
+                    slot.insert((modified, path));
+                }
+                Entry::Occupied(mut slot) => {
+                    let older = if modified > slot.get().0 {
+                        slot.insert((modified, path)).1
+                    } else {
+                        path
+                    };
+                    log::debug!(
+                        "Skipping older copy of Pi session {}: {}",
+                        slot.key(),
+                        older.display()
+                    );
+                }
+            }
+        }
+        kept.extend(newest.into_values().map(|(_, path)| path));
+        kept.sort();
+        kept
     }
+}
+
+/// The header `id` and modification time of a Pi session file.
+fn session_identity(path: &Path) -> Option<(String, SystemTime)> {
+    let file = std::fs::File::open(path).ok()?;
+    let modified = file.metadata().ok()?.modified().ok()?;
+    let mut line = String::new();
+    BufReader::new(file).read_line(&mut line).ok()?;
+    let header: Value = serde_json::from_str(&line).ok()?;
+    if header.get("type")?.as_str()? != "session" {
+        return None;
+    }
+    Some((header.get("id")?.as_str()?.to_string(), modified))
 }
 
 impl SessionProvider for PiProvider {
@@ -191,6 +243,31 @@ mod tests {
         let files = PiProvider::with_home(home.path().to_path_buf()).collect_jsonl_files();
 
         assert_eq!(files, vec![direct, nested]);
+    }
+
+    #[test]
+    fn collect_jsonl_files_keeps_only_the_newest_copy_of_a_session() {
+        let home = tempfile::tempdir().unwrap();
+        let sessions = home.path().join(".pi/agent/sessions");
+        let copied = r#"{"type":"session","version":3,"id":"11111111-1111-4111-a111-111111111111","timestamp":"2026-06-10T07:00:00.000Z","cwd":"/tmp/a"}"#;
+        let other = r#"{"type":"session","version":3,"id":"22222222-2222-4222-a222-222222222222","timestamp":"2026-06-10T07:00:00.000Z","cwd":"/tmp/a"}"#;
+        let older = sessions.join("--tmp-a--/session.jsonl");
+        let newer = sessions.join("--tmp-b--/session.jsonl");
+        let unrelated = sessions.join("--tmp-a--/other.jsonl");
+        for (path, header) in [(&older, copied), (&newer, copied), (&unrelated, other)] {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, header).unwrap();
+        }
+        std::fs::File::options()
+            .write(true)
+            .open(&older)
+            .unwrap()
+            .set_modified(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000))
+            .unwrap();
+
+        let files = PiProvider::with_home(home.path().to_path_buf()).collect_jsonl_files();
+
+        assert_eq!(files, vec![unrelated, newer]);
     }
 
     #[test]

@@ -111,6 +111,13 @@ fn parse_entries(path: &Path) -> Option<(PiSessionHeader, Vec<PiEntry>, u32)> {
             return None;
         }
     };
+    // Extensions keep their own JSONL files under the sessions tree (e.g.
+    // `<ext>/<id>/observation-pack/ledger.jsonl`); every Pi session, v1
+    // included, opens with a `type: "session"` header.
+    if header_value.get("type").and_then(Value::as_str) != Some("session") {
+        log::debug!("Skipping non-session Pi JSONL: {}", path.display());
+        return None;
+    }
     let original_version = header_value
         .get("version")
         .and_then(Value::as_u64)
@@ -158,6 +165,10 @@ fn parse_entries(path: &Path) -> Option<(PiSessionHeader, Vec<PiEntry>, u32)> {
 
     let mut entries: Vec<PiEntry> = Vec::new();
     for (i, value) in entry_values.into_iter().enumerate() {
+        let link = value.get("id").and_then(Value::as_str).map(|id| {
+            let parent_id = value.get("parentId").and_then(Value::as_str);
+            (id.to_string(), parent_id.map(str::to_string))
+        });
         match serde_json::from_value::<PiEntry>(value) {
             Ok(entry) => entries.push(entry),
             Err(error) => {
@@ -167,6 +178,9 @@ fn parse_entries(path: &Path) -> Option<(PiSessionHeader, Vec<PiEntry>, u32)> {
                     i + 2,
                     path.display()
                 );
+                if let Some((id, parent_id)) = link {
+                    entries.push(PiEntry::Unparsed { id, parent_id });
+                }
             }
         }
     }
@@ -403,47 +417,127 @@ fn extract_model(entries: &[PiEntry], branch: &[String]) -> Option<String> {
     None
 }
 
+/// Usage Pi counts toward session totals, across every branch: assistant
+/// messages, `usage` entries, and the summaries Pi generates itself. Usage
+/// with no attributable model (extension summaries, a tool's nested model
+/// work) is skipped with a warning rather than attributed to a guess.
 fn extract_usage_events(
     entries: &[PiEntry],
     path: &Path,
     parse_warning_count: &mut u32,
 ) -> Vec<UsageEvent> {
-    entries
+    let entry_by_id: HashMap<String, &PiEntry> = entries
         .iter()
-        .filter_map(|entry| {
-            let PiEntry::Message(message) = entry else {
-                return None;
+        .filter_map(|entry| get_entry_id(entry).map(|id| (id, entry)))
+        .collect();
+    let mut events = Vec::new();
+    let mut skipped: Vec<&str> = Vec::new();
+    for entry in entries {
+        if let PiEntry::Message(message) = entry
+            && let PiAgentMessage::ToolResult(result) = &message.message
+            && result.usage.is_some()
+        {
+            skipped.push(&message.base.id);
+            continue;
+        }
+        let Some((base, model, usage)) = counted_usage(entry, &entry_by_id) else {
+            continue;
+        };
+        let Some(model) = model.filter(|model| !model.is_empty()) else {
+            skipped.push(&base.id);
+            continue;
+        };
+        events.push(UsageEvent {
+            timestamp: base.timestamp.clone(),
+            model: model.to_string(),
+            turn_count: 1,
+            input_tokens: usage.input,
+            output_tokens: usage.output,
+            cache_read_input_tokens: usage.cache_read,
+            cache_creation_input_tokens: usage.cache_write,
+            usage_hash: None,
+            // Pi calculates this locally from model rates (including in the
+            // CommandCode extension). Missing rates also produce zero;
+            // it is an estimate, not a service-reported bill.
+            cost_is_estimate: true,
+            cost_usd: usage.cost.as_ref().map(|c| c.total),
+        });
+    }
+    if let Some(first) = skipped.first() {
+        log::warn!(
+            "skipping {} Pi usage record(s) without an attributable model in '{}' (first at entry {first})",
+            skipped.len(),
+            path.display()
+        );
+        *parse_warning_count = parse_warning_count.saturating_add(skipped.len() as u32);
+    }
+    events
+}
+
+/// An entry's counted usage and the model it ran on (`None` if unknown).
+/// Pi's own summaries run on the session's current model: the one in effect
+/// at a compaction's parent (the leaf it compacted) or at a branch summary's
+/// `fromId` (the leaf being left).
+fn counted_usage<'a>(
+    entry: &'a PiEntry,
+    entry_by_id: &HashMap<String, &'a PiEntry>,
+) -> Option<(&'a PiEntryBase, Option<&'a str>, &'a PiUsage)> {
+    match entry {
+        PiEntry::Message(message) => match &message.message {
+            PiAgentMessage::Assistant(assistant) => Some((
+                &message.base,
+                assistant.model.as_deref(),
+                assistant.usage.as_ref()?,
+            )),
+            _ => None,
+        },
+        PiEntry::Usage(record) => Some((&record.base, Some(&record.model), &record.usage)),
+        PiEntry::Compaction(compaction) => {
+            let usage = compaction.usage.as_ref()?;
+            let model = if compaction.from_hook {
+                None
+            } else {
+                model_in_effect(compaction.base.parent_id.as_deref(), entry_by_id)
             };
-            let PiAgentMessage::Assistant(assistant) = &message.message else {
-                return None;
+            Some((&compaction.base, model, usage))
+        }
+        PiEntry::BranchSummary(summary) => {
+            let usage = summary.usage.as_ref()?;
+            let model = if summary.from_hook {
+                None
+            } else {
+                model_in_effect(Some(&summary.from_id), entry_by_id)
             };
-            let usage = assistant.usage.as_ref()?;
-            let Some(model) = assistant.model.as_deref().filter(|model| !model.is_empty()) else {
-                log::warn!(
-                    "skipping Pi usage without a model in '{}' at entry {}",
-                    path.display(),
-                    message.base.id
-                );
-                *parse_warning_count = parse_warning_count.saturating_add(1);
-                return None;
-            };
-            Some(UsageEvent {
-                timestamp: message.base.timestamp.clone(),
-                model: model.to_string(),
-                turn_count: 1,
-                input_tokens: usage.input,
-                output_tokens: usage.output,
-                cache_read_input_tokens: usage.cache_read,
-                cache_creation_input_tokens: usage.cache_write,
-                usage_hash: None,
-                // Pi calculates this locally from model rates (including in the
-                // CommandCode extension). Missing rates also produce zero;
-                // it is an estimate, not a service-reported bill.
-                cost_is_estimate: true,
-                cost_usd: usage.cost.as_ref().map(|c| c.total),
-            })
-        })
-        .collect()
+            Some((&summary.base, model, usage))
+        }
+        _ => None,
+    }
+}
+
+/// The model in effect at `entry_id`: the nearest model change or assistant
+/// model at or above it in the tree (not in file order — branches interleave).
+fn model_in_effect<'a>(
+    entry_id: Option<&str>,
+    entry_by_id: &HashMap<String, &'a PiEntry>,
+) -> Option<&'a str> {
+    let mut current = entry_id.map(str::to_string);
+    // Bounded so a malformed parent cycle cannot loop forever.
+    for _ in 0..entry_by_id.len() {
+        let entry = *entry_by_id.get(current.as_deref()?)?;
+        match entry {
+            PiEntry::ModelChange(change) => return Some(&change.model_id),
+            PiEntry::Message(message) => {
+                if let PiAgentMessage::Assistant(assistant) = &message.message
+                    && let Some(model) = assistant.model.as_deref().filter(|m| !m.is_empty())
+                {
+                    return Some(model);
+                }
+            }
+            _ => {}
+        }
+        current = get_entry_parent_id(entry);
+    }
+    None
 }
 
 /// Extract the Pi session-list `modified` timestamp as epoch seconds.
@@ -556,12 +650,15 @@ pub(super) fn get_entry_id(entry: &PiEntry) -> Option<String> {
         PiEntry::Message(e) => Some(e.base.id.clone()),
         PiEntry::ModelChange(e) => Some(e.base.id.clone()),
         PiEntry::ThinkingLevelChange(e) => Some(e.base.id.clone()),
+        PiEntry::Usage(e) => Some(e.base.id.clone()),
         PiEntry::Compaction(e) => Some(e.base.id.clone()),
+        PiEntry::ContextEdit(e) => Some(e.base.id.clone()),
         PiEntry::BranchSummary(e) => Some(e.base.id.clone()),
         PiEntry::Custom(e) => Some(e.base.id.clone()),
         PiEntry::CustomMessage(e) => Some(e.base.id.clone()),
         PiEntry::Label(e) => Some(e.base.id.clone()),
         PiEntry::SessionInfo(e) => Some(e.base.id.clone()),
+        PiEntry::Unparsed { id, .. } => Some(id.clone()),
     }
 }
 
@@ -572,12 +669,15 @@ fn get_entry_parent_id(entry: &PiEntry) -> Option<String> {
         PiEntry::Message(e) => e.base.parent_id.clone(),
         PiEntry::ModelChange(e) => e.base.parent_id.clone(),
         PiEntry::ThinkingLevelChange(e) => e.base.parent_id.clone(),
+        PiEntry::Usage(e) => e.base.parent_id.clone(),
         PiEntry::Compaction(e) => e.base.parent_id.clone(),
+        PiEntry::ContextEdit(e) => e.base.parent_id.clone(),
         PiEntry::BranchSummary(e) => e.base.parent_id.clone(),
         PiEntry::Custom(e) => e.base.parent_id.clone(),
         PiEntry::CustomMessage(e) => e.base.parent_id.clone(),
         PiEntry::Label(e) => e.base.parent_id.clone(),
         PiEntry::SessionInfo(e) => e.base.parent_id.clone(),
+        PiEntry::Unparsed { parent_id, .. } => parent_id.clone(),
     }
 }
 
