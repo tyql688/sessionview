@@ -1,5 +1,6 @@
 export {
   parseMcpToolName,
+  parseToolInput,
   toolDisplayName,
   toolSummary,
 } from "@/lib/tools/names";

@@ -30,7 +30,9 @@ function optionalNumber(obj: Record<string, unknown>, key: string): string {
   return typeof value === "number" ? value.toLocaleString() : "";
 }
 
-function parseToolInput(raw: string): Record<string, unknown> | null {
+/** Tool input as a JSON record, or null: several providers store the model's
+ * raw argument text (a command, freeform text, truncated JSON) as-is. */
+export function parseToolInput(raw: string): Record<string, unknown> | null {
   try {
     const parsed: unknown = JSON.parse(raw);
     return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
