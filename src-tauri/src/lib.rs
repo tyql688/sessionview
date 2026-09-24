@@ -119,6 +119,7 @@ pub fn run() {
             commands::gui::get_session_open_window,
             commands::gui::get_session_messages_window,
             commands::gui::get_session_turn_outline,
+            commands::gui::get_session_search_text,
             commands::gui::cancel_session_load,
             commands::gui::get_child_sessions,
             commands::gui::get_child_session_counts,

@@ -10,6 +10,7 @@ import { ThinkingBlock } from "@/features/session/MessageBubble/ThinkingBlock";
 import { CopyMessageButton, TokenUsageDisplay } from "@/features/session/MessageBubble/TokenUsage";
 import { ToolMessage } from "@/features/session/MessageBubble/ToolMessage";
 import { useAnchoredExpand } from "@/features/session/MessageBubble/useAnchoredExpand";
+import { isSystemContent } from "@/features/session/hooks";
 
 // The markdown engine (markdown-it + shiki/katex/mermaid plugins) is by far
 // the heaviest frontend dependency — load it on demand so the app shell and
@@ -283,26 +284,6 @@ export function MessageBubble(props: { message: Message; provider?: Provider; pa
     return !msg.content || msg.content.trim().length === 0;
   };
 
-  const isSystemContent = (): boolean => {
-    const msg = props.message;
-    if (msg.role === "tool" || msg.role === "system") return false;
-    if (!msg.content || msg.content.trim().length === 0) return false;
-    const c = msg.content.trimStart();
-    // Skip known system/template content markers
-    const systemMarkers = [
-      "</observation>",
-      "</command-message>",
-      "<INSTRUCTIONS>",
-      "<environment_context>",
-      "<permissions instructions>",
-      "</facts>",
-      "</narrative>",
-      "</concepts>",
-      "<system-reminder>",
-    ];
-    return systemMarkers.some((marker) => c.includes(marker));
-  };
-
   const hasLegacyLocalCommandPrefix = () => props.message.content.trimStart().startsWith(LEGACY_LOCAL_COMMAND_PREFIX);
 
   const isCommandMessage = () =>
@@ -317,7 +298,7 @@ export function MessageBubble(props: { message: Message; provider?: Provider; pa
   }, [props.message.content]);
 
   const rendersMarkdown = () =>
-    props.message.role !== "tool" && props.message.role !== "system" && !isEmpty() && !isSystemContent();
+    props.message.role !== "tool" && props.message.role !== "system" && !isEmpty() && !isSystemContent(props.message);
 
   const copyText = useMemo(
     () => (rendersMarkdown() ? sanitizeMessageForClipboard(displayContent) : ""),
@@ -337,7 +318,7 @@ export function MessageBubble(props: { message: Message; provider?: Provider; pa
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   }, [props.message.timestamp]);
 
-  if (isEmpty() || isSystemContent()) return null;
+  if (isEmpty() || isSystemContent(props.message)) return null;
 
   return (
     <>

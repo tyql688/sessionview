@@ -6,8 +6,8 @@ import {
   applySearchHighlight,
   buildMatchLocations,
   collectSearchRanges,
+  type SearchableMessage,
 } from "@/features/session/search-utils";
-import type { ProcessedEntry } from "@/features/session/hooks";
 import { SessionSearch } from "@/features/session/SessionSearch";
 
 describe("collectSearchRanges (DOM)", () => {
@@ -91,53 +91,40 @@ describe("applySearchHighlight", () => {
   });
 });
 
-function messageEntry(index: number, content: string): ProcessedEntry {
-  return {
-    key: `msg-${index}`,
-    type: "message",
-    msg: {
-      role: "user",
-      content,
-      timestamp: null,
-      tool_name: null,
-      tool_input: null,
-      token_usage: null,
-    },
-    messageIndex: index,
-    searchHaystack: content.toLocaleLowerCase(),
-  };
+function searchable(messageIndex: number, content: string): SearchableMessage {
+  return { messageIndex, role: "user", haystack: content.toLocaleLowerCase() };
 }
 
 describe("buildMatchLocations", () => {
-  it("emits one location per occurrence, in entry order", () => {
-    const entries = [
-      messageEntry(0, "foo bar foo"),
-      messageEntry(1, "nothing here"),
-      messageEntry(2, "FOO again"),
+  it("emits one location per occurrence, in session order", () => {
+    const messages = [
+      searchable(0, "foo bar foo"),
+      searchable(1, "nothing here"),
+      searchable(2, "FOO again"),
     ];
-    // Data-level counting: entry 0 holds two occurrences, entry 2 one —
-    // independent of which rows the virtualizer has mounted.
-    expect(buildMatchLocations(entries, "foo")).toEqual([0, 0, 2]);
+    // Message 0 holds two occurrences, message 2 one — counted on the
+    // searchable text, independent of which rows are loaded or mounted.
+    expect(buildMatchLocations(messages, "foo", new Set())).toEqual([0, 0, 2]);
   });
 
   it("returns nothing for a blank term", () => {
-    expect(buildMatchLocations([messageEntry(0, "foo")], "  ")).toEqual([]);
+    expect(buildMatchLocations([searchable(0, "foo")], "  ", new Set())).toEqual([]);
   });
 });
 
 describe("activeMatchTarget", () => {
-  it("addresses a match as entry + nth occurrence within that entry", () => {
+  it("addresses a match as message + nth occurrence within that message", () => {
     const locations = [0, 0, 2];
     expect(activeMatchTarget(locations, 0)).toEqual({
-      entryIndex: 0,
+      messageIndex: 0,
       occurrence: 0,
     });
     expect(activeMatchTarget(locations, 1)).toEqual({
-      entryIndex: 0,
+      messageIndex: 0,
       occurrence: 1,
     });
     expect(activeMatchTarget(locations, 2)).toEqual({
-      entryIndex: 2,
+      messageIndex: 2,
       occurrence: 0,
     });
     expect(activeMatchTarget(locations, 3)).toBeNull();

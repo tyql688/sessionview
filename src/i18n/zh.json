@@ -135,6 +135,7 @@
     "refreshUsageStarted": "用量已在后台开始刷新",
     "refreshUsageOk": "用量已刷新",
     "reloadFailed": "会话重新加载失败",
+    "sessionSearchFailed": "会话内搜索失败",
     "subagentNotFound": "找不到对应的子代理会话",
     "subagentLoadFailed": "加载子会话失败",
     "resumeCommandCopied": "恢复命令已复制"

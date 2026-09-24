@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useI18n } from "@/i18n/index";
+import { useAnchoredExpand } from "@/features/session/MessageBubble/useAnchoredExpand";
 
 export function ThinkingBlock(props: { content: string }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
+  const anchoredExpand = useAnchoredExpand();
   const preview = () => {
     // A bold lead ("**Title** …") is the model's own headline — show just
     // it. Otherwise the first line stands in, markdown-ish **emphasis**
@@ -21,7 +23,7 @@ export function ThinkingBlock(props: { content: string }) {
         type="button"
         className="msg-thinking-header"
         aria-expanded={expanded}
-        onClick={() => setExpanded(!expanded)}
+        onClick={(event) => anchoredExpand(event.currentTarget, () => setExpanded((v) => !v))}
       >
         <span className="msg-thinking-icon">💭</span>
         <span className="msg-thinking-label">{t("timeline.thinking")}</span>

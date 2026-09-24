@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Message } from "@/lib/types";
-import { estimateEntryHeight, isRenderableMessage, processMessages } from "@/features/session/hooks";
+import { estimateEntryHeight, isRenderableMessage, isSystemContent, processMessages } from "@/features/session/hooks";
 
 const baseMessage: Message = {
   role: "assistant",
@@ -37,7 +37,6 @@ describe("SessionView message processing", () => {
         type: "message",
         msg: visibleAssistant,
         messageIndex: 1,
-        searchHaystack: "visible reply",
       },
     ]);
   });
@@ -114,28 +113,24 @@ describe("SessionView message processing", () => {
         type: "message",
         msg: readTool,
         messageIndex: 0,
-        searchHaystack: "",
       },
       {
         key: "msg-1-tool-2026-04-11T02:25:18.000Z",
         type: "message",
         msg: agentTool,
         messageIndex: 1,
-        searchHaystack: "",
       },
       {
         key: "msg-2-tool-2026-04-11T02:25:18.500Z",
         type: "message",
         msg: swarmTool,
         messageIndex: 2,
-        searchHaystack: "",
       },
       {
         key: "msg-3-tool-2026-04-11T02:25:19.000Z",
         type: "message",
         msg: bashTool,
         messageIndex: 3,
-        searchHaystack: "",
       },
     ]);
   });
@@ -164,5 +159,22 @@ describe("SessionView message processing", () => {
 
     expect(entry?.type).toBe("merged-tools");
     expect(entry && estimateEntryHeight(entry)).toBe(44);
+  });
+});
+
+describe("isSystemContent", () => {
+  it("hides a message a system reminder opens, not a reply that quotes one", () => {
+    expect(isSystemContent({ role: "user", content: "\n<system-reminder>\nsynthetic\n</system-reminder>" })).toBe(true);
+    expect(isSystemContent({ role: "assistant", content: "Injected text arrives wrapped in `<system-reminder>`." })).toBe(
+      false,
+    );
+    expect(
+      isSystemContent({ role: "assistant", content: "Done.\n\n<system-reminder>Background task done.</system-reminder>" }),
+    ).toBe(false);
+  });
+
+  it("treats template markers anywhere as injected, for dialogue roles only", () => {
+    expect(isSystemContent({ role: "user", content: "# notes\n<environment_context>x</environment_context>" })).toBe(true);
+    expect(isSystemContent({ role: "system", content: "<environment_context>x</environment_context>" })).toBe(false);
   });
 });

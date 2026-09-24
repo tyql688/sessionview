@@ -22,9 +22,11 @@ export function atNewest(el: HTMLElement): boolean {
   return el.scrollTop > -4;
 }
 
-/** Viewport bottom edge in content coordinates (offsetTop space). */
+/** Viewport bottom edge in the rows' offsetTop space. Its origin is the
+ * scroller's padding-box top at scrollTop 0 (the newest end); older rows sit at
+ * negative offsets, so a row's viewport position is `offsetTop - scrollTop`. */
 export function viewportBottom(el: HTMLElement): number {
-  return el.scrollHeight + el.scrollTop;
+  return el.clientHeight + el.scrollTop;
 }
 
 /** Rubber-band overscroll past the oldest edge. The scrollable range is

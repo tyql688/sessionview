@@ -10,8 +10,8 @@ use crate::models::{Message, Provider, SessionDetail, SessionMeta, TokenTotals};
 use crate::services::load_cancel;
 use crate::services::load_session_meta;
 use crate::services::session_view::{
-    LoadRequest, SessionTurnOutline, build_session_turn_outline, session_window_bounds,
-    subagent_meta_title, with_load_guard,
+    LoadRequest, SessionSearchText, SessionTurnOutline, build_session_search_text,
+    build_session_turn_outline, session_window_bounds, subagent_meta_title, with_load_guard,
 };
 
 use super::session_tail::try_tail_fast_path;
@@ -261,6 +261,22 @@ pub async fn get_session_turn_outline(
 
             Ok(build_session_turn_outline(messages.as_ref()))
         })
+    })
+    .await
+}
+
+/// The session's searchable dialogue for in-session search, taken from the
+/// same cached parse as the message windows so indices line up. No load
+/// guard: requests for a session are identical, so none cancels another and
+/// concurrent ones share one parse; window fetches cannot cancel it either.
+pub async fn get_session_search_text(
+    session_id: String,
+    state: AppState,
+) -> CommandResult<SessionSearchText> {
+    super::blocking(move || -> anyhow::Result<SessionSearchText> {
+        let meta = load_session_meta(&state.db, &session_id).map_err(anyhow::Error::msg)?;
+        let (messages, _, _) = load_messages_cached(&state, &meta)?;
+        Ok(build_session_search_text(messages.as_ref()))
     })
     .await
 }

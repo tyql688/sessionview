@@ -17,7 +17,7 @@ use crate::models::{
     ProviderSnapshot, SearchFilters, SearchResult, SessionDetail, SessionMeta, TreeNode,
     UsageStats,
 };
-use crate::services::session_view::SessionTurnOutline;
+use crate::services::session_view::{SessionSearchText, SessionTurnOutline};
 
 use super::{AppState, SessionMessagesWindow, SessionOpenWindow, TodayTokens};
 
@@ -46,6 +46,7 @@ gui_commands! {
     get_session_open_window(session_id: String, offset: i64, limit: usize, request_id: Option<String>, request_seq: Option<u64>) -> SessionOpenWindow;
     get_session_messages_window(session_id: String, offset: i64, limit: usize, request_id: Option<String>, request_seq: Option<u64>) -> SessionMessagesWindow;
     get_session_turn_outline(session_id: String, request_seq: Option<u64>) -> SessionTurnOutline;
+    get_session_search_text(session_id: String) -> SessionSearchText;
     cancel_session_load(session_id: String, request_id: Option<String>) -> ();
     get_child_sessions(parent_id: String) -> Vec<SessionMeta>;
     get_child_session_counts(parent_ids: Vec<String>) -> HashMap<String, u64>;

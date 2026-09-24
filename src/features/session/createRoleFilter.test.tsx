@@ -21,7 +21,6 @@ function messageEntry(role: Message["role"], index: number): ProcessedEntry {
     type: "message",
     msg,
     messageIndex: index,
-    searchHaystack: msg.content,
   };
 }
 
@@ -61,9 +60,9 @@ describe("useRoleFilter", () => {
   it("drops time separators entirely in focus mode", () => {
     const entries = [
       messageEntry("user", 0),
-      { key: "sep-1", type: "time-sep" as const, time: "10:00", searchHaystack: "" },
+      { key: "sep-1", type: "time-sep" as const, time: "10:00" },
       messageEntry("tool", 1),
-      { key: "sep-2", type: "time-sep" as const, time: "10:20", searchHaystack: "" },
+      { key: "sep-2", type: "time-sep" as const, time: "10:20" },
       messageEntry("assistant", 2),
     ];
 
@@ -75,11 +74,11 @@ describe("useRoleFilter", () => {
   it("collapses separator runs left behind by hidden roles", () => {
     const entries = [
       messageEntry("user", 0),
-      { key: "sep-1", type: "time-sep" as const, time: "10:00", searchHaystack: "" },
+      { key: "sep-1", type: "time-sep" as const, time: "10:00" },
       messageEntry("tool", 1),
-      { key: "sep-2", type: "time-sep" as const, time: "10:20", searchHaystack: "" },
+      { key: "sep-2", type: "time-sep" as const, time: "10:20" },
       messageEntry("assistant", 2),
-      { key: "sep-3", type: "time-sep" as const, time: "10:40", searchHaystack: "" },
+      { key: "sep-3", type: "time-sep" as const, time: "10:40" },
       messageEntry("tool", 3),
     ];
 

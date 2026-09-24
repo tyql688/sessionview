@@ -5,8 +5,8 @@ import { StrictMode } from "react";
 
 import type { Message, SessionMeta } from "../../lib/types";
 import { SESSION_COMMAND_EVENTS } from "../../lib/session-command-events";
-import { processMessages } from "./hooks";
-import { findFirstMatchingEntryIndex } from "./search-utils";
+import { setPendingSessionSearch } from "../search/search";
+import { SESSION_SEARCH_DEBOUNCE_MS } from "./search-utils";
 
 const LOAD_CANCELED_SENTINEL = "__sessionview_load_canceled__";
 
@@ -65,8 +65,16 @@ let openWindowMessages = MESSAGES;
 let openWindowStart = 0;
 let totalMessages = MESSAGES.length;
 let messagesWindowMessages = MESSAGES;
+// When set, window requests slice this complete session so indices stay
+// consistent for sessions larger than one page; otherwise they return
+// `messagesWindowMessages`.
+let windowSource: Message[] | null = null;
 let messagesWindowGate: Promise<void> | null = null;
 let outlineEntries: Array<Record<string, unknown>> = [];
+// The whole session's searchable dialogue, at absolute message indices.
+let searchTextMessages: Array<{ message_index: number; role: string; content: string }> = [];
+let searchTextGate: Promise<void> | null = null;
+const searchTextCalls: Array<Record<string, unknown> | undefined> = [];
 const openWindowCalls: Array<Record<string, unknown> | undefined> = [];
 const messagesWindowCalls: Array<Record<string, unknown> | undefined> = [];
 const cancelSessionLoadCalls: Array<{
@@ -78,6 +86,12 @@ const latestOpenRequestBySession = new Map<string, string>();
 // When > 0, the next open-window calls fail with the cancel sentinel —
 // simulates a lost backend cancel race against the CURRENT request.
 let cancelNextOpenCalls = 0;
+
+function searchTextOf(indexed: Array<[number, Message]>) {
+  return indexed
+    .filter(([, m]) => (m.role === "user" || m.role === "assistant") && m.content.trim().length > 0)
+    .map(([message_index, m]) => ({ message_index, role: m.role, content: m.content }));
+}
 
 function tokenTotals() {
   return {
@@ -125,16 +139,23 @@ vi.mock("@tauri-apps/api/core", () => ({
         };
       case "get_session_meta":
         return META;
-      case "get_session_messages_window":
+      case "get_session_messages_window": {
         messagesWindowCalls.push(args);
         if (messagesWindowGate) await messagesWindowGate;
+        const offset = typeof args?.offset === "number" ? (args.offset as number) : 0;
+        const limit = typeof args?.limit === "number" ? (args.limit as number) : 0;
         return {
           total: totalMessages,
-          start: typeof args?.offset === "number" ? (args.offset as number) : 0,
-          messages: messagesWindowMessages,
+          start: offset,
+          messages: windowSource ? windowSource.slice(offset, offset + limit) : messagesWindowMessages,
           parse_warning_count: 0,
           token_totals: tokenTotals(),
         };
+      }
+      case "get_session_search_text":
+        searchTextCalls.push(args);
+        if (searchTextGate) await searchTextGate;
+        return { total: totalMessages, messages: searchTextMessages };
       case "get_session_turn_outline":
         return {
           turns: outlineEntries,
@@ -233,7 +254,12 @@ beforeEach(async () => {
   totalMessages = MESSAGES.length;
   messagesWindowMessages = MESSAGES;
   messagesWindowGate = null;
+  windowSource = null;
   outlineEntries = [];
+  searchTextMessages = searchTextOf(MESSAGES.map((m, i) => [i, m]));
+  searchTextGate = null;
+  searchTextCalls.length = 0;
+  setPendingSessionSearch(null);
   openWindowCalls.length = 0;
   messagesWindowCalls.length = 0;
   cancelSessionLoadCalls.length = 0;
@@ -345,6 +371,10 @@ describe("SessionView smoke", () => {
     openWindowStart = 1;
     totalMessages = 2;
     messagesWindowMessages = [olderUserMessage];
+    searchTextMessages = searchTextOf([
+      [0, olderUserMessage],
+      [1, MESSAGES[1]],
+    ]);
 
     const { findByText } = render(
       <SessionView
@@ -375,25 +405,22 @@ describe("SessionView smoke", () => {
 
     fireEvent.input(input, { target: { value: "我发的旧内容" } });
 
-    await waitFor(() =>
-      expect(messagesWindowCalls).toContainEqual(
-        expect.objectContaining({ offset: 0, limit: 1 }),
-      ),
-    );
-    // The match lives outside the initial tail; the search must page it in
-    // and reveal it in the rendered timeline (highlighting itself runs on the
-    // CSS Highlight API, absent in happy-dom).
+    await waitFor(() => expect(searchTextCalls).toEqual([{ sessionId: META.id }]));
+    // The match lives outside the initial tail; the search must bring it into
+    // the window and reveal it in the rendered timeline (highlighting itself
+    // runs on the CSS Highlight API, absent in happy-dom).
     expect(await findByText("我发的旧内容")).toBeInTheDocument();
   });
 
-  it("loads the complete session before choosing the first search match", async () => {
-    const oldestUserMessage = messageAt(0, "无常最早是用户提问");
-    const middleMessage = messageAt(1, "普通中间消息");
-    const newerMessage = messageAt(2, "无常后面又被提到");
-    openWindowMessages = [newerMessage];
-    openWindowStart = 2;
-    totalMessages = 3;
-    messagesWindowMessages = [oldestUserMessage, middleMessage];
+  it("reveals the session-wide first match without loading the whole session", async () => {
+    const session = Array.from({ length: 1000 }, (_, index) =>
+      messageAt(index, index === 0 ? "无常最早是用户提问" : index === 999 ? "无常后面又被提到" : `message ${index}`),
+    );
+    openWindowMessages = [session[999]];
+    openWindowStart = 999;
+    totalMessages = session.length;
+    windowSource = session;
+    searchTextMessages = searchTextOf(session.map((m, i) => [i, m]));
 
     const { findByText } = render(
       <SessionView
@@ -426,13 +453,211 @@ describe("SessionView smoke", () => {
 
     await waitFor(() =>
       expect(messagesWindowCalls).toContainEqual(
-        expect.objectContaining({ offset: 0, limit: 2 }),
+        expect.objectContaining({ offset: 0, limit: 300 }),
       ),
     );
+    // Matches are counted on the searchable text, so every window request
+    // stays page-sized (at most one 600-message batch) — the history before
+    // the loaded window is never pulled in wholesale.
+    expect(messagesWindowCalls.every((call) => Number(call?.limit) <= 600)).toBe(true);
     // The FIRST match session-wide is the oldest message; it must be loaded
     // and revealed even though the initial window only held the newest one.
     expect(await findByText("无常最早是用户提问")).toBeInTheDocument();
   });
+
+  it("applies a global search handed to an open session whose search text is held", async () => {
+    const session = Array.from({ length: 40 }, (_, index) =>
+      messageAt(
+        index,
+        index === 3
+          ? "alpha only here"
+          : index === 4
+            ? "<system-reminder>\nalpha stays hidden\n</system-reminder>"
+            : index === 5
+              ? "beta first"
+              : index === 7
+                ? "beta second"
+                : `message ${index}`,
+      ),
+    );
+    openWindowMessages = session;
+    totalMessages = session.length;
+    searchTextMessages = searchTextOf(session.map((m, i) => [i, m]));
+
+    const { findByText } = render(
+      <SessionView
+        session={{
+          id: META.id,
+          provider: "claude",
+          title: META.title,
+          project_name: "smoke",
+          is_sidechain: false,
+          source_path: META.source_path,
+          project_path: META.project_path,
+        }}
+        active={true}
+      />,
+    );
+
+    expect(await findByText("message 39")).toBeInTheDocument();
+    document.dispatchEvent(new CustomEvent(SESSION_COMMAND_EVENTS.sessionSearch));
+    const input = await waitFor(() => {
+      const el = document.querySelector<HTMLInputElement>(".session-search-input");
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    fireEvent.input(input, { target: { value: "alpha" } });
+    const count = () => document.querySelector(".session-search-count")?.textContent;
+    // The reminder-only message is hidden in the timeline, so it is not a match.
+    await waitFor(() => expect(count()).toBe("1/1"));
+
+    const scrolled: string[] = [];
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) {
+      scrolled.push(this.textContent?.trim() ?? "");
+    });
+
+    // The global overlay hands this open session a different query; the held
+    // search text answers it without another fetch.
+    setPendingSessionSearch({ sessionId: META.id, query: "beta" });
+
+    await waitFor(() => expect(count()).toBe("1/2"));
+    expect(input.value).toBe("beta");
+    expect(searchTextCalls).toHaveLength(1);
+    await waitFor(() => expect(scrolled.at(-1)).toBe("beta first"));
+
+    fireEvent.click(document.querySelectorAll(".session-search-nav")[1]);
+    await waitFor(() => expect(scrolled.at(-1)).toBe("beta second"));
+
+    // Handing over the same query again starts over at its first match.
+    setPendingSessionSearch({ sessionId: META.id, query: "beta" });
+    await waitFor(() => expect(scrolled.at(-1)).toBe("beta first"));
+    expect(count()).toBe("1/2");
+    scrollIntoView.mockRestore();
+  });
+
+  it("shares one search-text fetch across queries committed while it loads", async () => {
+    let releaseSearchText = () => {};
+    searchTextGate = new Promise((resolve) => {
+      releaseSearchText = resolve;
+    });
+    const session = Array.from({ length: 40 }, (_, index) =>
+      messageAt(index, index === 5 ? "alpha beta" : index === 9 ? "alpha only" : `message ${index}`),
+    );
+    openWindowMessages = session;
+    totalMessages = session.length;
+    searchTextMessages = searchTextOf(session.map((m, i) => [i, m]));
+
+    const { findByText } = render(
+      <SessionView
+        session={{
+          id: META.id,
+          provider: "claude",
+          title: META.title,
+          project_name: "smoke",
+          is_sidechain: false,
+          source_path: META.source_path,
+          project_path: META.project_path,
+        }}
+        active={true}
+      />,
+    );
+
+    expect(await findByText("message 39")).toBeInTheDocument();
+    document.dispatchEvent(new CustomEvent(SESSION_COMMAND_EVENTS.sessionSearch));
+    const input = await waitFor(() => {
+      const el = document.querySelector<HTMLInputElement>(".session-search-input");
+      expect(el).not.toBeNull();
+      return el!;
+    });
+
+    // Typing on: the second query commits while the first fetch still loads.
+    fireEvent.input(input, { target: { value: "alpha" } });
+    await waitFor(() => expect(searchTextCalls).toHaveLength(1));
+    fireEvent.input(input, { target: { value: "alpha b" } });
+    await new Promise((resolve) => setTimeout(resolve, SESSION_SEARCH_DEBOUNCE_MS + 50));
+    releaseSearchText();
+
+    const count = () => document.querySelector(".session-search-count")?.textContent;
+    await waitFor(() => expect(count()).toBe("1/1"));
+    expect(searchTextCalls).toHaveLength(1);
+  });
+
+  it("re-centers a far search match until it stays on screen", async () => {
+    const box = (top: number, bottom: number) => ({
+      x: 0,
+      y: top,
+      width: 0,
+      height: bottom - top,
+      top,
+      right: 0,
+      bottom,
+      left: 0,
+      toJSON: () => ({}),
+    });
+    const inMatchRow = (node: Node | null) =>
+      !!(node instanceof Element ? node : node?.parentElement)?.closest('[data-entry-key^="msg-0-"]');
+    let matchScrolls = 0;
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) {
+      if (!this.classList.contains("session-entry") && inMatchRow(this)) matchScrolls += 1;
+    });
+    const nativeElementRect = Element.prototype.getBoundingClientRect;
+    const viewportGeometry = vi
+      .spyOn(Element.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: Element) {
+        return this.classList.contains("session-messages") ? box(0, 800) : nativeElementRect.call(this);
+      });
+    // The first centering lands on estimated row heights; real heights then
+    // push the match below the viewport until a second pass re-centers it.
+    const nativeRangeRect = Range.prototype.getBoundingClientRect;
+    const matchGeometry = vi.spyOn(Range.prototype, "getBoundingClientRect").mockImplementation(function (this: Range) {
+      if (!inMatchRow(this.startContainer)) return nativeRangeRect.call(this);
+      const top = matchScrolls < 2 ? 900 : 400;
+      return box(top, top + 20);
+    });
+    const session = Array.from({ length: 1000 }, (_, index) =>
+      messageAt(index, index === 0 ? "无常最早是用户提问" : `message ${index}`),
+    );
+    openWindowMessages = [session[999]];
+    openWindowStart = 999;
+    totalMessages = session.length;
+    windowSource = session;
+    searchTextMessages = searchTextOf(session.map((m, i) => [i, m]));
+
+    const { findByText } = render(
+      <SessionView
+        session={{
+          id: META.id,
+          provider: "claude",
+          title: META.title,
+          project_name: "smoke",
+          is_sidechain: false,
+          source_path: META.source_path,
+          project_path: META.project_path,
+        }}
+        active={true}
+      />,
+    );
+
+    expect(await findByText("message 999")).toBeInTheDocument();
+    document.dispatchEvent(new CustomEvent(SESSION_COMMAND_EVENTS.sessionSearch));
+    const input = await waitFor(() => {
+      const el = document.querySelector<HTMLInputElement>(".session-search-input");
+      expect(el).not.toBeNull();
+      return el!;
+    });
+
+    fireEvent.input(input, { target: { value: "最早" } });
+
+    // The match itself is centered, not just its row's top.
+    await waitFor(() => expect(matchScrolls).toBe(2), { timeout: 5000 });
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+    // Once on screen the reveal stops re-aligning.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(matchScrolls).toBe(2);
+    matchGeometry.mockRestore();
+    viewportGeometry.mockRestore();
+    scrollIntoView.mockRestore();
+  }, 10_000);
 
   it("keeps normal upward scrolling after search reveals an older loaded match", async () => {
     const manyMessages = Array.from({ length: 120 }, (_, index) =>
@@ -445,14 +670,9 @@ describe("SessionView smoke", () => {
             : `message ${index}`,
       ),
     );
-    expect(
-      findFirstMatchingEntryIndex(
-        processMessages(manyMessages, 0),
-        "target after search",
-      ),
-    ).toBe(10);
     openWindowMessages = manyMessages;
     totalMessages = manyMessages.length;
+    searchTextMessages = searchTextOf(manyMessages.map((m, i) => [i, m]));
 
     const { findByText, queryByText } = render(
       <SessionView
@@ -505,6 +725,83 @@ describe("SessionView smoke", () => {
     await waitFor(() =>
       expect(queryByText("oldest still above")).toBeInTheDocument(),
     );
+  });
+
+  it("keeps the view still when rows below the viewport change height", async () => {
+    const observers: Array<{ callback: ResizeObserverCallback; targets: Set<Element> }> = [];
+    const silent = globalThis.ResizeObserver;
+    (globalThis as { ResizeObserver: unknown }).ResizeObserver = class {
+      private readonly record: { callback: ResizeObserverCallback; targets: Set<Element> };
+      constructor(callback: ResizeObserverCallback) {
+        this.record = { callback, targets: new Set() };
+        observers.push(this.record);
+      }
+      observe(target: Element) {
+        this.record.targets.add(target);
+      }
+      unobserve(target: Element) {
+        this.record.targets.delete(target);
+      }
+      disconnect() {
+        this.record.targets.clear();
+      }
+    };
+    try {
+      const { findByText } = render(
+        <SessionView
+          session={{
+            id: META.id,
+            provider: "claude",
+            title: META.title,
+            project_name: "smoke",
+            is_sidechain: false,
+            source_path: META.source_path,
+            project_path: META.project_path,
+          }}
+          active={true}
+        />,
+      );
+      expect(await findByText("General Kenobi reply")).toBeInTheDocument();
+      const scroller = document.querySelector<HTMLDivElement>(".session-messages")!;
+      const [newest, older] = [...scroller.querySelectorAll<HTMLElement>(".session-entry")];
+      const rowObserver = await waitFor(() => {
+        const found = observers.find((observer) => observer.targets.has(newest));
+        expect(found).toBeDefined();
+        return found!;
+      });
+
+      // An 800px viewport over 5000px of content, 1000px up from the newest
+      // end. offsetTop counts from the viewport top at scrollTop 0, so the
+      // newest row sits below the view and the older row inside it.
+      let scrollTop = -1000;
+      Object.defineProperty(scroller, "scrollTop", {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => {
+          scrollTop = value;
+        },
+      });
+      Object.defineProperty(scroller, "scrollHeight", { configurable: true, get: () => 5000 });
+      Object.defineProperty(newest, "offsetTop", { configurable: true, get: () => 300 });
+      Object.defineProperty(older, "offsetTop", { configurable: true, get: () => -900 });
+      const resize = (...rows: Array<[Element, number]>) =>
+        rowObserver.callback(
+          rows.map(([target, blockSize]) => ({ target, borderBoxSize: [{ blockSize }] })) as unknown as ResizeObserverEntry[],
+          {} as ResizeObserver,
+        );
+
+      resize([newest, 100], [older, 100]);
+      resize([newest, 160]);
+      expect(scrollTop).toBe(-1060);
+      resize([older, 180]);
+      expect(scrollTop).toBe(-1060);
+      // Mid-bounce past the oldest edge a write would lose to the animation.
+      scrollTop = -4300;
+      resize([newest, 200]);
+      expect(scrollTop).toBe(-4300);
+    } finally {
+      (globalThis as { ResizeObserver: unknown }).ResizeObserver = silent;
+    }
   });
 
   it("re-centers and re-aligns a far minimap jump after row layout settles", async () => {

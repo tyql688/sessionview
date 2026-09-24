@@ -135,6 +135,7 @@
     "refreshUsageStarted": "Usage refresh started in the background",
     "refreshUsageOk": "Usage refreshed",
     "reloadFailed": "Failed to reload session",
+    "sessionSearchFailed": "Failed to search this session",
     "subagentNotFound": "Subagent session not found",
     "subagentLoadFailed": "Failed to load child sessions",
     "resumeCommandCopied": "Resume command copied"
