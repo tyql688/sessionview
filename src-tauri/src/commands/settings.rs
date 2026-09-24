@@ -10,8 +10,8 @@ use crate::pricing::{
 };
 use crate::services::{EventBus, ProviderSnapshotService};
 
-use super::AppState;
 use super::sessions::load_detail;
+use super::{AppState, MaintenanceGuard};
 
 #[derive(Clone, Serialize)]
 struct MaintenanceEventPayload {
@@ -101,21 +101,12 @@ pub async fn get_pricing_catalog_status(state: AppState) -> CommandResult<Pricin
 }
 
 pub async fn refresh_pricing_catalog(state: AppState) -> CommandResult<PricingCatalogStatus> {
-    use std::sync::atomic::Ordering;
-
-    if state.maintenance_running.swap(true, Ordering::SeqCst) {
-        return Err(anyhow::anyhow!("maintenance task already running").into());
-    }
     // The owned task finishes even if the HTTP caller disconnects. Keep the
     // lock through both catalog storage and repricing; no scan may observe a
     // new catalog while writing stats computed from the previous one.
-    struct MaintenanceGuard(std::sync::Arc<std::sync::atomic::AtomicBool>);
-    impl Drop for MaintenanceGuard {
-        fn drop(&mut self) {
-            self.0.store(false, Ordering::SeqCst);
-        }
-    }
-    let guard = MaintenanceGuard(state.maintenance_running.clone());
+    let Some(guard) = MaintenanceGuard::try_acquire(&state) else {
+        return Err(anyhow::anyhow!("maintenance task already running").into());
+    };
     tokio::spawn(async move {
         let _guard = guard;
         emit_maintenance(&*state.events, "refresh_usage", "started", None);
@@ -191,13 +182,12 @@ async fn refresh_pricing_and_usage(state: AppState) -> CommandResult<PricingCata
 }
 
 pub async fn start_rebuild_index(state: AppState) -> CommandResult<bool> {
-    use std::sync::atomic::Ordering;
-
-    if state.maintenance_running.swap(true, Ordering::SeqCst) {
+    let Some(guard) = MaintenanceGuard::try_acquire(&state) else {
         return Ok(false);
-    }
+    };
 
     tokio::spawn(async move {
+        let _guard = guard;
         emit_maintenance(&*state.events, "rebuild_index", "started", None);
         let result = tokio::task::spawn_blocking({
             let state = state.clone();
@@ -211,7 +201,6 @@ pub async fn start_rebuild_index(state: AppState) -> CommandResult<bool> {
             Ok(_) => emit_maintenance(&*state.events, "rebuild_index", "finished", None),
             Err(error) => emit_maintenance(&*state.events, "rebuild_index", "failed", Some(error)),
         }
-        state.maintenance_running.store(false, Ordering::SeqCst);
     });
 
     Ok(true)
@@ -237,13 +226,12 @@ pub async fn clear_usage_stats(state: AppState) -> CommandResult<()> {
 }
 
 pub async fn start_refresh_usage(state: AppState) -> CommandResult<bool> {
-    use std::sync::atomic::Ordering;
-
-    if state.maintenance_running.swap(true, Ordering::SeqCst) {
+    let Some(guard) = MaintenanceGuard::try_acquire(&state) else {
         return Ok(false);
-    }
+    };
 
     tokio::spawn(async move {
+        let _guard = guard;
         emit_maintenance(&*state.events, "refresh_usage", "started", None);
         // Full forced reparse; token stats are swapped per-session inside the
         // provider commits. No destructive global clear up front — a failure
@@ -266,7 +254,6 @@ pub async fn start_refresh_usage(state: AppState) -> CommandResult<bool> {
             Ok(_) => emit_maintenance(&*state.events, "refresh_usage", "finished", None),
             Err(error) => emit_maintenance(&*state.events, "refresh_usage", "failed", Some(error)),
         }
-        state.maintenance_running.store(false, Ordering::SeqCst);
     });
 
     Ok(true)

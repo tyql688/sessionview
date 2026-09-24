@@ -14,8 +14,8 @@ use crate::services::session_view::{
     subagent_meta_title, with_load_guard,
 };
 
-use super::AppState;
 use super::session_tail::try_tail_fast_path;
+use super::{AppState, MaintenanceGuard};
 
 /// Sentinel error returned when a load was cancelled mid-flight. Mapped
 /// to a typed string the frontend can ignore (rather than show as an
@@ -47,25 +47,12 @@ pub struct SessionOpenWindow {
     pub window: SessionMessagesWindow,
 }
 
-/// Clears `maintenance_running` on drop. Lives inside the blocking closure so
-/// a dropped command future (HTTP client disconnect) can't leak the flag set.
-struct MaintenanceGuard(Arc<std::sync::atomic::AtomicBool>);
-
-impl Drop for MaintenanceGuard {
-    fn drop(&mut self) {
-        self.0.store(false, std::sync::atomic::Ordering::SeqCst);
-    }
-}
-
 pub async fn reindex(state: AppState) -> CommandResult<usize> {
-    use std::sync::atomic::Ordering;
-
-    if state.maintenance_running.swap(true, Ordering::SeqCst) {
+    let Some(guard) = MaintenanceGuard::try_acquire(&state) else {
         return Err(CommandError::from(anyhow!(
             "maintenance task already running"
         )));
-    }
-    let guard = MaintenanceGuard(state.maintenance_running.clone());
+    };
 
     let worker_state = state.clone();
     super::blocking(move || {
@@ -80,14 +67,11 @@ pub async fn reindex_providers(
     aggressive: Option<bool>,
     state: AppState,
 ) -> CommandResult<usize> {
-    use std::sync::atomic::Ordering;
-
-    if state.maintenance_running.swap(true, Ordering::SeqCst) {
+    let Some(guard) = MaintenanceGuard::try_acquire(&state) else {
         return Err(CommandError::from(anyhow!(
             "maintenance task already running"
         )));
-    }
-    let guard = MaintenanceGuard(state.maintenance_running.clone());
+    };
 
     let worker_state = state.clone();
     super::blocking(move || -> anyhow::Result<usize> {
