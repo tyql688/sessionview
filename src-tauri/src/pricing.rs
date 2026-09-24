@@ -38,15 +38,25 @@ pub struct ModelPricing {
     pub threshold_tokens: Option<u64>,
 }
 
+/// Stored once per catalog key (~10k entries), so absent rates are omitted
+/// rather than written as `null`; a missing field reads back as `None`.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RemoteModelPricing {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub input_cost_per_token: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub output_cost_per_token: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_read_input_token_cost: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_creation_input_token_cost: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub input_cost_per_token_above_200k_tokens: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub output_cost_per_token_above_200k_tokens: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_read_input_token_cost_above_200k_tokens: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_creation_input_token_cost_above_200k_tokens: Option<f64>,
 }
 
@@ -387,6 +397,28 @@ mod tests {
 
     fn assert_close(actual: f64, expected: f64) {
         assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+    }
+
+    #[test]
+    fn stored_catalog_omits_absent_rates_and_reads_back_identically() {
+        let catalog = parse_models_dev(
+            r#"{"vendor":{"models":{"model-a":{"cost":{"input":2.5,"output":15,"cache_read":0.25}}}}}"#,
+        )
+        .unwrap();
+        let stored = serde_json::to_string(&catalog).unwrap();
+        assert!(!stored.contains("null"), "{stored}");
+
+        let reread = parse_catalog(&stored).unwrap();
+        let legacy = parse_catalog(
+            r#"{"vendor/model-a":{"input_cost_per_token":2.5e-6,"output_cost_per_token":1.5e-5,"cache_read_input_token_cost":2.5e-7,"cache_creation_input_token_cost":null,"input_cost_per_token_above_200k_tokens":null}}"#,
+        )
+        .unwrap();
+        for model in ["vendor/model-a", "model-a"] {
+            let original = super::lookup_pricing(Some(&catalog), model);
+            assert!(original.is_some());
+            assert_eq!(super::lookup_pricing(Some(&reread), model), original);
+            assert_eq!(super::lookup_pricing(Some(&legacy), model), original);
+        }
     }
 
     #[test]
