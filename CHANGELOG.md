@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.8.3] - Unreleased
+
+### Changed
+
+- In-session search counts every match in the session's user and assistant messages without loading the whole session into the timeline. Stepping through matches loads the window around each one and centers the match itself, also inside long messages. Queries typed while the session's text is still loading share one request.
+- Global search covers the same user and assistant messages as in-session search; tool output and thinking are not indexed. OpenCode sessions index all of their text parts.
+- The index database stores each session's search text zstd-compressed, which shrinks the file, and compacts itself when rewritten sessions have grown it. The first launch converts the existing database in place and re-indexes every session once. Earlier SessionView versions, including an older `npx sessionview` still in the npm cache, cannot use the converted database: indexing and search fail with `unknown function: session_content_text()`. To go back to an earlier version, quit SessionView and delete `sessions.db`, `sessions.db-wal`, and `sessions.db-shm` from `~/.sessionview` (or from the directory passed to `--data-dir`). The earlier version rebuilds its index on the next launch; favorites and renamed titles are stored in that database and are lost.
+
+### Fixed
+
+- A large session is parsed once while it opens: the background parse, the minimap outline, message windows, and in-session search share a single parse, and a parse that finishes is kept even when the request that started it was canceled. On a 1.8 GB Codex session, opening it and searching during the load peaks at 1.7 GB of memory instead of 3.3 GB, and typing a query during the load at 1.4 GB instead of 5.8 GB.
+- Codex `WebSearch` completion records are parsed as web searches with their query, actions, and results.
+- Pi sessions parse current records: system-prompt snapshots, usage entries such as cache warming (counted toward usage), and context edits are recognized, and an entry that fails to parse keeps the rest of its branch linked. Compaction and branch-summary usage is attributed to the model in effect at that point in the tree; usage without an attributable model is skipped with a parse warning. Extension JSONL files without a session header are skipped, and a session file copied into several project directories is indexed once, from its most recently modified copy.
+- The timeline stays still when rows below the viewport resize or rows change height during a rubber-band bounce at either edge, and expanding a thinking block keeps its header in place.
+- Replies that quote `<system-reminder>` in their text are shown; a message is hidden as injected content only when a system reminder opens it.
+- Terminal tool output that starts with a brace is shown as-is without console warnings.
+
 ## [0.8.2] - 2026-09-08
 
 ### Fixed
