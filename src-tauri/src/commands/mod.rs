@@ -8,7 +8,7 @@ mod settings;
 mod terminal;
 mod usage;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -45,10 +45,6 @@ pub struct AppState {
     /// frontend request identity so stale cleanup IPC cannot cancel a newer
     /// load for the same session.
     pub load_tokens: Arc<Mutex<HashMap<String, LoadToken>>>,
-    /// Cache keys whose background full-file parse is in flight. The tail
-    /// fast-path consults this set to avoid spawning a duplicate promote
-    /// when the user opens the same session twice in rapid succession.
-    pub promote_in_flight: Arc<Mutex<HashSet<String>>>,
 }
 
 /// Holds `AppState::maintenance_running` for one maintenance pass (index,

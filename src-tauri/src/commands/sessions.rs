@@ -423,7 +423,8 @@ pub(crate) fn load_detail(session_id: &str, db: &Database) -> anyhow::Result<Ses
 
 /// Load messages either from the in-memory cache or by re-parsing the
 /// source file. Returns an `Arc` so cache hits and full-detail clones
-/// share the parsed data without an extra copy.
+/// share the parsed data without an extra copy. Concurrent loads of one
+/// session share a single parse (`SessionCache::get_or_load`).
 ///
 /// Honors the thread-local cancel flag installed by `with_load_guard`:
 /// the parser may bail out mid-line-loop and return an empty/partial
@@ -451,24 +452,18 @@ pub(crate) fn load_messages_cached(
         .ok()
         .and_then(|m| m.modified().ok());
 
-    let cache_key = session_cache_key(meta);
-    if let Some(hit) = state.session_cache.get(&cache_key, mtime) {
-        return Ok((hit.messages, hit.parse_warning_count, hit.token_totals));
-    }
-
-    let loaded =
-        load_messages_from_provider_or_canceled(&meta.provider, &meta.id, &meta.source_path)?;
-    let total_messages = loaded.messages.len();
-    let cached = state.session_cache.insert(
-        cache_key,
-        meta.source_path.clone(),
-        loaded.messages,
-        loaded.parse_warning_count,
-        loaded.token_totals,
-        mtime,
-        false,
-        Some(total_messages),
-    );
+    let cached = state
+        .session_cache
+        .get_or_load(&session_cache_key(meta), &meta.source_path, mtime, || {
+            load_messages_from_provider(&meta.provider, &meta.id, &meta.source_path)
+        })
+        .map_err(|error| {
+            if load_cancel::is_canceled() {
+                canceled_error()
+            } else {
+                error
+            }
+        })?;
     Ok((
         cached.messages,
         cached.parse_warning_count,

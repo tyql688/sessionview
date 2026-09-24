@@ -157,9 +157,10 @@ fn kimi_tail(path: &Path, target_messages: usize) -> Option<(Vec<Message>, u32)>
 /// `load_messages_cached` call hits the promoted entry and the fast
 /// path is no longer needed for this session.
 ///
-/// Skipped when another promote for the same cache key is already in
-/// flight (e.g. the user clicked the same session twice in rapid
-/// succession) — `AppState.promote_in_flight` is the gating set.
+/// Skipped when a parse of this session is already in progress (an
+/// earlier promote, or a request's own load). Requests arriving while the
+/// promote runs wait for it instead of parsing the file again
+/// (`SessionCache::get_or_load`).
 ///
 /// Failures are logged at warn level. The user already has a usable
 /// tail window in hand, so a stale cache is the worst outcome.
@@ -169,47 +170,22 @@ fn schedule_full_parse_promote(
     cache_key: String,
     mtime: Option<std::time::SystemTime>,
 ) {
-    // Try to claim the promote slot before paying for `spawn_blocking`.
-    // A racing fast-path that already spawned a promote for this cache
-    // key wins; we silently no-op.
-    {
-        let mut guard = match state.promote_in_flight.lock() {
-            Ok(g) => g,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        if !guard.insert(cache_key.clone()) {
-            return;
-        }
+    if state.session_cache.is_loading(&cache_key) {
+        return;
     }
 
     tokio::task::spawn_blocking(move || {
-        let result = load_messages_from_provider(&meta.provider, &meta.id, &meta.source_path);
-        match result {
-            Ok(loaded) => {
-                let total_messages = loaded.messages.len();
-                state.session_cache.insert(
-                    cache_key.clone(),
-                    meta.source_path.clone(),
-                    loaded.messages,
-                    loaded.parse_warning_count,
-                    loaded.token_totals,
-                    mtime,
-                    false,
-                    Some(total_messages),
-                );
-            }
-            Err(error) => {
-                log::warn!(
-                    "background full parse failed for session {}: {error:#}",
-                    meta.id
-                );
-            }
-        }
-        // Release the in-flight slot last so a subsequent fast-path that
-        // wants to re-promote (after a file change, for instance) can
-        // proceed cleanly.
-        if let Ok(mut guard) = state.promote_in_flight.lock() {
-            guard.remove(&cache_key);
+        let promoted =
+            state
+                .session_cache
+                .get_or_load(&cache_key, &meta.source_path, mtime, || {
+                    load_messages_from_provider(&meta.provider, &meta.id, &meta.source_path)
+                });
+        if let Err(error) = promoted {
+            log::warn!(
+                "background full parse failed for session {}: {error:#}",
+                meta.id
+            );
         }
     });
 }

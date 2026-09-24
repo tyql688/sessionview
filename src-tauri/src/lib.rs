@@ -84,7 +84,6 @@ pub fn build_app_state(data_dir: &Path, events: Arc<dyn EventBus>) -> anyhow::Re
             32 * 1024 * 1024,
         )),
         load_tokens: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        promote_in_flight: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
     })
 }
 
