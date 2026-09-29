@@ -17,6 +17,30 @@ use crate::provider::{
 const COMPRESSED_LOG_NAME: &str = "session.jsonl.zstd";
 const PLAIN_LOG_NAME: &str = "session.jsonl";
 
+/// Rank a session artifact by `(format version, compressed)`: newer DSH
+/// releases persist versioned artifacts (`session.v2.jsonl.zstd`,
+/// `session.v3.jsonl.zstd`, …) alongside — or in place of — the unversioned
+/// names, and a directory mid-migration can hold several generations at
+/// once (highest version wins; the compressed encoding wins ties, mirroring
+/// the old plain-vs-zstd rule). Returns `None` for non-artifacts
+/// (`session.lock`, `*.Zone.Identifier`, …).
+fn artifact_rank(file_name: &str) -> Option<(u64, bool)> {
+    if file_name == PLAIN_LOG_NAME {
+        return Some((0, false));
+    }
+    if file_name == COMPRESSED_LOG_NAME {
+        return Some((0, true));
+    }
+    let rest = file_name.strip_prefix("session.v")?;
+    let dot = rest.find('.')?;
+    let version: u64 = rest[..dot].parse().ok()?;
+    match &rest[dot..] {
+        ".jsonl" => Some((version, false)),
+        ".jsonl.zstd" => Some((version, true)),
+        _ => None,
+    }
+}
+
 pub(crate) struct Descriptor;
 impl crate::provider::ProviderDescriptor for Descriptor {
     // DSH resumes sessions through its terminal profile: `--resume <id>` is
@@ -35,6 +59,12 @@ impl crate::provider::ProviderDescriptor for Descriptor {
     }
     fn cli_command(&self) -> &'static str {
         "dsh"
+    }
+    /// v2/v3/v4 artifacts are newly discovered, and legacy files containing
+    /// `model/selection`, `compaction/prune` or `activity/status` rows now
+    /// yield fewer parse warnings (pruned transcripts change too).
+    fn parser_revision(&self) -> Option<&'static str> {
+        Some("1")
     }
 }
 
@@ -66,14 +96,17 @@ impl DshProvider {
 
     /// One artifact per session directory: DSH compresses `session.jsonl`
     /// into `session.jsonl.zstd`, and both can coexist transiently around
-    /// that switch — preferring the compressed artifact keeps one session id
-    /// from parsing twice out of two source paths.
+    /// that switch. Newer releases persist versioned artifacts
+    /// (`session.v2/v3/v4.jsonl.zstd`); the highest version wins, so a
+    /// directory mid-migration indexes its newest log, and the compressed
+    /// encoding breaks ties within a generation (keeping one session id from
+    /// parsing twice out of two source paths).
     fn collect_session_files(&self) -> Vec<PathBuf> {
         let sessions_dir = self.sessions_dir();
         if !sessions_dir.exists() {
             return Vec::new();
         }
-        let mut file_by_dir: BTreeMap<PathBuf, PathBuf> = BTreeMap::new();
+        let mut file_by_dir: BTreeMap<PathBuf, ((u64, bool), PathBuf)> = BTreeMap::new();
         for entry in WalkDir::new(&sessions_dir) {
             let entry = match entry {
                 Ok(entry) => entry,
@@ -88,20 +121,23 @@ impl DshProvider {
             let Some(name) = entry.file_name().to_str() else {
                 continue;
             };
-            let is_compressed = name == COMPRESSED_LOG_NAME;
-            if !is_compressed && name != PLAIN_LOG_NAME {
+            let Some(rank) = artifact_rank(name) else {
                 continue;
-            }
+            };
             let Some(dir) = entry.path().parent().map(std::path::Path::to_path_buf) else {
                 continue;
             };
-            if is_compressed {
-                file_by_dir.insert(dir, entry.into_path());
-            } else {
-                file_by_dir.entry(dir).or_insert_with(|| entry.into_path());
-            }
+            file_by_dir
+                .entry(dir)
+                .and_modify(|(best_rank, best_path)| {
+                    if rank > *best_rank {
+                        *best_rank = rank;
+                        *best_path = entry.path().to_path_buf();
+                    }
+                })
+                .or_insert_with(|| (rank, entry.path().to_path_buf()));
         }
-        file_by_dir.into_values().collect()
+        file_by_dir.into_values().map(|(_, path)| path).collect()
     }
 }
 
@@ -212,6 +248,60 @@ mod tests {
 
         let files = DshProvider::with_home(home.path().to_path_buf()).collect_session_files();
         assert_eq!(files.len(), 2);
+    }
+
+    #[test]
+    fn artifact_rank_orders_versions_and_encodings() {
+        assert_eq!(artifact_rank("session.jsonl"), Some((0, false)));
+        assert_eq!(artifact_rank("session.jsonl.zstd"), Some((0, true)));
+        assert_eq!(artifact_rank("session.v2.jsonl.zstd"), Some((2, true)));
+        assert_eq!(artifact_rank("session.v4.jsonl.zstd"), Some((4, true)));
+        assert_eq!(artifact_rank("session.v3.jsonl"), Some((3, false)));
+        // Non-artifacts never qualify.
+        assert_eq!(artifact_rank("session.lock"), None);
+        assert_eq!(artifact_rank("session.jsonl.zstd:Zone.Identifier"), None);
+        assert_eq!(artifact_rank("other.jsonl"), None);
+        assert_eq!(artifact_rank("session.v.jsonl.zstd"), None);
+        assert_eq!(artifact_rank("session.vx.jsonl.zstd"), None);
+        // Compression only breaks ties within one generation.
+        assert!(artifact_rank("session.jsonl.zstd") > artifact_rank("session.jsonl"));
+        assert!(artifact_rank("session.v2.jsonl") > artifact_rank("session.jsonl.zstd"));
+        assert!(artifact_rank("session.v4.jsonl.zstd") > artifact_rank("session.v3.jsonl.zstd"));
+    }
+
+    #[test]
+    fn collect_session_files_prefers_highest_artifact_version() {
+        let home = tempfile::tempdir().unwrap();
+        let session = home.path().join("sessions").join("--proj--").join("s-1");
+        std::fs::create_dir_all(&session).unwrap();
+        // A directory mid-migration holds several generations: newest wins.
+        std::fs::write(session.join("session.jsonl.zstd"), "{}").unwrap();
+        std::fs::write(session.join("session.v3.jsonl.zstd"), "{}").unwrap();
+        std::fs::write(session.join("session.v4.jsonl.zstd"), "{}").unwrap();
+        std::fs::write(session.join("session.lock"), "").unwrap();
+        std::fs::write(session.join("session.v4.jsonl.zstd:Zone.Identifier"), "").unwrap();
+
+        let files = DshProvider::with_home(home.path().to_path_buf()).collect_session_files();
+        assert_eq!(files.len(), 1);
+        assert!(
+            files[0].ends_with("session.v4.jsonl.zstd"),
+            "highest version must win: {files:?}"
+        );
+    }
+
+    #[test]
+    fn collect_session_files_finds_versioned_only_dirs() {
+        let home = tempfile::tempdir().unwrap();
+        let session = home.path().join("sessions").join("--proj--").join("s-9");
+        std::fs::create_dir_all(&session).unwrap();
+        std::fs::write(session.join("session.v2.jsonl.zstd"), "{}").unwrap();
+
+        let files = DshProvider::with_home(home.path().to_path_buf()).collect_session_files();
+        assert_eq!(files.len(), 1);
+        assert!(
+            files[0].ends_with("session.v2.jsonl.zstd"),
+            "versioned-only dir must index: {files:?}"
+        );
     }
 
     #[test]

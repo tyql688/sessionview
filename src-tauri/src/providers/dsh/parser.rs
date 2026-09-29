@@ -7,8 +7,33 @@
 //!   `$DSH_HOME/sessions/<project-key>/<session-id>/session.jsonl[.zstd]`
 //!   (`DSH_HOME` defaults to `~/.dsh`). The artifact is zstd-compressed JSONL
 //!   when the suffix is `.jsonl.zstd`; uncompressed `.jsonl` is also accepted.
+//!   Newer releases persist versioned artifacts instead
+//!   (`session.v2.jsonl.zstd`, `session.v3.jsonl.zstd`, …); discovery picks
+//!   the highest generation per directory (see `artifact_rank`).
 //! - The first record is the immutable session header
 //!   `{type:"session", version, id, createdAt, cwd?, parentSession?, origin?, agentPreset?, ...}`.
+//!   Headers at version 0–4 share the framing parsed here (`MAX_SUPPORTED_HEADER_VERSION`);
+//!   v2+ sessions additionally carry `isSeeded`/`delegationDepth` and a per-record
+//!   `surfaceOp: "append"` marker on surface events (the default behavior, ignored).
+//!   Standalone `compaction/prune` rows cite `shadowedSeqs` in `shadowedRange`.
+//!   Splice semantics differ from `replace`: the cited seqs usually name
+//!   `tool/result` rows that already merged into their `tool/call` message, so
+//!   there is no message of their own to remove and the prune is a no-op — the
+//!   content travels on the following `surfaceOp: {op:"replace"}` re-emission.
+//!   Only a cited seq that itself produced a message (`user/message`,
+//!   `assistant/message`, an orphan `tool/result`, …) is spliced out.
+//! - v2+ sessions never emit `assistant/chunk` rows: failed model calls are recorded
+//!   as `assistant/attempt` events (usage + `finish` error chunks only, no text
+//!   deltas — nothing to reconstruct), and parallel-tool detail rides
+//!   `tool/ptc-dispatch[-start]` rows that duplicate their parent `tool/call` +
+//!   `tool/result` pair. All three are log-only, as are `workspace/changes`,
+//!   `model/selection`, `session-log-deepseek/delivery-accepted`, the renamed
+//!   `approval/asked` + `approval/decided` pair, and `activity/status`.
+//! - `system/message` carries the session's system prompt with `surfaceOp: "append"`.
+//!   It is dropped like the other system-injected context dumps: rendering the
+//!   multi-KB prompt into every transcript would be noise, not conversation.
+//! - `deliverables/presented` lists files the harness presented to the user;
+//!   it surfaces as a tagged System line following the subagent-report convention.
 //! - Every following record is a session event `{type, seq, time, data}` or a
 //!   packed chunk row (`text-chunks` / `reasoning-chunks` / `tool-call-chunks`)
 //!   that replays raw stream deltas in one storage line.
@@ -85,6 +110,12 @@ const DSH_USAGE_KEYS: UsageKeys = UsageKeys {
     cache_read: &["cacheReadTokens"],
     cache_write: &["cacheWriteTokens"],
 };
+
+/// Highest session-header `version` this parser has been verified against
+/// (v2–v4 share the v0 framing plus the log-only rows documented above).
+/// Newer generations still parse best-effort but count a warning so the UI
+/// badges them for review.
+const MAX_SUPPORTED_HEADER_VERSION: i64 = 4;
 
 const MISSING: Value = Value::Null;
 
@@ -270,9 +301,12 @@ fn scan_records(
         if header.is_none() {
             match serde_json::from_str::<DshHeader>(line) {
                 Ok(parsed) if parsed.kind == "session" => {
-                    if parsed.version.is_some_and(|v| v != 0) {
+                    if parsed
+                        .version
+                        .is_some_and(|v| v > MAX_SUPPORTED_HEADER_VERSION)
+                    {
                         log::warn!(
-                            "DSH session '{}' has format version {:?}; expected 0 — parsing best-effort",
+                            "DSH session '{}' has format version {:?}; tested up to {MAX_SUPPORTED_HEADER_VERSION} — parsing best-effort",
                             path.display(),
                             parsed.version
                         );
@@ -370,6 +404,67 @@ fn handle_record(record: &Value, state: &mut ParseState) {
                 state.descriptor_label = Some(label.to_string());
             }
         }
+        // The session's system prompt arrives as a surface event, but it is
+        // system-injected context rather than conversation — drop it like the
+        // agent-instructions/plugin dumps below instead of rendering a
+        // multi-KB prompt row into every v2+ transcript.
+        "system/message" => {
+            log::debug!("skipping DSH system/message prompt dump");
+        }
+        // Files the harness presented to the user: surface compactly as a
+        // tagged System line (subagent-report convention), not conversation.
+        "deliverables/presented" => {
+            let files: Vec<String> = data
+                .get("files")
+                .and_then(Value::as_array)
+                .map(|files| {
+                    files
+                        .iter()
+                        .filter_map(|file| {
+                            let path = file.get("path").and_then(Value::as_str)?;
+                            let description = file
+                                .get("description")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .trim();
+                            if description.is_empty() {
+                                Some(path.to_string())
+                            } else {
+                                Some(format!("{path} — {description}"))
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            if !files.is_empty() {
+                state.push_with_provenance(
+                    Message {
+                        timestamp,
+                        ..Message::system(format!("[deliverables]\n{}", files.join("\n")))
+                    },
+                    seq,
+                );
+            }
+        }
+        // Standalone compaction: `shadowedSeqs` names the surface seqs to
+        // drop (usage rows in `usage_events` already preserve their tokens, as
+        // with `replace` splices). A cited `tool/result` row that merged into
+        // its `tool/call` message has no message of its own, so it yields
+        // nothing to remove — those prunes are no-ops, and the following
+        // `surfaceOp: replace` re-emission carries the content.
+        "compaction/prune" => {
+            let shadowed: Vec<u64> = data
+                .get("shadowedSeqs")
+                .and_then(Value::as_array)
+                .map(|seqs| seqs.iter().filter_map(Value::as_u64).collect())
+                .unwrap_or_default();
+            if shadowed.is_empty() {
+                log::warn!("skipping DSH compaction/prune event without shadowedSeqs");
+                state.parse_warning_count = state.parse_warning_count.saturating_add(1);
+            } else {
+                apply_surface_replace(state, state.messages.len(), &shadowed);
+            }
+        }
         "agent-preset/selected" => {
             if let Some(agent_preset) = data
                 .get("agentPreset")
@@ -392,7 +487,10 @@ fn handle_record(record: &Value, state: &mut ParseState) {
         }
         // Known log-only event families: boundaries, request metadata, chunk
         // rows, compaction brackets, and informational plugin rows. None
-        // carries surface semantics.
+        // carries surface semantics. The v2+ generation adds failed-attempt
+        // markers (`assistant/attempt`: usage + `finish`-error chunks only),
+        // parallel-tool detail duplicating the parent `tool/call` pair
+        // (`tool/ptc-dispatch[-start]`), and transport/model bookkeeping.
         "turn/start"
         | "turn/end"
         | "step/start"
@@ -414,6 +512,15 @@ fn handle_record(record: &Value, state: &mut ParseState) {
         | "compaction/summary"
         | "approval/requested"
         | "approval/resolved"
+        | "approval/asked"
+        | "approval/decided"
+        | "assistant/attempt"
+        | "tool/ptc-dispatch"
+        | "tool/ptc-dispatch-start"
+        | "workspace/changes"
+        | "model/selection"
+        | "session-log-deepseek/delivery-accepted"
+        | "activity/status"
         | "goal/change"
         | "plan/mode"
         | "question/requested"
@@ -562,21 +669,11 @@ fn handle_user_message(
         "user" => state.push_user(text, timestamp, seq),
         // System-injected context dumps — workspace instructions, runtime
         // snapshots, skill/tool catalogs, relayed or recalled context — are
-        // not conversation; the DSH UI collapses them, so do we.
+        // not conversation; the DSH UI collapses them, so do we. The dump
+        // shape is identified by its `form`, not the producer `kind`
+        // (`plugin`, `runtime-context`, `skill-catalog`, … all qualify).
         "agent-instructions" => {
             log::debug!("skipping DSH agent-instructions user message");
-        }
-        "plugin"
-            if matches!(
-                form,
-                Some("snapshot")
-                    | Some("instructions")
-                    | Some("catalog")
-                    | Some("relay")
-                    | Some("recall")
-            ) =>
-        {
-            log::debug!("skipping DSH plugin {form:?} user message");
         }
         // A background subagent's relayed report. The first block is DSH's
         // boilerplate ("Background subagent <id> reported:") — drop it and
@@ -620,6 +717,20 @@ fn handle_user_message(
                     seq,
                 );
             }
+        }
+        // System-injected context dumps — workspace instructions, runtime
+        // snapshots, skill/tool catalogs, recalled context — are not
+        // conversation; the DSH UI collapses them, so do we. The dump shape is
+        // identified by its `form`, not the producer `kind` (`plugin`,
+        // `runtime-context`, `skill-catalog`, … all qualify).
+        // `relay` is deliberately absent: `subagent-report` (handled above) and
+        // `coordinator` both relay real instructions, which are conversation.
+        _ if matches!(
+            form,
+            Some("snapshot") | Some("instructions") | Some("catalog") | Some("recall")
+        ) =>
+        {
+            log::debug!("skipping DSH {source_kind} {form:?} context dump");
         }
         // Everything else that reaches the surface (policy changes, goal
         // rounds, notices, compaction checkpoints, …) renders as a system
@@ -1279,6 +1390,19 @@ mod tests {
             time,
             &format!(
                 r#"{{"turn":1,"step":1,"message":{{"role":"assistant","content":{content},"source":{{"kind":"model","provider":"opencode-go","model":"deepseek-v4-flash"}},"id":"a{seq}"}}{usage_json}}}"#
+            ),
+        )
+    }
+
+    /// `arguments` is a JSON string literal (quotes included) — DSH stores the
+    /// tool arguments as an escaped string, not an object.
+    fn tool_call_line(seq: u64, time: i64, call_id: &str, name: &str, arguments: &str) -> String {
+        event_line(
+            "tool/call",
+            seq,
+            time,
+            &format!(
+                r#"{{"turn":1,"step":1,"callId":"{call_id}","name":"{name}","arguments":{arguments}}}"#
             ),
         )
     }
@@ -2011,5 +2135,242 @@ mod tests {
         let outcome = provider.scan_incremental(&known).expect("incremental scan");
         assert!(outcome.parsed.is_empty());
         assert_eq!(outcome.unchanged_source_paths.len(), 1);
+    }
+
+    /// A v4 header: the framing v2+ generations share with v0, plus the
+    /// fields newer releases add (`isSeeded`, `delegationDepth`).
+    fn versioned_header_line(version: i64, cwd: &str) -> String {
+        format!(
+            r#"{{"type":"session","version":{version},"id":"{SESSION_ID}","createdAt":1786865077879,"cwd":"{cwd}","isSeeded":false,"delegationDepth":0,"agentPreset":"standard"}}"#
+        )
+    }
+
+    #[test]
+    fn versioned_headers_parse_without_warnings() {
+        for version in [2, 3, 4] {
+            let session = parse_lines(&[
+                &versioned_header_line(version, "/tmp/p"),
+                &user_message_line(1, 1000, r#"{"kind":"user"}"#, r#""hello v4""#),
+            ]);
+            assert_eq!(session.meta.id, SESSION_ID);
+            assert_eq!(session.messages.len(), 1);
+            assert_eq!(
+                session.parse_warning_count, 0,
+                "v{version} header must not warn"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_future_header_version_warns() {
+        let session = parse_lines(&[
+            &versioned_header_line(99, "/tmp/p"),
+            &user_message_line(1, 1000, r#"{"kind":"user"}"#, r#""hello future""#),
+        ]);
+        assert_eq!(session.messages.len(), 1);
+        assert_eq!(session.parse_warning_count, 1);
+    }
+
+    #[test]
+    fn v2_generation_rows_are_silent() {
+        // Every new row type the v2+ generation adds that carries no
+        // transcript semantics must parse warning-free.
+        let session = parse_lines(&[
+            &versioned_header_line(4, "/tmp/p"),
+            &user_message_line(1, 1000, r#"{"kind":"user"}"#, r#""hello""#),
+            &event_line(
+                "assistant/attempt",
+                2,
+                1001,
+                r#"{"turn":1,"step":1,"stream":[{"type":"chunk","time":1001,"chunk":{"type":"usage","usage":{"inputTokens":0,"outputTokens":0,"totalTokens":0}}},{"type":"chunk","time":1001,"chunk":{"type":"finish","reason":{"kind":"error"}}}]}"#,
+            ),
+            &event_line(
+                "tool/ptc-dispatch-start",
+                3,
+                1002,
+                r#"{"rootCallId":"call_1","parentCallId":"call_1","subCallId":"call_1:code:1","name":"bash"}"#,
+            ),
+            &event_line(
+                "tool/ptc-dispatch",
+                4,
+                1003,
+                r#"{"rootCallId":"call_1","parentCallId":"call_1","subCallId":"call_1:code:1","name":"bash","isError":false,"content":[{"type":"text","text":"detail"}]}"#,
+            ),
+            &event_line("workspace/changes", 5, 1004, r#"{"turn":1}"#),
+            &event_line(
+                "model/selection",
+                6,
+                1005,
+                r#"{"provider":"aittest","model":"dsv41"}"#,
+            ),
+            &event_line(
+                "session-log-deepseek/delivery-accepted",
+                7,
+                1006,
+                r#"{"sessionId":"session-x","sessionFormatVersion":4,"throughSeq":6}"#,
+            ),
+            &event_line(
+                "approval/asked",
+                8,
+                1007,
+                r#"{"id":"a-1","toolName":"bash","callId":"call_1","reason":"escalate"}"#,
+            ),
+            &event_line(
+                "approval/decided",
+                9,
+                1008,
+                r#"{"id":"a-1","outcome":"allowed-once"}"#,
+            ),
+            &event_line("activity/status", 10, 1009, r#"{"status":"running"}"#),
+        ]);
+        assert_eq!(session.messages.len(), 1);
+        assert_eq!(session.messages[0].content, "hello");
+        assert_eq!(session.parse_warning_count, 0);
+    }
+
+    #[test]
+    fn system_message_prompt_dump_is_dropped() {
+        // `system/message` carries the session prompt with surfaceOp append;
+        // it is context, not conversation — a prompt-only log yields nothing.
+        let dir = TempDir::new().expect("temp dir must be created");
+        let path = write_log(
+            &dir,
+            "session.jsonl",
+            &[
+                &versioned_header_line(4, "/tmp/p"),
+                r#"{"type":"system/message","seq":1,"time":1000,"surfaceOp":"append","data":{"turn":1,"step":1,"message":{"role":"system","content":[{"type":"text","text":"You are a helpful software engineer assistant."}],"source":{"kind":"plugin","plugin":"@deepseek-ai/dsh-system-prompt"},"id":"s1"}}}"#,
+            ],
+        );
+        assert!(parse_session_file(&path).is_none());
+    }
+
+    #[test]
+    fn deliverables_surface_as_tagged_system_row() {
+        let session = parse_lines(&[
+            &versioned_header_line(4, "/tmp/p"),
+            &user_message_line(1, 1000, r#"{"kind":"user"}"#, r#""write a guide""#),
+            &event_line(
+                "deliverables/presented",
+                2,
+                1001,
+                r#"{"turn":1,"callId":"call_1","files":[{"path":"/tmp/guide.md","description":"Workspace guide"}]}"#,
+            ),
+        ]);
+        assert_eq!(session.messages.len(), 2);
+        let deliverables = &session.messages[1];
+        assert_eq!(deliverables.role, MessageRole::System);
+        assert_eq!(
+            deliverables.content,
+            "[deliverables]\n/tmp/guide.md — Workspace guide"
+        );
+        assert_eq!(session.parse_warning_count, 0);
+    }
+
+    #[test]
+    fn drops_new_generation_context_dumps_and_keeps_notices() {
+        let session = parse_lines(&[
+            &versioned_header_line(3, "/tmp/p"),
+            &user_message_line(1, 1000, r#"{"kind":"user"}"#, r#""hello""#),
+            &event_line(
+                "user/message",
+                2,
+                1001,
+                r#"{"content":[{"type":"text","text":"snapshot"}],"source":{"kind":"runtime-context","form":"snapshot"},"role":"user","id":"u2"}"#,
+            ),
+            &event_line(
+                "user/message",
+                3,
+                1002,
+                r#"{"content":[{"type":"text","text":"catalog"}],"source":{"kind":"skill-catalog","form":"catalog"},"role":"user","id":"u3"}"#,
+            ),
+            &event_line(
+                "user/message",
+                4,
+                1003,
+                r#"{"content":[{"type":"text","text":"The approval policy changed."}],"source":{"kind":"user-approval"},"role":"user","id":"u4"}"#,
+            ),
+            // A coordinator relay is an injected instruction, not a dump: it
+            // shares `form: "relay"` with subagent reports and must survive.
+            &event_line(
+                "user/message",
+                5,
+                1004,
+                r#"{"content":[{"type":"text","text":"Resume the watch now."}],"source":{"kind":"coordinator","form":"relay","senderSessionId":"session-x"},"role":"user","id":"u5"}"#,
+            ),
+        ]);
+        // Dumps gone; the approval notice and the relay render as System lines.
+        assert_eq!(session.messages.len(), 3);
+        assert_eq!(session.messages[0].content, "hello");
+        assert_eq!(session.messages[1].role, MessageRole::System);
+        assert_eq!(session.messages[1].content, "The approval policy changed.");
+        assert_eq!(session.messages[2].role, MessageRole::System);
+        assert_eq!(session.messages[2].content, "Resume the watch now.");
+        assert_eq!(session.parse_warning_count, 0);
+    }
+
+    #[test]
+    fn compaction_prune_removes_a_shadowed_message_seq_and_keeps_usage() {
+        // The arm's contract: a cited seq that produced a message is spliced
+        // out, while assistant usage survives in `usage_events`.
+        let session = parse_lines(&[
+            &versioned_header_line(4, "/tmp/p"),
+            &user_message_line(1, 1000, r#"{"kind":"user"}"#, r#""old prompt""#),
+            &assistant_message_line(
+                2,
+                1001,
+                r#"[{"type":"text","text":"old answer"}]"#,
+                Some(r#"{"inputTokens":300,"outputTokens":50}"#),
+            ),
+            &event_line(
+                "compaction/prune",
+                3,
+                2000,
+                r#"{"shadowedRange":{"start":1,"end":2},"shadowedSeqs":[1,2],"shadowedTokenCount":350}"#,
+            ),
+            &user_message_line(4, 2001, r#"{"kind":"user"}"#, r#""new prompt""#),
+        ]);
+        let messages = &session.messages;
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "new prompt");
+        // Shadowed usage survives in usage_events (stats stay complete).
+        assert_eq!(session.usage_events.len(), 1);
+        assert_eq!(session.usage_events[0].input_tokens, 300);
+        // Search text keeps the old content even though it left the transcript.
+        assert!(session.content_text.contains("old answer"));
+        assert_eq!(session.parse_warning_count, 0);
+    }
+
+    #[test]
+    fn compaction_prune_shadowing_a_merged_tool_result_is_a_noop() {
+        // The real shape: `compaction/prune` cites the `tool/result` seq, but
+        // that row merged into the `tool/call` message, so the prune finds no
+        // message of its own. A following `surfaceOp: replace` re-emission
+        // (also citing the result seq) keeps the content exactly once.
+        let session = parse_lines(&[
+            &versioned_header_line(4, "/tmp/p"),
+            &user_message_line(1, 1000, r#"{"kind":"user"}"#, r#""run it""#),
+            &tool_call_line(2, 1001, "call-1", "bash", r#""{\"command\":\"ls\"}""#),
+            &tool_result_line(3, 1002, "call-1", r#""listing""#, false),
+            &event_line(
+                "compaction/prune",
+                4,
+                1003,
+                r#"{"shadowedRange":{"start":3,"end":3},"shadowedSeqs":[3],"shadowedTokenCount":42}"#,
+            ),
+            r#"{"type":"tool/result","seq":5,"time":1004,"surfaceOp":{"op":"replace","startSeq":3,"endSeq":3},"sourceEventSeqs":[3],"data":{"turn":1,"step":1,"message":{"source":{"kind":"tool","callId":"call-1"},"content":[{"type":"tool-result","toolCallId":"call-1","content":[{"type":"text","text":"listing"}],"isError":false}],"role":"user","id":"r5"}}}"#,
+        ]);
+        let tools: Vec<_> = session
+            .messages
+            .iter()
+            .filter(|m| m.role == MessageRole::Tool)
+            .collect();
+        assert_eq!(
+            tools.len(),
+            1,
+            "prune must not drop or duplicate the tool result"
+        );
+        assert_eq!(tools[0].tool_name.as_deref(), Some("Bash"));
+        assert_eq!(tools[0].content, "listing");
+        assert_eq!(session.parse_warning_count, 0);
     }
 }
