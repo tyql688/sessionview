@@ -1,18 +1,21 @@
-//! GitHub Copilot CLI session provider.
+//! GitHub Copilot session provider (Copilot CLI + VS Code Copilot agent).
 //!
-//! Copilot CLI writes one event log per session in the `copilot-agent` wire
-//! format:
+//! Copilot writes one event log per session in the `copilot-agent` wire
+//! format, from two hosts:
 //!
 //! ```text
-//! $COPILOT_HOME/session-state/<uuid>/events.jsonl
+//! $COPILOT_HOME/session-state/<uuid>/events.jsonl     # Copilot CLI
 //!   (~/.copilot by default; COPILOT_HOME replaces the whole path)
+//! <Code user dir>/workspaceStorage/<hash>/
+//!   GitHub.copilot-chat/transcripts/<uuid>.jsonl      # VS Code agent panel
 //! ```
 //!
-//! Session directories in `session-state/` without an `events.jsonl`
-//! (coding-agent workspaces that persist only checkpoints) carry no
-//! transcript and are skipped — there is nothing to render. Subagents live
-//! inline in their parent's log and come out as child sessions sharing its
-//! `source_path` (see `parser`).
+//! The CLI layout is the documented source of truth; the VS Code transcripts
+//! share the envelope but omit `session.start.data.context`, so their project
+//! comes from the sibling `workspace.json` folder URI. Session directories in
+//! `session-state/` without an `events.jsonl` (VS Code coding-agent
+//! workspaces that persist only checkpoints) carry no transcript and are
+//! skipped — there is nothing to render.
 //!
 //! `$COPILOT_HOME/session-store.db` (SQLite, WAL, written by the running
 //! CLI) holds one `assistant_usage_events` row per model call. It is read
@@ -41,6 +44,10 @@ use crate::provider::{
     LoadedSession, ParsedSession, ProviderError, ScanOutcome, SessionProvider, SourceState,
 };
 
+/// Per-user directory of the stable VS Code distribution holding
+/// `workspaceStorage/<hash>/GitHub.copilot-chat/transcripts/`.
+const VSCODE_APP_DIRS: [&str; 2] = ["Code", "Code - Insiders"];
+
 pub(crate) struct Descriptor;
 impl crate::provider::ProviderDescriptor for Descriptor {
     // Documented resume form (`copilot --help`): `--resume <id>` / `--continue`.
@@ -64,6 +71,8 @@ impl crate::provider::ProviderDescriptor for Descriptor {
 pub struct CopilotProvider {
     /// `$COPILOT_HOME` (defaults to `~/.copilot`), when resolvable.
     copilot_home: PathBuf,
+    /// VS Code per-user dirs whose `workspaceStorage` may host transcripts.
+    code_user_dirs: Vec<PathBuf>,
 }
 
 impl CopilotProvider {
@@ -72,12 +81,15 @@ impl CopilotProvider {
             .filter(|value| !value.is_empty())
             .map(PathBuf::from)
             .or_else(|| dirs::home_dir().map(|home| home.join(".copilot")))?;
-        Some(Self::with_root(copilot_home))
+        Some(Self::with_roots(copilot_home, vscode_user_dirs()?))
     }
 
-    /// Test constructor: point the provider at an arbitrary `.copilot` root.
-    pub fn with_root(copilot_home: PathBuf) -> Self {
-        Self { copilot_home }
+    /// Test constructor: point the provider at arbitrary roots.
+    pub fn with_roots(copilot_home: PathBuf, code_user_dirs: Vec<PathBuf>) -> Self {
+        Self {
+            copilot_home,
+            code_user_dirs,
+        }
     }
 
     fn cli_sessions_root(&self) -> PathBuf {
@@ -131,14 +143,68 @@ impl CopilotProvider {
         parser::parse_session_file(path, session_rows, &source_state)
     }
 
-    /// Every candidate event-log path. Each file is one session; a resumed
-    /// session keeps its id inside the same directory, so ids never collide.
+    /// Every candidate event-log path across both hosts. Each file is one
+    /// session; distinct files can never collide on a session id because a
+    /// resumed CLI session keeps its id inside the same directory.
     fn collect_session_files(&self) -> Vec<PathBuf> {
         let mut files = Vec::new();
         collect_named_files(&self.cli_sessions_root(), "events.jsonl", &mut files);
+        for user_dir in &self.code_user_dirs {
+            let storage = user_dir.join("workspaceStorage");
+            if !storage.is_dir() {
+                continue;
+            }
+            for hash in std::fs::read_dir(&storage).into_iter().flatten().flatten() {
+                let transcript_dir = hash.path().join("GitHub.copilot-chat").join("transcripts");
+                collect_jsonl_files(&transcript_dir, &mut files);
+            }
+        }
         files.sort();
+        files.dedup();
         files
     }
+}
+
+/// Collect `<session-dir>/events.jsonl` for every per-session directory
+/// directly under `dir`. Session roots are exactly one level deep.
+fn collect_named_files(dir: &std::path::Path, name: &str, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let candidate = entry.path().join(name);
+        if candidate.is_file() {
+            out.push(candidate);
+        }
+    }
+}
+
+fn collect_jsonl_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() && path.extension().is_some_and(|ext| ext == "jsonl") {
+            out.push(path);
+        }
+    }
+}
+
+/// Platform-specific VS Code per-user config directories.
+fn vscode_user_dirs() -> Option<Vec<PathBuf>> {
+    #[cfg(target_os = "macos")]
+    let base = dirs::home_dir()?
+        .join("Library")
+        .join("Application Support");
+    #[cfg(not(target_os = "macos"))]
+    let base = dirs::config_dir()?;
+    Some(
+        VSCODE_APP_DIRS
+            .iter()
+            .map(|app| base.join(app).join("User"))
+            .collect(),
+    )
 }
 
 fn read_usage_rows(
@@ -197,32 +263,17 @@ fn read_usage_rows(
     Ok(out)
 }
 
-/// Collect `<session-dir>/events.jsonl` for every per-session directory
-/// directly under `dir`. Session roots are exactly one level deep.
-fn collect_named_files(dir: &std::path::Path, name: &str, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let candidate = entry.path().join(name);
-        if candidate.is_file() {
-            out.push(candidate);
-        }
-    }
-}
-
 impl SessionProvider for CopilotProvider {
     fn provider(&self) -> Provider {
         Provider::Copilot
     }
 
     fn source_roots(&self) -> Vec<PathBuf> {
-        let root = self.cli_sessions_root();
-        if root.is_dir() {
-            vec![root]
-        } else {
-            Vec::new()
+        let mut roots = vec![self.cli_sessions_root()];
+        for user_dir in &self.code_user_dirs {
+            roots.push(user_dir.join("workspaceStorage"));
         }
+        roots.into_iter().filter(|root| root.is_dir()).collect()
     }
 
     fn scan_all(&self) -> Result<Vec<ParsedSession>, ProviderError> {
@@ -391,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn collect_session_files_skips_checkpoint_only_dirs() {
+    fn collect_session_files_spans_both_hosts() {
         let home = tempfile::tempdir().unwrap();
         let cli_dir = home.path().join("session-state").join("s1");
         std::fs::create_dir_all(&cli_dir).unwrap();
@@ -401,9 +452,23 @@ mod tests {
         std::fs::create_dir_all(&empty_dir).unwrap();
         std::fs::write(empty_dir.join("workspace.yaml"), "id: s2\n").unwrap();
 
-        let provider = CopilotProvider::with_root(home.path().to_path_buf());
+        let code_user = tempfile::tempdir().unwrap();
+        let transcript_dir = code_user
+            .path()
+            .join("workspaceStorage")
+            .join("hash1")
+            .join("GitHub.copilot-chat")
+            .join("transcripts");
+        std::fs::create_dir_all(&transcript_dir).unwrap();
+        std::fs::write(transcript_dir.join("t1.jsonl"), "").unwrap();
+        std::fs::write(transcript_dir.join("notes.txt"), "").unwrap();
+
+        let provider = CopilotProvider::with_roots(
+            home.path().to_path_buf(),
+            vec![code_user.path().to_path_buf()],
+        );
         let files = provider.collect_session_files();
-        assert_eq!(files.len(), 1, "events.jsonl only: {files:?}");
+        assert_eq!(files.len(), 2, "events.jsonl + transcript only: {files:?}");
     }
 
     #[test]
@@ -411,7 +476,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let event_path = write_session(home.path());
         let store = create_usage_store(home.path(), false);
-        let provider = CopilotProvider::with_root(home.path().to_path_buf());
+        let provider = CopilotProvider::with_roots(home.path().to_path_buf(), Vec::new());
 
         let first = provider.scan_incremental(&HashMap::new()).unwrap().parsed;
         assert_eq!(first.len(), 1);
@@ -449,7 +514,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let event_path = write_session(home.path());
         let store = create_usage_store(home.path(), true);
-        let provider = CopilotProvider::with_root(home.path().to_path_buf());
+        let provider = CopilotProvider::with_roots(home.path().to_path_buf(), Vec::new());
         let first = provider.scan_incremental(&HashMap::new()).unwrap().parsed;
         assert_eq!(first.len(), 1);
 
@@ -476,25 +541,34 @@ mod tests {
     }
 
     /// End-to-end smoke test against real Copilot data on this machine.
-    /// Point `COPILOT_HOME` at the `.copilot` tree if needed, then run:
-    ///   cargo test --lib copilot::tests::smoke_against_real_data -- --ignored
+    /// Point `COPILOT_HOME` at the `.copilot` tree (and, when the VS Code
+    /// transcripts live elsewhere, set `XDG_CONFIG_HOME` so
+    /// `<config>/Code/User/workspaceStorage` resolves), then run:
+    ///   cargo test --lib copilot::tests::smoke_against_real_data -- --ignored --nocapture
     #[test]
     #[ignore = "hits the real Copilot trees; run with --ignored"]
     fn smoke_against_real_data() {
         let Some(provider) = CopilotProvider::new() else {
+            eprintln!("no resolvable Copilot roots; skipping");
             return;
         };
+        eprintln!("roots: {:?}", provider.source_roots());
         let files = provider.collect_session_files();
-        if files.is_empty() {
-            return;
-        }
+        eprintln!("candidate event logs: {}", files.len());
 
-        let sessions = provider
-            .scan_all()
-            .unwrap_or_else(|_| panic!("Copilot real-data scan failed"));
+        let sessions = provider.scan_all().expect("scan_all");
         assert!(
             !sessions.is_empty(),
             "expected sessions from the real Copilot tree"
+        );
+        let with_usage = sessions
+            .iter()
+            .filter(|s| !s.usage_events.is_empty())
+            .count();
+        eprintln!(
+            "scanned {} Copilot sessions ({} with usage events)",
+            sessions.len(),
+            with_usage
         );
         for parsed in &sessions {
             assert_eq!(parsed.meta.provider, Provider::Copilot);
