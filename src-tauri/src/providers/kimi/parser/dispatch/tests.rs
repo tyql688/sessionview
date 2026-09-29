@@ -243,6 +243,172 @@ fn step_usage_accumulates_when_turn_record_never_arrives() {
 }
 
 #[test]
+fn usage_record_before_content_stays_authoritative_and_attaches_later() {
+    let mut accum = ScanAccum::new();
+    dispatch_line(&mut accum, &json!({"type": "turn.prompt", "time": 1000}));
+    dispatch_line(
+        &mut accum,
+        &json!({
+            "type": "usage.record",
+            "usageScope": "turn",
+            "model": "kimi-test",
+            "usage": {"inputOther": 12, "output": 6, "inputCacheRead": 24},
+            "time": 1001
+        }),
+    );
+    dispatch_line(
+        &mut accum,
+        &json!({
+            "type": "context.append_loop_event",
+            "event": {"type": "content.part", "part": {"type": "text", "text": "answer"}},
+            "time": 1002
+        }),
+    );
+    dispatch_line(
+        &mut accum,
+        &json!({
+            "type": "context.append_loop_event",
+            "event": {
+                "type": "step.end",
+                "usage": {"inputOther": 12, "output": 6, "inputCacheRead": 24}
+            },
+            "time": 1003
+        }),
+    );
+
+    assert_eq!(accum.parse_warning_count, 0);
+    assert_eq!(accum.usage_events.len(), 1);
+    assert_eq!(accum.usage_events[0].input_tokens, 12);
+    let usage = accum.messages[0].token_usage.as_ref().unwrap();
+    assert_eq!(usage.input_tokens, 12);
+    assert_eq!(usage.cache_read_input_tokens, 24);
+    assert_eq!(usage.output_tokens, 6);
+}
+
+#[test]
+fn usage_before_content_stays_isolated_across_model_steps() {
+    let mut accum = ScanAccum::new();
+    dispatch_line(&mut accum, &json!({"type": "turn.prompt", "time": 1000}));
+
+    for (step, input, output) in [(0, 12, 6), (1, 20, 9)] {
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_loop_event",
+                "event": {"type": "step.begin", "step": step},
+                "time": 1100 + step * 10
+            }),
+        );
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "usage.record",
+                "usageScope": "turn",
+                "model": "kimi-test",
+                "usage": {"inputOther": input, "output": output},
+                "time": 1101 + step * 10
+            }),
+        );
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_loop_event",
+                "event": {
+                    "type": "content.part",
+                    "part": {"type": "text", "text": format!("answer-{step}")}
+                },
+                "time": 1102 + step * 10
+            }),
+        );
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "context.append_loop_event",
+                "event": {
+                    "type": "step.end",
+                    "step": step,
+                    "usage": {"inputOther": input, "output": output}
+                },
+                "time": 1103 + step * 10
+            }),
+        );
+    }
+
+    assert_eq!(accum.parse_warning_count, 0);
+    assert_eq!(accum.usage_events.len(), 2);
+    assert_eq!(accum.usage_events[0].input_tokens, 12);
+    assert_eq!(accum.usage_events[1].input_tokens, 20);
+    assert_eq!(accum.messages.len(), 2);
+    assert_eq!(
+        accum.messages[0].token_usage.as_ref().unwrap().input_tokens,
+        12
+    );
+    assert_eq!(
+        accum.messages[1].token_usage.as_ref().unwrap().input_tokens,
+        20
+    );
+}
+
+#[test]
+fn later_step_fallback_survives_previous_authoritative_usage() {
+    let mut accum = ScanAccum::new();
+    accum.current_model = Some("kimi-test".into());
+
+    dispatch_line(
+        &mut accum,
+        &json!({
+            "type": "context.append_loop_event",
+            "event": {"type": "step.begin", "step": 0},
+            "time": 1000
+        }),
+    );
+    dispatch_line(
+        &mut accum,
+        &json!({
+            "type": "usage.record",
+            "usageScope": "turn",
+            "model": "kimi-test",
+            "usage": {"inputOther": 12, "output": 6},
+            "time": 1001
+        }),
+    );
+    accum.push_assistant_text("first", Some("2026-07-19T00:00:00Z".into()));
+    dispatch_line(
+        &mut accum,
+        &json!({
+            "type": "context.append_loop_event",
+            "event": {"type": "step.end", "step": 0, "usage": {"inputOther": 12, "output": 6}},
+            "time": 1002
+        }),
+    );
+
+    dispatch_line(
+        &mut accum,
+        &json!({
+            "type": "context.append_loop_event",
+            "event": {"type": "step.begin", "step": 1},
+            "time": 1010
+        }),
+    );
+    accum.push_assistant_text("second", Some("2026-07-19T00:00:01Z".into()));
+    dispatch_line(
+        &mut accum,
+        &json!({
+            "type": "context.append_loop_event",
+            "event": {"type": "step.end", "step": 1, "usage": {"inputOther": 20, "output": 9}},
+            "time": 1011
+        }),
+    );
+
+    assert_eq!(accum.parse_warning_count, 0);
+    assert_eq!(accum.usage_events.len(), 2);
+    assert_eq!(accum.usage_events[1].input_tokens, 20);
+    let second_usage = accum.messages[1].token_usage.as_ref().unwrap();
+    assert_eq!(second_usage.input_tokens, 20);
+    assert_eq!(second_usage.output_tokens, 9);
+}
+
+#[test]
 fn assistant_text_takes_over_usage_from_tool_owner() {
     let mut accum = ScanAccum::new();
     accum.current_model = Some("kimi-test".into());
@@ -347,6 +513,7 @@ fn usage_without_current_output_does_not_overwrite_previous_turn() {
     );
     assert!(accum.messages[1].token_usage.is_none());
     assert_eq!(accum.usage_events.len(), 2);
+    accum.finish_pending_usage();
     assert_eq!(accum.parse_warning_count, 1);
 }
 
@@ -574,6 +741,94 @@ fn unknown_record_type_is_counted_not_silently_dropped() {
         &mut accum,
         &json!({"type": "future.event", "time": 1779701196500i64}),
     );
+    assert!(accum.messages.is_empty());
+    assert_eq!(accum.parse_warning_count, 1);
+}
+
+#[test]
+fn current_profile_and_lifecycle_records_are_handled() {
+    let mut accum = ScanAccum::new();
+    dispatch_line(
+        &mut accum,
+        &json!({
+            "type": "profile.bind",
+            "modelAlias": "kimi-latest",
+            "profileName": "reviewer",
+            "time": 1779701196500i64
+        }),
+    );
+    for event in [
+        json!({"type": "runtime.set_binding", "workspaceId": "wd-test", "runtimeId": "local", "agentId": "main", "time": 1779701196501i64}),
+        json!({"type": "turn.ended", "agentId": "main", "turnId": 0, "reason": "completed", "time": 1779701196502i64}),
+        json!({"type": "token_counting.turn_recorded", "agentId": "main", "turnId": 0, "tokens": 100, "length": 200, "time": 1779701196503i64}),
+        json!({"type": "token_counting.measured", "agentId": "main", "tokens": 100, "length": 200, "time": 1779701196504i64}),
+        json!({"type": "prompt.accepted", "agentId": "main", "promptId": "prompt-1", "time": 1779701196505i64}),
+        json!({"type": "plugin.session_start", "agentId": "main", "time": 1779701196506i64}),
+    ] {
+        dispatch_line(&mut accum, &event);
+    }
+
+    assert_eq!(accum.current_model.as_deref(), Some("kimi-latest"));
+    assert_eq!(accum.current_profile.as_deref(), Some("reviewer"));
+    assert!(accum.messages.is_empty());
+    assert_eq!(accum.parse_warning_count, 0);
+}
+
+#[test]
+fn abnormal_lifecycle_records_surface_status_details() {
+    let mut accum = ScanAccum::new();
+    for event in [
+        json!({
+            "type": "turn.step.retrying",
+            "nextAttempt": 2,
+            "maxAttempts": 5,
+            "delayMs": 750,
+            "errorName": "ProviderError",
+            "errorMessage": "temporary upstream failure",
+            "time": 1779701196501i64
+        }),
+        json!({
+            "type": "turn.step.interrupted",
+            "reason": "tool_cancelled",
+            "message": "the active tool was stopped",
+            "time": 1779701196502i64
+        }),
+        json!({
+            "type": "turn.ended",
+            "reason": "failed",
+            "error": {"message": "request failed"},
+            "time": 1779701196503i64
+        }),
+    ] {
+        dispatch_line(&mut accum, &event);
+    }
+
+    assert_eq!(accum.parse_warning_count, 0);
+    assert_eq!(accum.messages.len(), 3);
+    assert!(accum.messages[0].content.contains("attempt 2/5"));
+    assert!(
+        accum.messages[0]
+            .content
+            .contains("temporary upstream failure")
+    );
+    assert!(accum.messages[1].content.contains("tool_cancelled"));
+    assert!(
+        accum.messages[1]
+            .content
+            .contains("the active tool was stopped")
+    );
+    assert_eq!(accum.messages[2].content, "[turn_failed]\nrequest failed");
+}
+
+#[test]
+fn malformed_abnormal_lifecycle_record_remains_a_warning() {
+    let mut accum = ScanAccum::new();
+
+    dispatch_line(
+        &mut accum,
+        &json!({"type": "turn.ended", "time": 1779701196500i64}),
+    );
+
     assert!(accum.messages.is_empty());
     assert_eq!(accum.parse_warning_count, 1);
 }

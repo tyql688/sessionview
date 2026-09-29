@@ -75,6 +75,7 @@ describe("providerSnapshots store", () => {
       "dsh",
       "mcode",
       "copilot",
+      "commandcode",
     ]);
   });
 

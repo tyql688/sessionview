@@ -20,6 +20,8 @@ pub(crate) struct UsageByModelRow {
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
     pub cost_usd: f64,
+    pub estimated_turns: u64,
+    pub reported_turns: u64,
 }
 
 #[derive(Debug, Clone)]

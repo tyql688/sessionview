@@ -1,13 +1,23 @@
-import { Antigravity, Claude, Codex, Copilot, Cursor, DeepSeek, Grok, Kimi, Minimax, OpenCode } from "@lobehub/icons";
+import Antigravity from "@lobehub/icons-static-svg/icons/antigravity-color.svg?react";
+import Claude from "@lobehub/icons-static-svg/icons/claude-color.svg?react";
+import Codex from "@lobehub/icons-static-svg/icons/codex-color.svg?react";
+import Copilot from "@lobehub/icons-static-svg/icons/copilot-color.svg?react";
+import Cursor from "@lobehub/icons-static-svg/icons/cursor.svg?react";
+import DeepSeek from "@lobehub/icons-static-svg/icons/deepseek-color.svg?react";
+import Grok from "@lobehub/icons-static-svg/icons/grok.svg?react";
+import Kimi from "@lobehub/icons-static-svg/icons/kimi.svg?react";
+import Minimax from "@lobehub/icons-static-svg/icons/minimax-color.svg?react";
+import OpenCode from "@lobehub/icons-static-svg/icons/opencode.svg?react";
 import type { JSX } from "react";
 import type { Provider } from "@/lib/types";
 import { getProviderColor } from "@/stores/providerSnapshots";
 
 const DEFAULT_ICON_SIZE = 14;
 
-// Custom SVGs for providers not in @lobehub/icons:
+// Custom SVGs for providers not in LobeHub's icon collection:
 // - pi: no @lobehub brand icon exists.
 // - cc-mirror: a Claude mirror, not a real brand — the Claude glyph tinted pink.
+// - commandcode: official glyph shipped in Command Code's VS Code extension.
 function PiIcon({ size }: { size: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 800 800" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -36,33 +46,53 @@ function CcMirrorIcon({ size }: { size: number }) {
   );
 }
 
-// Provider brand logos. Mainstream providers use official @lobehub/icons
-// colored variants (the app's provider colors match their brand colors); Pi and
-// cc-mirror keep custom SVGs above. Kimi's and Grok's brand marks are
+function CommandCodeIcon({ size }: { size: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 144 144" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M73.1399 5.87207H70.4648C53.6901 5.87207 41.6998 5.88454 32.5877 7.10962C23.6446 8.312 18.3583 10.5847 14.4715 14.4715C10.5847 18.3583 8.312 23.6446 7.10962 32.5877C5.88454 41.6998 5.87207 53.6901 5.87207 70.4648V73.1398C5.87207 89.9145 5.88454 101.905 7.10962 111.017C8.312 119.96 10.5847 125.246 14.4715 129.133C18.3583 133.02 23.6446 135.293 32.5877 136.495C41.6998 137.72 53.6901 137.733 70.4648 137.733H73.1398C89.9145 137.733 101.905 137.72 111.017 136.495C119.96 135.293 125.246 133.02 129.133 129.133C133.02 125.246 135.293 119.96 136.495 111.017C137.72 101.905 137.733 89.9146 137.733 73.1399V70.4648C137.733 53.6901 137.72 41.6998 136.495 32.5877C135.293 23.6446 133.02 18.3583 129.133 14.4715C125.246 10.5847 119.96 8.312 111.017 7.10962C101.905 5.88454 89.9146 5.87207 73.1399 5.87207ZM10.3193 10.3193C0 20.6387 0 37.2474 0 70.4648V73.1398C0 106.357 0 122.966 10.3193 133.285C20.6387 143.605 37.2474 143.605 70.4648 143.605H73.1398C106.357 143.605 122.966 143.605 133.285 133.285C143.605 122.966 143.605 106.357 143.605 73.1399V70.4648C143.605 37.2474 143.605 20.6387 133.285 10.3193C122.966 0 106.357 0 73.1399 0H70.4648C37.2474 0 20.6387 0 10.3193 10.3193Z"
+        fill="currentColor"
+      />
+      <path
+        d="M98.8049 27.6163C89.3295 27.6163 81.6214 35.3243 81.6214 44.7997V52.1641H61.9832V44.7997C61.9832 35.3243 54.2752 27.6163 44.7997 27.6163C35.3243 27.6163 27.6163 35.3243 27.6163 44.7997C27.6163 54.2752 35.3243 61.9832 44.7997 61.9832H52.1641V81.6214H44.7997C35.3243 81.6214 27.6163 89.3295 27.6163 98.8049C27.6163 108.28 35.3243 115.988 44.7997 115.988C54.2752 115.988 61.9832 108.28 61.9832 98.8049V91.4406H81.6214V98.8049C81.6214 108.28 89.3295 115.988 98.8049 115.988C108.28 115.988 115.988 108.28 115.988 98.8049C115.988 89.3295 108.28 81.6214 98.8049 81.6214H91.4406V61.9832H98.8049C108.28 61.9832 115.988 54.2752 115.988 44.7997C115.988 35.3243 108.28 27.6163 98.8049 27.6163ZM91.4406 52.1641V44.7997C91.4406 40.7248 94.73 37.4354 98.8049 37.4354C102.88 37.4354 106.169 40.7248 106.169 44.7997C106.169 48.8747 102.88 52.1641 98.8049 52.1641H91.4406ZM44.7997 52.1641C40.7248 52.1641 37.4354 48.8747 37.4354 44.7997C37.4354 40.7248 40.7248 37.4354 44.7997 37.4354C48.8747 37.4354 52.1641 40.7248 52.1641 44.7997V52.1641H44.7997ZM61.9832 81.6214V61.9832H81.6214V81.6214H61.9832ZM98.8049 106.169C94.73 106.169 91.4406 102.88 91.4406 98.8049V91.4406H98.8049C102.88 91.4406 106.169 94.73 106.169 98.8049C106.169 102.88 102.88 106.169 98.8049 106.169ZM44.7997 106.169C40.7248 106.169 37.4354 102.88 37.4354 98.8049C37.4354 94.73 40.7248 91.4406 44.7997 91.4406H52.1641V98.8049C52.1641 102.88 48.8747 106.169 44.7997 106.169Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+// Provider brand logos. Import official LobeHub SVGs directly so static marks
+// do not bring in the React icon package's unrelated UI and emoji dependencies.
+// Mainstream providers use colored variants (the app's provider colors match
+// their brand colors); Pi and cc-mirror keep custom SVGs above.
+// Kimi's and Grok's brand marks are
 // black-on-light / white-on-dark, so they use the monochrome variant tinted
 // by text-primary.
 const PROVIDER_ICONS: Record<Provider, (size: number) => JSX.Element> = {
-  claude: (size) => <Claude.Color size={size} />,
-  codex: (size) => <Codex.Color size={size} />,
-  antigravity: (size) => <Antigravity.Color size={size} />,
-  // OpenCode + Cursor have no .Color variant in @lobehub/icons — use base.
-  opencode: (size) => <OpenCode size={size} />,
+  claude: (size) => <Claude width={size} height={size} />,
+  codex: (size) => <Codex width={size} height={size} />,
+  antigravity: (size) => <Antigravity width={size} height={size} />,
+  // OpenCode and Cursor use their monochrome marks.
+  opencode: (size) => <OpenCode width={size} height={size} />,
   kimi: (size) => (
     <span style={{ color: "var(--text-primary)", display: "inline-flex" }}>
-      <Kimi size={size} />
+      <Kimi width={size} height={size} />
     </span>
   ),
-  cursor: (size) => <Cursor size={size} />,
+  cursor: (size) => <Cursor width={size} height={size} />,
   "cc-mirror": (size) => <CcMirrorIcon size={size} />,
   pi: (size) => <PiIcon size={size} />,
   grok: (size) => (
     <span style={{ color: "var(--text-primary)", display: "inline-flex" }}>
-      <Grok size={size} />
+      <Grok width={size} height={size} />
     </span>
   ),
-  dsh: (size) => <DeepSeek.Color size={size} />,
-  mcode: (size) => <Minimax.Color size={size} />,
-  copilot: (size) => <Copilot.Color size={size} />,
+  dsh: (size) => <DeepSeek width={size} height={size} />,
+  mcode: (size) => <Minimax width={size} height={size} />,
+  copilot: (size) => <Copilot width={size} height={size} />,
+  commandcode: (size) => <CommandCodeIcon size={size} />,
 };
 
 export function ProviderIcon(props: { provider: Provider; size?: number }) {

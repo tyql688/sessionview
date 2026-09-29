@@ -65,7 +65,7 @@ impl ImageCacheService {
     /// Copy every readable local image referenced by `messages` into
     /// the cache directory (idempotent — existing cache entries are
     /// left untouched). Data URIs and remote URLs naturally fall
-    /// through because `Path::exists()` returns false for them.
+    /// through because `Path::is_file()` returns false for them.
     pub(crate) fn cache_images(&self, messages: &[Message]) {
         let paths = extract_image_paths(messages);
         if paths.is_empty() {
@@ -82,7 +82,9 @@ impl ImageCacheService {
                 continue;
             }
             let original = Path::new(path);
-            if !original.exists() {
+            // Directories are not image sources. On Windows, placeholder text
+            // such as "..." can resolve to the current directory.
+            if !original.is_file() {
                 continue;
             }
             if let Err(e) = std::fs::copy(original, &cache_path) {

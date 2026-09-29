@@ -123,6 +123,15 @@ const FALLBACK_PROVIDER_SNAPSHOTS: Record<Provider, ProviderSnapshot> = {
     exists: false,
     session_count: 0,
   },
+  commandcode: {
+    key: "commandcode",
+    label: "Command Code",
+    color: "var(--commandcode)",
+    sort_order: 15,
+    path: "",
+    exists: false,
+    session_count: 0,
+  },
 };
 
 let loadPromise: Promise<void> | null = null;

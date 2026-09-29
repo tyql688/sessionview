@@ -72,8 +72,16 @@ export function ModelTable(props: ModelTableProps) {
                 <td>
                   <div className="usage-model-cell">
                     <span className="usage-model-tag">{props.formatModelName(row.model)}</span>
-                    {row.cost === 0 && row.input_tokens + row.output_tokens + row.cache_tokens > 0 && (
-                      <span className="usage-price-badge">{t("usage.unpriced")}</span>
+                    {row.estimated_turns > 0 && (
+                      <span className="usage-price-badge usage-price-badge-known">{t("usage.estimatedCost")}</span>
+                    )}
+                    {row.reported_turns > 0 && (
+                      <span className="usage-price-badge usage-price-badge-known">{t("usage.reportedCost")}</span>
+                    )}
+                    {row.unpriced_turns > 0 && (
+                      <span className="usage-price-badge">
+                        {row.unpriced_turns === row.turns ? t("usage.unpriced") : t("usage.partlyUnpriced")}
+                      </span>
                     )}
                   </div>
                 </td>

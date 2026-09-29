@@ -1,14 +1,19 @@
 //! Session cost resolution.
 //!
 //! Order of preference for every provider:
-//! 1. **Wire cost** reported on the session (Grok `costUsdTicks`, Pi
-//!    `usage.cost.total`, …) when present.
+//! 1. **Wire cost** reported by the service (Grok `costUsdTicks`, …).
+//!    Pi's `usage.cost.total` is a client estimate; an ambiguous zero does
+//!    not override a known catalog rate.
 //! 2. **Catalog estimate** from models.dev (or the cached catalog) using
 //!    token counts × unit rates. Lookup may strip served-model suffixes
 //!    (e.g. `grok-4.5-build` → `grok-4.5`) without rewriting stored ids.
 //!
 //! Storage and UI keep the original model string; only the pricing lookup
 //! is allowed to alias.
+
+mod cost;
+
+pub use cost::{CostSource, RecordedCost, resolve_cost};
 
 use std::collections::HashMap;
 
@@ -33,15 +38,25 @@ pub struct ModelPricing {
     pub threshold_tokens: Option<u64>,
 }
 
+/// Stored once per catalog key (~10k entries), so absent rates are omitted
+/// rather than written as `null`; a missing field reads back as `None`.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RemoteModelPricing {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub input_cost_per_token: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub output_cost_per_token: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_read_input_token_cost: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_creation_input_token_cost: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub input_cost_per_token_above_200k_tokens: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub output_cost_per_token_above_200k_tokens: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_read_input_token_cost_above_200k_tokens: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_creation_input_token_cost_above_200k_tokens: Option<f64>,
 }
 
@@ -56,18 +71,28 @@ pub fn normalize_model_key(model: &str) -> String {
 /// (e.g. `"vendor/model-1"` → also inserts `"model-1"`) so that
 /// exact-match lookup works without HashMap iteration.
 pub fn parse_catalog(json: &str) -> Result<PricingCatalog, serde_json::Error> {
-    let raw: HashMap<String, RemoteModelPricing> = serde_json::from_str(json)?;
-    let mut catalog = PricingCatalog::with_capacity(raw.len() * 2);
-    for (name, pricing) in raw {
-        let key = normalize_model_key(&name);
-        // Short-name alias: "vendor/model" → "model" (first writer wins)
+    let raw: std::collections::BTreeMap<String, RemoteModelPricing> = serde_json::from_str(json)?;
+    let mut catalog: PricingCatalog = raw
+        .iter()
+        .map(|(name, pricing)| (normalize_model_key(name), pricing.clone()))
+        .collect();
+    let mut ordered: Vec<_> = raw.iter().collect();
+    ordered.sort_by_key(|(name, _)| {
+        PREFERRED_ALIAS_PROVIDERS
+            .iter()
+            .position(|provider| name.starts_with(&format!("{provider}/")))
+            .unwrap_or(usize::MAX)
+    });
+    for (name, pricing) in ordered {
+        let key = normalize_model_key(name);
+        // Exact persisted keys always win; missing aliases have deterministic
+        // provider precedence, independent of HashMap iteration order.
         if let Some((_, suffix)) = key.split_once('/')
             && !suffix.is_empty()
             && !catalog.contains_key(suffix)
         {
             catalog.insert(suffix.to_string(), pricing.clone());
         }
-        catalog.insert(key, pricing);
     }
     Ok(catalog)
 }
@@ -113,6 +138,7 @@ const SKIP_KEYWORDS: &[&str] = &[
 /// First match wins.
 const PREFERRED_ALIAS_PROVIDERS: &[&str] = &[
     "anthropic",
+    "meta",
     "openai",
     "google",
     "xai",
@@ -129,7 +155,7 @@ const PREFERRED_ALIAS_PROVIDERS: &[&str] = &[
 
 /// Parse models.dev API response into a flat PricingCatalog.
 ///
-/// Every provider/model with non-zero pricing is indexed as
+/// Every provider/model with usable pricing (including explicit zero) is indexed as
 /// `provider_id/model_id`. For preferred providers a short-name alias
 /// (just `model_id`) is also inserted so that e.g. `claude-opus-4-6`
 /// resolves directly without a prefix.
@@ -158,9 +184,9 @@ pub fn parse_models_dev(json: &str) -> Result<PricingCatalog, serde_json::Error>
                 Some(c) => c,
                 None => continue,
             };
-            let input = cost.input.filter(|&v| v > 0.0);
-            let output = cost.output.filter(|&v| v > 0.0);
-            if input.is_none() && output.is_none() {
+            let input = cost.input.filter(|v| v.is_finite() && *v >= 0.0);
+            let output = cost.output.filter(|v| v.is_finite() && *v >= 0.0);
+            if input.is_none() || output.is_none() {
                 continue;
             }
 
@@ -214,50 +240,22 @@ fn push_unique(targets: &mut Vec<String>, candidate: String) {
     }
 }
 
-/// Strip a trailing version/revision segment so model matching can be
-/// provider-agnostic:
-/// - claude-sonnet-4-5-20250514 -> claude-sonnet-4-5
-/// - glm-5.1 -> glm-5
+/// A dated served revision may use its undated catalog entry. Numeric model
+/// versions and price tiers (mini, fast, pro, etc.) are distinct models.
 fn strip_trailing_version_segment(model: &str) -> Option<String> {
-    if let Some((prefix, suffix)) = model.rsplit_once('-')
-        && suffix.len() >= 4
-        && suffix.chars().all(|ch| ch.is_ascii_digit())
-    {
+    let (prefix, suffix) = model.rsplit_once('-')?;
+    if suffix.len() == 8 && suffix.chars().all(|ch| ch.is_ascii_digit()) {
         return Some(prefix.to_string());
     }
-
-    if let Some((prefix, suffix)) = model.rsplit_once('.')
-        && !prefix.is_empty()
-        && suffix.chars().all(|ch| ch.is_ascii_digit())
-    {
-        return Some(prefix.to_string());
-    }
-
     None
 }
 
-/// Known model variant suffixes, stripped only as a last resort when no
-/// other match succeeds (e.g. "gpt-5.4-fast" → "gpt-5.4",
-/// "grok-4.5-build" → "grok-4.5").
-///
-/// Order matters for multi-segment tails: longer suffixes first.
-const VARIANT_SUFFIXES: &[&str] = &[
-    "-fast", "-mini", "-turbo", "-pro", "-lite", "-plus", "-preview", "-latest",
-    // Grok Build API returns served-model ids like `grok-4.5-build` while
-    // models.dev / catalog keys are the user-selected `grok-4.5`.
-    "-build",
-];
-
+/// Grok Build's served identifier uses the selected model's catalog rates.
 fn strip_variant_suffix(model: &str) -> Option<String> {
     let lower = model.to_lowercase();
-    for suffix in VARIANT_SUFFIXES {
-        if let Some(prefix) = lower.strip_suffix(suffix)
-            && !prefix.is_empty()
-        {
-            return Some(prefix.to_string());
-        }
-    }
-    None
+    let base = lower.strip_suffix("-build")?;
+    let short = base.rsplit('/').next()?;
+    short.starts_with("grok-").then(|| base.to_string())
 }
 
 fn model_match_variants(model: &str) -> Vec<String> {
@@ -327,7 +325,7 @@ pub fn lookup_pricing(catalog: Option<&PricingCatalog>, model: &str) -> Option<M
         }
     }
 
-    // 2. Strip known variant suffixes (-fast, -mini, …) and retry.
+    // 2. Resolve only the documented Grok Build served-id alias.
     let normalized = normalize_model_key(model);
     if let Some(base) = strip_variant_suffix(&normalized) {
         for candidate in model_match_variants(&base) {
@@ -372,26 +370,6 @@ pub fn estimate_cost_with_catalog(
         )
 }
 
-/// Prefer a provider-reported USD cost when present; otherwise estimate from
-/// the models.dev (or cached) pricing catalog.
-///
-/// Wire cost is authoritative even when zero (the provider said the turn was
-/// free / unbilled). Only `None` falls through to token-based estimation.
-pub fn resolve_cost_usd(
-    wire_cost_usd: Option<f64>,
-    catalog: Option<&PricingCatalog>,
-    model: &str,
-    input: u64,
-    output: u64,
-    cache_read: u64,
-    cache_write: u64,
-) -> f64 {
-    if let Some(cost) = wire_cost_usd {
-        return cost;
-    }
-    estimate_cost_with_catalog(catalog, model, input, output, cache_read, cache_write)
-}
-
 fn component_cost(
     tokens: u64,
     base_price: f64,
@@ -419,6 +397,53 @@ mod tests {
 
     fn assert_close(actual: f64, expected: f64) {
         assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+    }
+
+    #[test]
+    fn stored_catalog_omits_absent_rates_and_reads_back_identically() {
+        let catalog = parse_models_dev(
+            r#"{"vendor":{"models":{"model-a":{"cost":{"input":2.5,"output":15,"cache_read":0.25}}}}}"#,
+        )
+        .unwrap();
+        let stored = serde_json::to_string(&catalog).unwrap();
+        assert!(!stored.contains("null"), "{stored}");
+
+        let reread = parse_catalog(&stored).unwrap();
+        let legacy = parse_catalog(
+            r#"{"vendor/model-a":{"input_cost_per_token":2.5e-6,"output_cost_per_token":1.5e-5,"cache_read_input_token_cost":2.5e-7,"cache_creation_input_token_cost":null,"input_cost_per_token_above_200k_tokens":null}}"#,
+        )
+        .unwrap();
+        for model in ["vendor/model-a", "model-a"] {
+            let original = super::lookup_pricing(Some(&catalog), model);
+            assert!(original.is_some());
+            assert_eq!(super::lookup_pricing(Some(&reread), model), original);
+            assert_eq!(super::lookup_pricing(Some(&legacy), model), original);
+        }
+    }
+
+    #[test]
+    fn cached_aliases_preserve_exact_keys_and_prefer_the_model_vendor() {
+        let raw = r#"{
+            "meta/model-a":{"input_cost_per_token":1,"output_cost_per_token":2},
+            "gateway/model-a":{"input_cost_per_token":9,"output_cost_per_token":9},
+            "model-b":{"input_cost_per_token":3,"output_cost_per_token":4},
+            "gateway/model-b":{"input_cost_per_token":8,"output_cost_per_token":8}
+        }"#;
+        for _ in 0..20 {
+            let catalog = parse_catalog(raw).unwrap();
+            assert_eq!(
+                super::lookup_pricing(Some(&catalog), "model-a")
+                    .unwrap()
+                    .input,
+                1.0
+            );
+            assert_eq!(
+                super::lookup_pricing(Some(&catalog), "model-b")
+                    .unwrap()
+                    .input,
+                3.0
+            );
+        }
     }
 
     #[test]
@@ -454,25 +479,45 @@ mod tests {
             parse_catalog(r#"{"m":{"input_cost_per_token":1.0,"output_cost_per_token":1.0}}"#)
                 .expect("catalog");
         // Catalog would estimate 200 if used (100+100 tokens * $1/token).
-        let wire = super::resolve_cost_usd(Some(0.42), Some(&catalog), "m", 100, 100, 0, 0);
-        assert_close(wire, 0.42);
-        let estimated = super::resolve_cost_usd(None, Some(&catalog), "m", 100, 100, 0, 0);
-        assert_close(estimated, 200.0);
+        let wire = super::resolve_cost(
+            Some(super::RecordedCost::Reported(0.42)),
+            Some(&catalog),
+            "m",
+            100,
+            100,
+            0,
+            0,
+        );
+        assert_close(wire.usd, 0.42);
+        let estimated = super::resolve_cost(None, Some(&catalog), "m", 100, 100, 0, 0);
+        assert_close(estimated.usd, 200.0);
         // Explicit zero is still wire-authoritative.
-        let free = super::resolve_cost_usd(Some(0.0), Some(&catalog), "m", 100, 100, 0, 0);
-        assert_close(free, 0.0);
+        let free = super::resolve_cost(
+            Some(super::RecordedCost::Reported(0.0)),
+            Some(&catalog),
+            "m",
+            100,
+            100,
+            0,
+            0,
+        );
+        assert_close(free.usd, 0.0);
     }
 
     #[test]
-    fn lookup_pricing_strips_variant_suffix() {
+    fn lookup_pricing_does_not_borrow_prices_from_other_tiers() {
         let catalog = parse_catalog(
-            r#"{"gpt-5.4":{"input_cost_per_token":2.5e-6,"output_cost_per_token":15e-6}}"#,
+            r#"{"gpt-5.4":{"input_cost_per_token":0.0000025,"output_cost_per_token":0.000015}}"#,
         )
-        .expect("catalog");
-        // "gpt-5.4-fast" should strip "-fast" and match "gpt-5.4"
-        let pricing = super::lookup_pricing(Some(&catalog), "gpt-5.4-fast").expect("pricing");
-        assert_close(pricing.input, 2.5e-6);
-        assert_close(pricing.output, 15.0e-6);
+        .unwrap();
+        for model in [
+            "gpt-5.4-fast",
+            "gpt-5.4-mini",
+            "gpt-5.4-pro",
+            "gpt-5.4-preview",
+        ] {
+            assert!(super::lookup_pricing(Some(&catalog), model).is_none());
+        }
     }
 
     #[test]
@@ -531,7 +576,7 @@ mod tests {
     }
 
     #[test]
-    fn lookup_pricing_matches_minor_version_suffix() {
+    fn lookup_pricing_does_not_borrow_an_older_minor_versions_price() {
         let json = r#"{
             "zai": {
                 "models": {
@@ -543,13 +588,11 @@ mod tests {
         }"#;
         let catalog = parse_models_dev(json).expect("catalog");
 
-        // glm-5.1 should resolve to glm-5 via generic version stripping
-        let cost = estimate_cost_with_catalog(Some(&catalog), "glm-5.1", 1_000_000, 0, 0, 0);
-        assert_close(cost, 1.0);
+        assert!(super::lookup_pricing(Some(&catalog), "glm-5.1").is_none());
     }
 
     #[test]
-    fn parse_models_dev_skips_free_models() {
+    fn parse_models_dev_keeps_explicit_free_models() {
         let json = r#"{
             "zai": {
                 "models": {
@@ -563,7 +606,10 @@ mod tests {
             }
         }"#;
         let catalog = parse_models_dev(json).expect("catalog");
-        assert!(!catalog.contains_key("zai/glm-4.7-flash"));
+        assert!(catalog.contains_key("zai/glm-4.7-flash"));
+        let free = super::resolve_cost(None, Some(&catalog), "zai/glm-4.7-flash", 100, 50, 20, 0);
+        assert_eq!(free.source, super::CostSource::Estimated);
+        assert_eq!(free.usd, 0.0);
         assert!(catalog.contains_key("zai/glm-5"));
     }
 
@@ -703,10 +749,8 @@ mod tests {
         let cost_5 = estimate_cost_with_catalog(Some(&catalog), "gpt-5", 1_000_000, 0, 0, 0);
         assert_close(cost_5, 1.25);
 
-        // The bug: "gpt-5.4-fast" was resolving to "gpt-5" (shortest match)
-        // instead of "gpt-5.4" (most specific match).
-        let cost_fast =
-            estimate_cost_with_catalog(Some(&catalog), "gpt-5.4-fast", 1_000_000, 0, 0, 0);
-        assert_close(cost_fast, 2.5); // must use gpt-5.4 pricing, not gpt-5
+        // Neither a different tier nor an older version is a known rate.
+        assert!(super::lookup_pricing(Some(&catalog), "gpt-5.4-fast").is_none());
+        assert!(super::lookup_pricing(Some(&catalog), "gpt-5.5").is_none());
     }
 }

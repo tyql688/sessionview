@@ -73,6 +73,7 @@
   --dsh: #4d6bfe;
   --mcode: #f23f5d;
   --copilot: #57666d;
+  --commandcode: #424242;
   --code-bg: #f1f4f8;
   --code-text: #24292e;
   --inline-code-bg: rgba(0, 0, 0, 0.06);
@@ -178,6 +179,7 @@
   --dsh: #8ea1ff;
   --mcode: #ff7b93;
   --copilot: #a3b6bf;
+  --commandcode: #fff;
   --code-bg: #22272e;
   --code-text: #adbac7;
   --inline-code-bg: rgba(255, 255, 255, 0.1);

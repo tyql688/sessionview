@@ -8,7 +8,7 @@
 //!   `context.append_message` lines. Messages carry `role` and structured
 //!   `content[]`/`toolCalls[]` arrays. No per-line `time` field.
 //! * **Native** (kimi-code 0.1.1+): events split into `metadata`,
-//!   `config.update`, `turn.prompt`, `context.append_message`,
+//!   `config.update`/`profile.bind`, `turn.prompt`, `context.append_message`,
 //!   `context.append_loop_event` (assistant `content.part` / `tool.call` /
 //!   `tool.result` / step bookkeeping), and `usage.record`. Each
 //!   event-bearing line carries `"time"` in epoch milliseconds.
@@ -22,6 +22,10 @@
 //! The parser walks the file once, dispatching per-line by `type`, and
 //! reuses a single accumulator so the message order matches on-disk
 //! order regardless of which format the line uses.
+//! Model aliases and profile names from config/profile records are retained in
+//! session metadata even though those state records are not transcript lines.
+//! Failed/interrupted/retrying lifecycle records retain their diagnostic text
+//! as System messages; successful lifecycle bookkeeping remains non-visible.
 
 mod dispatch;
 mod index;
@@ -66,6 +70,7 @@ fn scan_lines<R: BufRead>(reader: R, path: &Path, accum: &mut ScanAccum) {
             .read_error_count
             .saturating_add(stats.parse_error_count),
     );
+    accum.finish_pending_usage();
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +232,7 @@ pub(crate) fn parse_session(path: &Path, index: &SessionIndex) -> Option<ParsedS
         file_size_bytes: file_meta.len(),
         source_path: path.to_string_lossy().to_string(),
         is_sidechain: is_subagent,
-        variant_name: None,
+        variant_name: accum.current_profile.clone(),
         model: accum.current_model.clone(),
         cc_version: None,
         git_branch: None,
@@ -284,7 +289,7 @@ pub fn parse_session_tail(path: &Path, target_messages: usize) -> Option<KimiTai
             if let Ok(entry) = serde_json::from_str::<Value>(&line)
                 && matches!(
                     entry.get("type").and_then(Value::as_str),
-                    Some("metadata" | "config.update")
+                    Some("metadata" | "config.update" | "profile.bind")
                 )
             {
                 head_context.push(entry);
@@ -364,7 +369,7 @@ mod tests {
             "main",
             &[
                 r#"{"type":"metadata","protocol_version":"1.0","created_at":1779701196480}"#,
-                r#"{"type":"config.update","modelAlias":"kimi-code/kimi-for-coding","time":1779701196500}"#,
+                r#"{"type":"config.update","modelAlias":"kimi-code/kimi-for-coding","profileName":"reviewer","time":1779701196500}"#,
                 r#"{"type":"context.append_message","message":{"role":"user","content":[{"type":"text","text":"hi"}],"toolCalls":[]}}"#,
                 r#"{"type":"context.append_loop_event","event":{"type":"content.part","part":{"type":"think","think":"thinking..."}},"time":1779701200000}"#,
                 r#"{"type":"context.append_loop_event","event":{"type":"content.part","part":{"type":"text","text":"Hello!"}},"time":1779701200500}"#,
@@ -374,6 +379,7 @@ mod tests {
         let parsed = parse_session(&path, &SessionIndex::default()).expect("parses");
         assert_eq!(parsed.meta.title, "Demo title");
         assert!(!parsed.meta.is_sidechain);
+        assert_eq!(parsed.meta.variant_name.as_deref(), Some("reviewer"));
         // user, thinking (System), assistant
         assert_eq!(parsed.messages.len(), 3);
         assert_eq!(parsed.messages[0].role, MessageRole::User);
@@ -895,5 +901,35 @@ mod tests {
         assert_eq!(session_id_for_path(p2).as_deref(), Some("ses_abc"));
         let bogus = Path::new("/etc/passwd");
         assert!(session_id_for_path(bogus).is_none());
+    }
+
+    #[test]
+    fn tail_parse_recovers_model_from_profile_bind_at_file_head() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("wire.jsonl");
+        let mut lines = vec![
+            r#"{"type":"metadata","protocol_version":"1.4","created_at":1779701196400}"#
+                .to_string(),
+            r#"{"type":"runtime.set_binding","time":1779701196401}"#.to_string(),
+            r#"{"type":"profile.bind","modelAlias":"kimi-latest","time":1779701196402}"#
+                .to_string(),
+            r#"{"type":"permission.set_mode","mode":"default","time":1779701196403}"#.to_string(),
+        ];
+        for time in 0..60 {
+            lines.push(format!(
+                r#"{{"type":"runtime.set_binding","time":{}}}"#,
+                1779701196500i64 + time
+            ));
+        }
+        lines.push(
+            r#"{"type":"context.append_loop_event","event":{"type":"content.part","part":{"type":"text","text":"answer"}},"time":1779701196600}"#.to_string(),
+        );
+        std::fs::write(&path, lines.join("\n")).unwrap();
+
+        let tail = parse_session_tail(&path, 1).expect("tail parses");
+
+        assert_eq!(tail.messages.len(), 1);
+        assert_eq!(tail.messages[0].model.as_deref(), Some("kimi-latest"));
+        assert_eq!(tail.parse_warning_count, 0);
     }
 }

@@ -1,7 +1,7 @@
 //! Pure session-view business logic shared by the session commands:
-//! load guards, message-window bounds, turn outlines, and subagent
-//! meta titles. Command handlers in `commands/sessions.rs` stay thin
-//! and delegate here.
+//! load guards, message-window bounds, turn outlines, searchable dialogue,
+//! and subagent meta titles. Command handlers in `commands/sessions.rs`
+//! stay thin and delegate here.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 
 use crate::commands::{AppState, LoadToken};
-use crate::models::Message;
+use crate::models::{Message, MessageRole};
 use crate::services::load_cancel::{self, CancelFlag};
 
 /// Identity of one frontend load request: the cancel-matching id plus a
@@ -140,6 +140,45 @@ pub struct SessionRoleCounts {
 pub struct SessionTurnOutline {
     pub turns: Vec<SessionTurnOutlineEntry>,
     pub role_counts: SessionRoleCounts,
+}
+
+/// A message in-session search runs over: the user/assistant dialogue as the
+/// timeline renders it (tool and thinking rows are never searched).
+#[derive(Serialize, Clone, PartialEq, Debug)]
+pub struct SessionSearchMessage {
+    pub message_index: usize,
+    pub role: MessageRole,
+    pub content: String,
+}
+
+/// The whole session's searchable dialogue. In-session search counts and
+/// navigates matches on this instead of loading every message: tool output,
+/// the bulk of a long session, is never searched.
+#[derive(Serialize, Clone, PartialEq, Debug)]
+pub struct SessionSearchText {
+    /// Message count of the parse, so the frontend can tell when a live
+    /// session has grown past this snapshot.
+    pub total: usize,
+    pub messages: Vec<SessionSearchMessage>,
+}
+
+pub(crate) fn build_session_search_text(messages: &[Message]) -> SessionSearchText {
+    SessionSearchText {
+        total: messages.len(),
+        messages: messages
+            .iter()
+            .enumerate()
+            .filter(|(_, message)| {
+                matches!(message.role, MessageRole::User | MessageRole::Assistant)
+                    && is_renderable_message(message)
+            })
+            .map(|(message_index, message)| SessionSearchMessage {
+                message_index,
+                role: message.role.clone(),
+                content: message.content.clone(),
+            })
+            .collect(),
+    }
 }
 
 /// Mirror of the frontend's `isRenderableMessage` (session/hooks.ts): the

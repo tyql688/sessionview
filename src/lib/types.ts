@@ -13,6 +13,7 @@ type ProviderValues = [
   "dsh",
   "mcode",
   "copilot",
+  "commandcode",
 ];
 
 export type Provider = ProviderValues[number];
@@ -253,6 +254,9 @@ export interface ModelCost {
   output_tokens: number;
   cache_tokens: number;
   cost: number;
+  estimated_turns: number;
+  reported_turns: number;
+  unpriced_turns: number;
 }
 
 interface ProjectProviderUsage {

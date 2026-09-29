@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n/index";
 import type { Message } from "@/lib/types";
 import { readToolResultText } from "@/lib/tauri";
-import { formatToolInput, formatToolResultMetadata, toolSummary } from "@/lib/tools";
+import { formatToolInput, formatToolResultMetadata, parseToolInput, toolSummary } from "@/lib/tools";
 import { parseContent } from "@/lib/message-content";
 import { toastError } from "@/stores/toast";
 import { COPY_FEEDBACK_MS } from "@/features/session/MessageBubble/TokenUsage";
@@ -39,19 +39,6 @@ function valueToText(value: unknown): string {
     return values.join(" ");
   }
   return "";
-}
-
-function parseJsonRecord(raw: string | null, context: string): Record<string, unknown> | null {
-  if (!raw) return null;
-  const trimmed = raw.trim();
-  if (!trimmed.startsWith("{")) return null;
-  try {
-    const parsed: unknown = JSON.parse(trimmed);
-    return isRecord(parsed) ? parsed : null;
-  } catch (error) {
-    console.warn(`failed to parse terminal tool ${context} JSON:`, error);
-    return null;
-  }
 }
 
 function fieldValue(record: Record<string, unknown> | null | undefined, keys: string[]): string {
@@ -105,13 +92,13 @@ function displayStatus(
 function collapsedSummary(message: Message, t: (key: string, options?: Record<string, unknown>) => string): string {
   const raw = toolSummary(message).trim();
   if (raw.length === 0) return "";
-  const command = fieldValue(parseJsonRecord(message.tool_input, "input"), ["command", "cmd", "CommandLine"]);
+  const inputRecord = message.tool_input ? parseToolInput(message.tool_input) : null;
+  const command = fieldValue(inputRecord, ["command", "cmd", "CommandLine"]);
   return raw === command ? "" : raw || t("tool.terminal");
 }
 
 function buildTerminalData(message: Message): TerminalData {
-  const inputRecord = parseJsonRecord(message.tool_input, "input");
-  const contentRecord = parseJsonRecord(message.content, "content");
+  const inputRecord = message.tool_input ? parseToolInput(message.tool_input) : null;
   const structured = isRecord(message.tool_metadata?.structured) ? message.tool_metadata.structured : null;
   const inputDetail = formatToolInput(message);
   const resultDetail = formatToolResultMetadata(message.tool_metadata);
@@ -127,7 +114,6 @@ function buildTerminalData(message: Message): TerminalData {
     ? providerOutput
     : firstText(
         fieldValue(structured, ["stdout", "output", "aggregated_output", "formatted_output"]),
-        fieldValue(contentRecord, ["stdout", "output", "aggregated_output", "formatted_output"]),
         detailLineValue(resultDetail, ["stdout", "output"]),
       );
 
@@ -146,11 +132,7 @@ function buildTerminalData(message: Message): TerminalData {
     stdout,
     stderr: providerOutput
       ? ""
-      : firstText(
-          fieldValue(structured, ["stderr"]),
-          fieldValue(contentRecord, ["stderr"]),
-          detailLineValue(resultDetail, ["stderr"]),
-        ),
+      : firstText(fieldValue(structured, ["stderr"]), detailLineValue(resultDetail, ["stderr"])),
     persistedOutputPath: resultDetail?.persistedOutputPath ?? "",
   };
 }

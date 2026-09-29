@@ -35,6 +35,9 @@ pub(super) fn result_kind_for_tool(
     if canonical_name == "ImageGeneration" {
         return Some("image".to_string());
     }
+    if matches!(canonical_name, "CodeExecution" | "Wait") {
+        return Some("tool_output".to_string());
+    }
     let result = result?;
     if result_output_path(result).is_some() {
         return Some("persisted_output".to_string());

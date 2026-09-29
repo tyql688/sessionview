@@ -11,7 +11,7 @@ use super::ParsedSession;
 ///
 /// `bucket` is the UTC epoch second of a 15-minute-aligned window start, so
 /// queries can group into days for any requested timezone.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct TokenStatRow {
     pub bucket: i64,
     pub model: String,
@@ -21,6 +21,19 @@ pub struct TokenStatRow {
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
     pub cost_usd: f64,
+    pub estimated_turns: u64,
+    pub reported_turns: u64,
+}
+
+impl TokenStatRow {
+    fn add_cost(&mut self, usd: f64, source: pricing::CostSource, turns: u64) {
+        self.cost_usd += usd;
+        match source {
+            pricing::CostSource::Estimated => self.estimated_turns += turns,
+            pricing::CostSource::Reported => self.reported_turns += turns,
+            pricing::CostSource::Unpriced => {}
+        }
+    }
 }
 
 /// A normalized out-of-band usage event. Input and cache components are disjoint.
@@ -35,10 +48,11 @@ pub struct UsageEvent {
     pub cache_read_input_tokens: u64,
     pub cache_creation_input_tokens: u64,
     pub usage_hash: Option<String>,
-    /// Provider-reported cost in USD when the wire format carries one
-    /// (e.g. Grok `costUsdTicks`). When set, stats aggregation prefers it
-    /// over the local pricing table.
+    /// Recorded USD cost. `cost_is_estimate` distinguishes SDK arithmetic
+    /// (Pi) from service-reported amounts (e.g. Grok `costUsdTicks`).
     pub cost_usd: Option<f64>,
+    /// True for SDK-calculated estimates (Pi); false for service-reported costs.
+    pub cost_is_estimate: bool,
 }
 
 pub fn token_totals_from_usage_events(events: &[UsageEvent]) -> TokenTotals {
@@ -88,16 +102,25 @@ pub fn compute_token_stats_from_usage_events(
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
                 cost_usd: 0.0,
+                estimated_turns: 0,
+                reported_turns: 0,
             });
         entry.turn_count += event.turn_count;
         entry.input_tokens += event.input_tokens;
         entry.output_tokens += event.output_tokens;
         entry.cache_read_tokens += event.cache_read_input_tokens;
         entry.cache_write_tokens += event.cache_creation_input_tokens;
-        // Prefer provider-reported USD (Grok costUsdTicks, Pi usage.cost, …);
-        // otherwise estimate from the pricing catalog (models.dev).
-        entry.cost_usd += pricing::resolve_cost_usd(
-            event.cost_usd,
+        // Resolve recorded costs according to their authority, retaining
+        // coverage independently of the numeric amount.
+        let recorded = event.cost_usd.map(|usd| {
+            if event.cost_is_estimate {
+                pricing::RecordedCost::Estimate(usd)
+            } else {
+                pricing::RecordedCost::Reported(usd)
+            }
+        });
+        let cost = pricing::resolve_cost(
+            recorded,
             pricing_catalog,
             &entry.model,
             event.input_tokens,
@@ -105,6 +128,7 @@ pub fn compute_token_stats_from_usage_events(
             event.cache_read_input_tokens,
             event.cache_creation_input_tokens,
         );
+        entry.add_cost(cost.usd, cost.source, event.turn_count);
     }
     if invalid_timestamps > 0 {
         log::warn!(
@@ -183,6 +207,8 @@ pub fn default_compute_token_stats_from_messages(
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
                 cost_usd: 0.0,
+                estimated_turns: 0,
+                reported_turns: 0,
             });
         entry.turn_count += 1;
         entry.input_tokens += usage.input_tokens as u64;
@@ -190,9 +216,9 @@ pub fn default_compute_token_stats_from_messages(
         entry.cache_read_tokens += usage.cache_read_input_tokens as u64;
         entry.cache_write_tokens += usage.cache_creation_input_tokens as u64;
         // Message-attached usage has no wire cost field today (Claude/Cursor/…);
-        // resolve_cost_usd falls through to the catalog estimate. When a
+        // resolve_cost falls through to the catalog estimate. When a
         // provider later attaches cost on TokenUsage, plumb it here the same way.
-        entry.cost_usd += pricing::resolve_cost_usd(
+        let cost = pricing::resolve_cost(
             None,
             pricing_catalog,
             &entry.model,
@@ -201,6 +227,7 @@ pub fn default_compute_token_stats_from_messages(
             usage.cache_read_input_tokens as u64,
             usage.cache_creation_input_tokens as u64,
         );
+        entry.add_cost(cost.usd, cost.source, 1);
     }
 
     if missing_timestamps > 0 {

@@ -943,6 +943,11 @@
   text-transform: uppercase;
 }
 
+.usage-price-badge-known {
+  background: color-mix(in srgb, var(--text-muted) 10%, var(--bg-editor));
+  color: var(--text-muted);
+}
+
 .usage-entity-cell {
   display: flex;
   flex-direction: column;

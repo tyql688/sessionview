@@ -16,6 +16,8 @@ impl ToolDescriptor {
 }
 
 const DESCRIPTORS: &[ToolDescriptor] = &[
+    descriptor("CodeExecution", "tool", "🟨", "code execution", &[]),
+    descriptor("Wait", "tool", "⏳", "wait", &[]),
     descriptor(
         "Bash",
         "shell",
@@ -132,6 +134,8 @@ const DESCRIPTORS: &[ToolDescriptor] = &[
             "wait_agent",
             "send_input",
             "close_agent",
+            "resume_agent",
+            "interrupt_agent",
             "invoke_subagent",
             "define_subagent",
         ],
@@ -193,7 +197,12 @@ const DESCRIPTORS: &[ToolDescriptor] = &[
         "interaction",
         "❓",
         "ask user",
-        &["request_user_input", "ask_user", "question"],
+        &[
+            "request_user_input",
+            "request_user_input_async",
+            "ask_user",
+            "question",
+        ],
     ),
     descriptor(
         "RequestPermissions",
@@ -353,6 +362,15 @@ pub(super) fn parse_mcp_tool_name(name: &str) -> Option<McpToolMetadata> {
 }
 
 pub(super) fn descriptor_for(provider: Provider, raw_name: &str) -> Option<ToolDescriptor> {
+    // Codex code-mode exec runs JavaScript orchestration, while other
+    // providers' exec tools remain shell commands.
+    if provider == Provider::Codex {
+        match raw_name {
+            "exec" => return descriptor_for_canonical("CodeExecution"),
+            "wait" => return descriptor_for_canonical("Wait"),
+            _ => {}
+        }
+    }
     if provider == Provider::Antigravity
         && (raw_name.contains("Agent") || raw_name.contains("agent"))
     {

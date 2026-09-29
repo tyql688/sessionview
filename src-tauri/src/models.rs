@@ -20,6 +20,8 @@ pub enum Provider {
     #[serde(rename = "mcode")]
     Mcode,
     Copilot,
+    #[serde(rename = "commandcode")]
+    CommandCode,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -624,6 +626,9 @@ pub struct ModelCost {
     pub output_tokens: u64,
     pub cache_tokens: u64,
     pub cost: f64,
+    pub estimated_turns: u64,
+    pub reported_turns: u64,
+    pub unpriced_turns: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

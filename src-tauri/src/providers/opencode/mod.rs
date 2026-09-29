@@ -179,8 +179,9 @@ impl SessionProvider for OpenCodeProvider {
             }
         }
 
-        // Batch: content text per session from text parts (avoids N+1)
-        // We collect up to 50 text parts per session using a window function.
+        // Batch: each session's dialogue from its text parts (avoids N+1).
+        // The scan emits message stubs, so this text is what search indexes:
+        // every part, in order.
         let mut content_map: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         {
@@ -192,21 +193,12 @@ impl SessionProvider for OpenCodeProvider {
             let rows = stmt.query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
             })?;
-            let mut counts: std::collections::HashMap<String, usize> =
-                std::collections::HashMap::new();
             for r in rows {
-                let r = r?;
-                let (sid, text) = r;
-                let count = counts.entry(sid.clone()).or_insert(0);
-                if *count >= 50 {
-                    continue;
-                }
-                *count += 1;
+                let (sid, text) = r?;
                 if let Some(t) = text {
-                    content_map
-                        .entry(sid)
-                        .or_default()
-                        .push_str(&format!("{}\n", t));
+                    let content = content_map.entry(sid).or_default();
+                    content.push_str(&t);
+                    content.push('\n');
                 }
             }
         }
@@ -299,22 +291,19 @@ impl SessionProvider for OpenCodeProvider {
             }
         }
 
-        // Batch: git branch per session from workspace
+        // Batch: git branch per session from workspace. Only exists in
+        // OpenCode v1's schema; v2's `workspace` table replaces the columns
+        // with provider bindings, so the column is absent after a v2 run.
         let mut branch_map: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         {
-            // The `workspace` table's shape moved between OpenCode versions:
-            // older builds carried the session's git `branch` there, newer
-            // ones repurposed the table (provider/binding bookkeeping) and
-            // dropped the column. Gate on the column, not just the table,
-            // so either shape scans cleanly — branch is optional metadata.
-            let has_workspace_branch: bool = conn
+            let has_branch_col: bool = conn
                 .prepare(
                     "SELECT COUNT(*) FROM pragma_table_info('workspace') WHERE name = 'branch'",
                 )
                 .and_then(|mut s| s.query_row([], |row| row.get::<_, i64>(0)))?
                 > 0;
-            if has_workspace_branch {
+            if has_branch_col {
                 let mut stmt = conn.prepare(
                     "SELECT s.id, w.branch
                      FROM session s

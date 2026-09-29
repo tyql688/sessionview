@@ -2,6 +2,33 @@ use super::*;
 use crate::models::{MessageRole, ToolResultMode};
 
 #[test]
+fn commandcode_zero_local_estimate_is_repriced_without_changing_tokens() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("session.jsonl");
+    std::fs::write(&path, concat!(
+        "{\"type\":\"session\",\"version\":3,\"id\":\"session-example\",\"timestamp\":\"2026-06-10T07:00:00Z\",\"cwd\":\"/tmp/project\"}\n",
+        "{\"type\":\"message\",\"id\":\"assistant-example\",\"parentId\":null,\"timestamp\":\"2026-06-10T07:00:01Z\",\"message\":{\"role\":\"assistant\",\"content\":[],\"provider\":\"commandcode\",\"model\":\"meta/muse-spark-1.3\",\"usage\":{\"input\":1000000,\"output\":1000000,\"cacheRead\":1000000,\"cacheWrite\":0,\"totalTokens\":3000000,\"cost\":{\"input\":0,\"output\":0,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0}},\"stopReason\":\"stop\",\"timestamp\":1781074801000}}\n"
+    )).unwrap();
+    let parsed = parse_session_file(&path).unwrap();
+    assert_eq!(parsed.parse_warning_count, 0);
+    assert!(parsed.usage_events[0].cost_is_estimate);
+    assert_eq!(parsed.usage_events[0].cost_usd, Some(0.0));
+    let catalog = crate::pricing::parse_catalog(r#"{"meta/muse-spark-1.3":{"input_cost_per_token":0.00000125,"output_cost_per_token":0.00000425,"cache_read_input_token_cost":0.00000015}}"#).unwrap();
+    let rows =
+        crate::provider::compute_token_stats_from_usage_events(&parsed, Some(&catalog), None);
+    assert_eq!(rows.len(), 1);
+    assert!((rows[0].cost_usd - 5.65).abs() < 1e-10);
+    assert_eq!(rows[0].estimated_turns, 1);
+    assert_eq!(rows[0].reported_turns, 0);
+    assert_eq!(
+        rows[0].input_tokens + rows[0].output_tokens + rows[0].cache_read_tokens,
+        3_000_000
+    );
+    let unknown = crate::provider::compute_token_stats_from_usage_events(&parsed, None, None);
+    assert_eq!(unknown[0].estimated_turns + unknown[0].reported_turns, 0);
+}
+
+#[test]
 fn parse_session_header() {
     let json = r#"{"type":"session","version":3,"id":"test-uuid","timestamp":"2024-12-03T14:00:00.000Z","cwd":"/path/to/project"}"#;
     let entry: PiEntry = serde_json::from_str(json).unwrap();
@@ -13,6 +40,57 @@ fn parse_session_header() {
         }
         _ => panic!("Expected session entry"),
     }
+}
+
+#[test]
+fn parse_session_file_repairs_unpaired_javascript_surrogate_escape() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("session.jsonl");
+    std::fs::write(
+        &path,
+        concat!(
+            "{\"type\":\"session\",\"version\":3,\"id\":\"session-1\",\"timestamp\":\"2026-06-10T07:00:00.000Z\",\"cwd\":\"/tmp/project\"}\n",
+            "{\"type\":\"message\",\"id\":\"user-1\",\"parentId\":null,\"timestamp\":\"2026-06-10T07:00:01.000Z\",\"message\":{\"role\":\"user\",\"content\":\"before \\uD83D after\",\"timestamp\":1781074801000}}\n"
+        ),
+    )
+    .unwrap();
+
+    let session = parse_session_file(&path).expect("session remains readable");
+
+    assert_eq!(session.parse_warning_count, 0);
+    assert_eq!(session.messages.len(), 1);
+    assert_eq!(session.messages[0].content, "before \u{FFFD} after");
+}
+
+#[test]
+fn parse_session_file_still_warns_and_skips_other_malformed_json() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("session.jsonl");
+    std::fs::write(
+        &path,
+        concat!(
+            "{\"type\":\"session\",\"version\":3,\"id\":\"session-1\",\"timestamp\":\"2026-06-10T07:00:00.000Z\",\"cwd\":\"/tmp/project\"}\n",
+            "{\"type\":\"message\",\"id\":\"broken\"\n",
+            "{\"type\":\"message\",\"id\":\"user-1\",\"parentId\":null,\"timestamp\":\"2026-06-10T07:00:01.000Z\",\"message\":{\"role\":\"user\",\"content\":\"kept\",\"timestamp\":1781074801000}}\n"
+        ),
+    )
+    .unwrap();
+
+    let session = parse_session_file(&path).expect("valid records remain readable");
+
+    assert_eq!(session.parse_warning_count, 1);
+    assert_eq!(session.messages.len(), 1);
+    assert_eq!(session.messages[0].content, "kept");
+}
+
+#[test]
+fn surrogate_repair_preserves_pairs_and_escaped_literals() {
+    let repaired_pair = parse_pi_json_value(r#"{"value":"\uD83D\uDE00"}"#).unwrap();
+    let escaped_literal = parse_pi_json_value(r#"{"value":"\\uD83D"}"#).unwrap();
+
+    assert_eq!(repaired_pair["value"], "😀");
+    assert_eq!(escaped_literal["value"], r"\uD83D");
+    assert!(repair_unpaired_surrogate_escapes(r#"{"value":"ordinary"}"#).is_none());
 }
 
 #[test]
@@ -243,6 +321,147 @@ fn parse_session_file_counts_usage_outside_the_active_branch() {
     assert_eq!(session.meta.cache_write_tokens, 3);
     assert_eq!(loaded.token_totals.input_tokens, 30);
     assert_eq!(loaded.messages[1].content, "Active answer");
+}
+
+#[test]
+fn parse_session_file_keeps_branch_linked_through_system_prompt_entries() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("session.jsonl");
+    std::fs::write(
+        &path,
+        [
+            r#"{"type":"session","version":3,"id":"session-1","timestamp":"2026-06-10T07:00:00.000Z","cwd":"/tmp/project"}"#,
+            r#"{"type":"message","id":"system-1","parentId":null,"timestamp":"2026-06-10T07:00:01.000Z","message":{"role":"system","content":"","sections":{"preamble":"example"},"timestamp":1781074801000,"toolsAdded":[{"name":"example"}]}}"#,
+            r#"{"type":"message","id":"user-1","parentId":"system-1","timestamp":"2026-06-10T07:00:02.000Z","message":{"role":"user","content":"First prompt","timestamp":1781074802000}}"#,
+            r#"{"type":"message","id":"system-2","parentId":"user-1","timestamp":"2026-06-10T07:00:03.000Z","message":{"role":"system","content":"","sections":{"project_context":"example"},"timestamp":1781074803000}}"#,
+            r#"{"type":"message","id":"assistant-1","parentId":"system-2","timestamp":"2026-06-10T07:00:04.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Answer"}],"provider":"pi-test","model":"model-a","stopReason":"stop","timestamp":1781074804000}}"#,
+        ]
+        .join("\n"),
+    )
+    .unwrap();
+
+    let session = parse_session_file(&path).unwrap();
+
+    assert_eq!(session.parse_warning_count, 0);
+    let contents: Vec<&str> = session
+        .messages
+        .iter()
+        .map(|message| message.content.as_str())
+        .collect();
+    assert_eq!(contents, ["First prompt", "Answer"]);
+    assert_eq!(session.meta.title, "First prompt");
+}
+
+#[test]
+fn parse_session_file_counts_usage_entries_and_ignores_context_edits() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("session.jsonl");
+    std::fs::write(
+        &path,
+        [
+            r#"{"type":"session","version":3,"id":"session-1","timestamp":"2026-06-10T07:00:00.000Z","cwd":"/tmp/project"}"#,
+            r#"{"type":"message","id":"user-1","parentId":null,"timestamp":"2026-06-10T07:00:01.000Z","message":{"role":"user","content":"First prompt","timestamp":1781074801000}}"#,
+            r#"{"type":"usage","id":"usage-1","parentId":"user-1","timestamp":"2026-06-10T07:00:02.000Z","kind":"cache_warm","provider":"pi-test","model":"model-a","usage":{"input":0,"output":0,"cacheRead":500,"cacheWrite":0,"totalTokens":500,"cost":{"input":0,"output":0,"cacheRead":0.25,"cacheWrite":0,"total":0.25}}}"#,
+            r#"{"type":"context_edit","id":"edit-1","parentId":"usage-1","timestamp":"2026-06-10T07:00:03.000Z","targetId":"user-1","replacement":null}"#,
+            r#"{"type":"message","id":"assistant-1","parentId":"edit-1","timestamp":"2026-06-10T07:00:04.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Answer"}],"provider":"pi-test","model":"model-a","usage":{"input":10,"output":2,"cacheRead":0,"cacheWrite":0,"totalTokens":12},"stopReason":"stop","timestamp":1781074804000}}"#,
+        ]
+        .join("\n"),
+    )
+    .unwrap();
+
+    let session = parse_session_file(&path).unwrap();
+
+    assert_eq!(session.parse_warning_count, 0);
+    let contents: Vec<&str> = session
+        .messages
+        .iter()
+        .map(|message| message.content.as_str())
+        .collect();
+    assert_eq!(contents, ["First prompt", "Answer"]);
+    assert_eq!(session.usage_events.len(), 2);
+    assert_eq!(session.usage_events[0].model, "model-a");
+    assert_eq!(session.usage_events[0].cost_usd, Some(0.25));
+    assert_eq!(session.meta.cache_read_tokens, 500);
+    assert_eq!(session.meta.input_tokens, 10);
+}
+
+#[test]
+fn parse_session_file_attributes_pi_summary_usage_to_the_model_in_effect() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("session.jsonl");
+    let usage = |input: u64| {
+        format!(
+            r#""usage":{{"input":{input},"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":{input}}}"#
+        )
+    };
+    std::fs::write(
+        &path,
+        [
+            r#"{"type":"session","version":3,"id":"session-1","timestamp":"2026-06-10T07:00:00.000Z","cwd":"/tmp/project"}"#.to_string(),
+            r#"{"type":"model_change","id":"model-1","parentId":null,"timestamp":"2026-06-10T07:00:01.000Z","provider":"pi-test","modelId":"model-a"}"#.to_string(),
+            r#"{"type":"message","id":"user-1","parentId":"model-1","timestamp":"2026-06-10T07:00:02.000Z","message":{"role":"user","content":"Prompt","timestamp":1781074802000}}"#.to_string(),
+            // A sibling branch switched models; it precedes the compaction in
+            // the file but is not its ancestor.
+            r#"{"type":"model_change","id":"model-2","parentId":"user-1","timestamp":"2026-06-10T07:00:03.000Z","provider":"pi-test","modelId":"model-b"}"#.to_string(),
+            format!(r#"{{"type":"compaction","id":"compaction-1","parentId":"user-1","timestamp":"2026-06-10T07:00:04.000Z","summary":"Checkpoint","firstKeptEntryId":"user-1","tokensBefore":100,"fromHook":false,{}}}"#, usage(100)),
+            format!(r#"{{"type":"branch_summary","id":"summary-1","parentId":"user-1","timestamp":"2026-06-10T07:00:05.000Z","fromId":"model-2","summary":"Left branch",{}}}"#, usage(50)),
+            format!(r#"{{"type":"compaction","id":"compaction-2","parentId":"compaction-1","timestamp":"2026-06-10T07:00:06.000Z","summary":"Extension checkpoint","firstKeptEntryId":"compaction-1","fromHook":true,{}}}"#, usage(7)),
+            format!(r#"{{"type":"message","id":"tool-1","parentId":"compaction-2","timestamp":"2026-06-10T07:00:07.000Z","message":{{"role":"toolResult","toolCallId":"call-1","toolName":"search","content":[{{"type":"text","text":"found"}}],"isError":false,{},"timestamp":1781074807000}}}}"#, usage(3)),
+        ]
+        .join("\n"),
+    )
+    .unwrap();
+
+    let session = parse_session_file(&path).unwrap();
+
+    let attributed: Vec<(&str, u64)> = session
+        .usage_events
+        .iter()
+        .map(|event| (event.model.as_str(), event.input_tokens))
+        .collect();
+    assert_eq!(attributed, [("model-a", 100), ("model-b", 50)]);
+    // The extension compaction and the tool's nested usage name no model.
+    assert_eq!(session.parse_warning_count, 2);
+}
+
+#[test]
+fn parse_session_file_keeps_branch_linked_through_unreadable_entries() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("session.jsonl");
+    std::fs::write(
+        &path,
+        [
+            r#"{"type":"session","version":3,"id":"session-1","timestamp":"2026-06-10T07:00:00.000Z","cwd":"/tmp/project"}"#,
+            r#"{"type":"message","id":"user-1","parentId":null,"timestamp":"2026-06-10T07:00:01.000Z","message":{"role":"user","content":"First prompt","timestamp":1781074801000}}"#,
+            r#"{"type":"future_entry","id":"future-1","parentId":"user-1","timestamp":"2026-06-10T07:00:02.000Z"}"#,
+            r#"{"type":"message","id":"assistant-1","parentId":"future-1","timestamp":"2026-06-10T07:00:03.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Answer"}],"provider":"pi-test","model":"model-a","stopReason":"stop","timestamp":1781074803000}}"#,
+        ]
+        .join("\n"),
+    )
+    .unwrap();
+
+    let session = parse_session_file(&path).unwrap();
+
+    assert_eq!(session.parse_warning_count, 1);
+    let contents: Vec<&str> = session
+        .messages
+        .iter()
+        .map(|message| message.content.as_str())
+        .collect();
+    assert_eq!(contents, ["First prompt", "Answer"]);
+}
+
+#[test]
+fn parse_session_file_skips_extension_jsonl_without_session_header() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("ledger.jsonl");
+    std::fs::write(
+        &path,
+        r#"{"timestamp":"2026-06-10T07:00:00.000Z","event":"full","id":"obs_example","tool":"bash"}"#,
+    )
+    .unwrap();
+
+    assert!(parse_session_file(&path).is_none());
 }
 
 #[test]

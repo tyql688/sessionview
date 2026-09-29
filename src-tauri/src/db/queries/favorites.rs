@@ -2,7 +2,7 @@ use rusqlite::params;
 
 use crate::models::SessionMeta;
 
-use super::super::row_mapper::row_to_session_meta;
+use super::super::row_mapper::{SESSION_META_COLUMNS, row_to_session_meta};
 use super::Database;
 
 impl Database {
@@ -43,18 +43,12 @@ impl Database {
 
     pub(crate) fn list_favorites(&self) -> Result<Vec<SessionMeta>, rusqlite::Error> {
         let conn = self.lock_read()?;
-        let mut stmt = conn.prepare(
-            "SELECT s.id, s.provider, s.title, s.project_path, s.project_name,
-                    s.created_at, s.updated_at, s.message_count, s.file_size_bytes, s.source_path, s.is_sidechain,
-                    s.variant_name, s.model, s.cc_version, s.git_branch, s.parent_id,
-                    input_tokens,
-                    output_tokens,
-                    cache_read_tokens,
-                    cache_write_tokens
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {SESSION_META_COLUMNS}
              FROM favorites f
              JOIN sessions s ON s.id = f.session_id
-             ORDER BY f.added_at DESC",
-        )?;
+             ORDER BY f.added_at DESC"
+        ))?;
 
         let rows = stmt.query_map([], row_to_session_meta)?;
 

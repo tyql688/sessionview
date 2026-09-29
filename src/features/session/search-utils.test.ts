@@ -1,40 +1,23 @@
 import { describe, expect, it } from "vitest";
-import type { Message } from "@/lib/types";
-import type { ProcessedEntry } from "@/features/session/hooks";
-import { findFirstMatchingEntryIndex } from "@/features/session/search-utils";
+import type { MessageRole } from "@/lib/types";
+import { buildMatchLocations, type SearchableMessage } from "@/features/session/search-utils";
 
-function message(content: string): Message {
-  return {
-    role: "assistant",
-    content,
-    timestamp: null,
-    tool_name: null,
-    tool_input: null,
-    token_usage: null,
-  };
-}
-
-function entry(index: number, content: string): ProcessedEntry {
-  return {
-    key: `msg-${index}`,
-    type: "message",
-    msg: message(content),
-    messageIndex: index,
-    searchHaystack: content.toLocaleLowerCase(),
-  };
+function searchable(messageIndex: number, role: MessageRole, content: string): SearchableMessage {
+  return { messageIndex, role, haystack: content.toLocaleLowerCase() };
 }
 
 describe("session search utilities", () => {
-  it("finds the first matching entry across searchable messages", () => {
-    const entries = [
-      entry(0, "英文内容"),
-      entry(1, "第一条中文命中"),
-      entry(2, "最新中文命中"),
+  it("locates matches by absolute message index across the whole session", () => {
+    const messages = [
+      searchable(0, "user", "英文内容"),
+      searchable(40, "assistant", "第一条中文命中"),
+      searchable(912, "user", "最新中文命中"),
     ];
-    expect(findFirstMatchingEntryIndex(entries, "中文")).toBe(1);
+    expect(buildMatchLocations(messages, "中文", new Set())).toEqual([40, 912]);
   });
 
-  it("returns -1 for a blank query", () => {
-    expect(findFirstMatchingEntryIndex([entry(0, "anything")], "  ")).toBe(-1);
+  it("skips roles hidden in the filter toolbar", () => {
+    const messages = [searchable(3, "user", "needle"), searchable(4, "assistant", "Needle")];
+    expect(buildMatchLocations(messages, "needle", new Set<MessageRole>(["user"]))).toEqual([4]);
   });
 });

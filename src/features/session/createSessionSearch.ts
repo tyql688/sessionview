@@ -1,20 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { setPendingSessionSearch, usePendingSessionSearch } from "@/features/search/search";
-import { applySearchHighlight, buildMatchLocations, SESSION_SEARCH_DEBOUNCE_MS } from "@/features/session/search-utils";
-import type { ProcessedEntry } from "@/features/session/hooks";
+import { isSystemContent } from "@/features/session/hooks";
+import {
+  activeMatchTarget,
+  applySearchHighlight,
+  buildMatchLocations,
+  SESSION_SEARCH_DEBOUNCE_MS,
+  type MatchTarget,
+  type SearchableMessage,
+} from "@/features/session/search-utils";
+import { useI18n } from "@/i18n/index";
+import { getSessionSearchText } from "@/lib/tauri";
+import type { MessageRole } from "@/lib/types";
+import { toastError } from "@/stores/toast";
 
 export interface CreateSessionSearchOptions {
-  /** Role-filtered entries the search runs against. */
-  filteredEntries: ProcessedEntry[];
+  /** Roles hidden in the filter toolbar; their messages are not searched. */
+  hiddenRoles: ReadonlySet<MessageRole>;
   /** Whether the session is still loading (gates the pending-search effect). */
   loading: boolean;
   /** The current session id (matched against a pending global search). */
   sessionId: string;
-  /** Load the complete searchable window and return the first matching entry. */
-  resolveCompleteSearchMatch: (term: string) => Promise<number | null>;
-  /** Scroll the virtualizer to an entry. */
-  revealEntry: (entryIndex: number) => void;
+  /** Session message count; growing past the searchable snapshot refreshes it. */
+  totalMessages: number;
+  /** Scroll a match of `term` into view, loading its message first. */
+  revealMatch: (term: string, target: MatchTarget) => Promise<boolean>;
   /** Register the debounce timer for cleanup by the owning component. */
   registerDebounce: (clear: () => void) => void;
 }
@@ -26,10 +37,16 @@ export interface CreateSessionSearchResult {
   searchBarOpen: boolean;
   setSearchBarOpen: Dispatch<SetStateAction<boolean>>;
   searchMatchIdx: number;
-  /** Entry index per occurrence, in session order — data-level, so the count
-   * covers the whole loaded session, not just the mounted rows. */
+  /** Absolute message index per occurrence, in session order — counted over
+   * the whole session, not just the loaded window or the mounted rows. */
   matchLocations: number[];
   navigateMatch: (delta: number) => void;
+}
+
+interface SearchableSnapshot {
+  sessionId: string;
+  total: number;
+  messages: SearchableMessage[];
 }
 
 /**
@@ -37,27 +54,35 @@ export interface CreateSessionSearchResult {
  * pending-global-search consumption, the typed-query debounce, and match
  * navigation.
  *
- * Matches are counted and navigated on entry data (`searchHaystack`), because
- * under virtualized rendering the DOM only ever holds the rows near the
- * viewport. Committing a query first pages in the complete session
- * (`resolveCompleteSearchMatch`), so the locations cover every message; the
- * DOM highlight paint runs separately in SessionView over whatever rows are
- * mounted.
+ * Matches are counted on the session's searchable text — the user/assistant
+ * dialogue, fetched on the first committed query — so the count covers the
+ * whole session while the timeline keeps loading one window. Navigating
+ * reveals the match (`revealMatch`); the DOM highlight paint runs separately
+ * in SessionView over whatever rows are mounted.
  */
 export function useSessionSearch(opts: CreateSessionSearchOptions): CreateSessionSearchResult {
+  const { t } = useI18n();
   const [sessionSearch, setSessionSearch] = useState("");
   const [activeSessionSearch, setActiveSessionSearch] = useState("");
   const [searchBarOpen, setSearchBarOpen] = useState(false);
   const [searchMatchIdx, setSearchMatchIdx] = useState(0);
+  const [searchable, setSearchable] = useState<SearchableSnapshot | null>(null);
 
   const pending = usePendingSessionSearch();
 
   const sessionSearchRef = useRef(sessionSearch);
   sessionSearchRef.current = sessionSearch;
+  const optsRef = useRef(opts);
+  optsRef.current = opts;
+  const searchableRef = useRef(searchable);
+  searchableRef.current = searchable;
 
   const matchLocations = useMemo(
-    () => buildMatchLocations(opts.filteredEntries, activeSessionSearch),
-    [opts.filteredEntries, activeSessionSearch],
+    () =>
+      searchable?.sessionId === opts.sessionId
+        ? buildMatchLocations(searchable.messages, activeSessionSearch, opts.hiddenRoles)
+        : [],
+    [searchable, opts.sessionId, activeSessionSearch, opts.hiddenRoles],
   );
   const matchLocationsRef = useRef(matchLocations);
   matchLocationsRef.current = matchLocations;
@@ -72,6 +97,52 @@ export function useSessionSearch(opts: CreateSessionSearchOptions): CreateSessio
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The search-text fetch in flight. Every caller that needs the snapshot
+  // meanwhile shares it, so typing on never starts another whole-session read.
+  const searchableFetchRef = useRef<{ sessionId: string; promise: Promise<boolean> } | null>(null);
+
+  /** Fetch the searchable text unless the held snapshot covers the current
+   * session at its current size, joining a fetch already in flight. False when
+   * it could not be fetched. */
+  function ensureSearchable(): Promise<boolean> {
+    const { sessionId, totalMessages } = optsRef.current;
+    const held = searchableRef.current;
+    if (held?.sessionId === sessionId && held.total === totalMessages) return Promise.resolve(true);
+    const inFlight = searchableFetchRef.current;
+    if (inFlight?.sessionId === sessionId) return inFlight.promise;
+    const promise = fetchSearchable(sessionId).finally(() => {
+      if (searchableFetchRef.current?.promise === promise) searchableFetchRef.current = null;
+    });
+    searchableFetchRef.current = { sessionId, promise };
+    return promise;
+  }
+
+  async function fetchSearchable(sessionId: string): Promise<boolean> {
+    try {
+      const text = await getSessionSearchText(sessionId);
+      if (sessionId !== optsRef.current.sessionId) return false;
+      const snapshot: SearchableSnapshot = {
+        sessionId,
+        total: text.total,
+        // The timeline hides injected system content, so search skips it too.
+        messages: text.messages
+          .filter((message) => !isSystemContent(message))
+          .map((message) => ({
+            messageIndex: message.message_index,
+            role: message.role,
+            haystack: message.content.toLocaleLowerCase(),
+          })),
+      };
+      searchableRef.current = snapshot;
+      setSearchable(snapshot);
+      return true;
+    } catch (error) {
+      console.error("Failed to load session search text:", error);
+      toastError(t("toast.sessionSearchFailed"));
+      return false;
+    }
+  }
+
   async function commitSessionSearch(raw: string) {
     const requestId = ++searchRequestIdRef.current;
     const term = raw.trim();
@@ -82,31 +153,39 @@ export function useSessionSearch(opts: CreateSessionSearchOptions): CreateSessio
       return;
     }
 
-    // Page in the complete session so the data-level match list is total.
-    await opts.resolveCompleteSearchMatch(term);
+    const ready = await ensureSearchable();
     if (requestId !== searchRequestIdRef.current || term !== sessionSearchRef.current.trim()) {
       return;
     }
+    const snapshot = searchableRef.current;
+    if (!ready || !snapshot) {
+      // Without the text there is no honest match count: commit nothing
+      // rather than show "No matches".
+      setActiveSessionSearch("");
+      return;
+    }
     setActiveSessionSearch(term);
+    // Every commit lands on the first match — also when the term is unchanged
+    // (a re-run from global search), since the index was just reset.
+    const first = buildMatchLocations(snapshot.messages, term, optsRef.current.hiddenRoles)[0];
+    if (first !== undefined) void optsRef.current.revealMatch(term, { messageIndex: first, occurrence: 0 });
   }
 
-  // Reveal the first match once a committed query's locations are computed.
-  // Runs on term change only — navigation moves searchMatchIdx separately.
+  // A live session grew past the searchable snapshot: refresh it so the new
+  // messages count too.
   useEffect(() => {
-    if (!activeSessionSearch) return;
-    const first = matchLocationsRef.current[0];
-    if (first !== undefined) {
-      opts.revealEntry(first);
-    }
+    if (!activeSessionSearch || !searchable || searchable.total === opts.totalMessages) return;
+    void ensureSearchable();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSessionSearch]);
+  }, [opts.totalMessages]);
 
   function navigateMatch(delta: number) {
     const locations = matchLocationsRef.current;
     if (locations.length === 0) return;
     const next = (searchMatchIdxRef.current + delta + locations.length) % locations.length;
     setSearchMatchIdx(next);
-    opts.revealEntry(locations[next]);
+    const target = activeMatchTarget(locations, next);
+    if (target) void opts.revealMatch(activeSessionSearch, target);
   }
 
   // Consume a pending session search set by the global SearchOverlay.

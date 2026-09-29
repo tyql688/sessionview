@@ -3,24 +3,21 @@ import { parseTimestamp, formatTimeOnly } from "@/lib/formatters";
 import { isAgentToolMessage } from "@/lib/subagent";
 
 /// A renderable timeline row: a message, a merged run of tool calls, or a
-/// time separator. `searchHaystack` is the pre-lowercased content in-session
-/// search walks per keystroke.
+/// time separator.
 export type ProcessedEntry =
   | {
       key: string;
       type: "message";
       msg: Message;
       messageIndex: number;
-      searchHaystack: string;
     }
-  | { key: string; type: "time-sep"; time: string; searchHaystack: string }
+  | { key: string; type: "time-sep"; time: string }
   | {
       key: string;
       type: "merged-tools";
       tools: string[];
       messages: Message[];
       messageIndices: number[];
-      searchHaystack: string;
     };
 
 /**
@@ -63,14 +60,40 @@ export function estimateEntryHeight(entry: ProcessedEntry): number {
 }
 
 /**
- * In-session search covers user + assistant dialogue only — deliberately
- * narrower than global search (which indexes thinking and tool summaries):
- * tool/thinking blocks render collapsed, so counting hits inside them would
- * produce matches the highlight pass cannot show or scroll to. Cmd+F finds
- * what is on screen; the global index digs into the rest.
+ * Search covers user + assistant dialogue only, in-session and global alike:
+ * tool/thinking blocks render collapsed, so hits inside them would be matches
+ * the highlight pass cannot show or scroll to. The backend's
+ * `build_session_search_text` (in-session) and `indexable_content_text`
+ * (global index) select the searchable text by the same rule.
  */
 export function isSearchableRole(role: MessageRole): boolean {
   return role === "user" || role === "assistant";
+}
+
+/** Harness-injected template content (Codex context and instructions,
+ * slash-command wrappers, claude-mem observations): present anywhere, each
+ * marks the whole message as injected. */
+const SYSTEM_CONTENT_MARKERS = [
+  "</observation>",
+  "</command-message>",
+  "<INSTRUCTIONS>",
+  "<environment_context>",
+  "<permissions instructions>",
+  "</facts>",
+  "</narrative>",
+  "</concepts>",
+];
+
+/**
+ * Whether a user/assistant message is injected system content, which the
+ * timeline hides and in-session search therefore skips. A system reminder
+ * marks the message only when it opens it: replies quote the tag in prose and
+ * code, and a quote must not hide the reply.
+ */
+export function isSystemContent(message: Pick<Message, "role" | "content">): boolean {
+  if (message.role === "tool" || message.role === "system") return false;
+  const content = message.content.trimStart();
+  return content.startsWith("<system-reminder>") || SYSTEM_CONTENT_MARKERS.some((marker) => content.includes(marker));
 }
 
 /** First absolute message index an entry anchors to (null for separators). */
@@ -78,21 +101,6 @@ export function entryFirstMessageIndex(entry: ProcessedEntry): number | null {
   if (entry.type === "message") return entry.messageIndex;
   if (entry.type === "merged-tools") return entry.messageIndices[0];
   return null;
-}
-
-/** Lowercased content, cached per message object: `processMessages` re-runs
- * over the WHOLE loaded window on every pagination chunk, and re-lowercasing
- * megabytes of unchanged messages dominated that pass (message objects are
- * stable references once fetched, so a WeakMap makes this once-per-message). */
-const haystackCache = new WeakMap<Message, string>();
-
-function messageHaystack(msg: Message): string {
-  if (!isSearchableRole(msg.role)) return "";
-  const cached = haystackCache.get(msg);
-  if (cached !== undefined) return cached;
-  const haystack = (msg.content ?? "").toLocaleLowerCase();
-  haystackCache.set(msg, haystack);
-  return haystack;
 }
 
 function isMergeableToolMessage(msg: Message): boolean {
@@ -149,8 +157,6 @@ export function processMessages(msgs: Message[], windowStart: number): Processed
           tools: toolNames,
           messages: toolGroup,
           messageIndices: toolIndices,
-          // Tool groups are not searchable — search covers user + assistant only.
-          searchHaystack: "",
         });
       } else {
         entries.push({
@@ -158,7 +164,6 @@ export function processMessages(msgs: Message[], windowStart: number): Processed
           type: "message",
           msg,
           messageIndex,
-          searchHaystack: messageHaystack(msg),
         });
       }
       i = j;
@@ -182,7 +187,6 @@ export function processMessages(msgs: Message[], windowStart: number): Processed
           key: `sep-${messageIndex}-${curTs}`,
           type: "time-sep",
           time: formatTimeOnly(curTs),
-          searchHaystack: "",
         });
       }
     }
@@ -192,7 +196,6 @@ export function processMessages(msgs: Message[], windowStart: number): Processed
       type: "message",
       msg,
       messageIndex,
-      searchHaystack: messageHaystack(msg),
     });
     i++;
   }

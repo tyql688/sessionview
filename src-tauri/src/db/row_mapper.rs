@@ -1,5 +1,13 @@
 use crate::models::{Provider, SessionMeta};
 
+/// The columns `row_to_session_meta` reads, in position order. Select them
+/// from `sessions s`; extra columns may follow from index 20.
+pub(crate) const SESSION_META_COLUMNS: &str =
+    "s.id, s.provider, s.title, s.project_path, s.project_name,
+     s.created_at, s.updated_at, s.message_count, s.file_size_bytes, s.source_path,
+     s.is_sidechain, s.variant_name, s.model, s.cc_version, s.git_branch, s.parent_id,
+     s.input_tokens, s.output_tokens, s.cache_read_tokens, s.cache_write_tokens";
+
 pub(crate) fn row_to_session_meta(row: &rusqlite::Row) -> rusqlite::Result<SessionMeta> {
     let provider = row.get::<_, String>(1)?;
     Ok(SessionMeta {

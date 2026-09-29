@@ -62,9 +62,11 @@ fn allowed_keys(command: &str) -> Option<&'static [&'static str]> {
         | "list_favorites" => &[],
         "reindex_providers" => &["providers", "aggressive"],
         "get_session_detail" | "get_session_turn_outline" => &["sessionId", "requestSeq"],
-        "get_session_meta" | "toggle_favorite" | "is_favorite" | "get_resume_command" => {
-            &["sessionId"]
-        }
+        "get_session_meta"
+        | "get_session_search_text"
+        | "toggle_favorite"
+        | "is_favorite"
+        | "get_resume_command" => &["sessionId"],
         "get_session_open_window" | "get_session_messages_window" => {
             &["sessionId", "offset", "limit", "requestId", "requestSeq"]
         }
@@ -151,6 +153,9 @@ pub async fn dispatch(state: AppState, command: &str, raw: Value) -> Result<Valu
             state,
         )
         .await?),
+        "get_session_search_text" => {
+            ok(commands::get_session_search_text(arg(a, "sessionId")?, state).await?)
+        }
         "cancel_session_load" => {
             ok(
                 commands::cancel_session_load(arg(a, "sessionId")?, arg(a, "requestId")?, state)

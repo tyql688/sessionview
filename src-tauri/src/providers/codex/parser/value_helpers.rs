@@ -69,8 +69,11 @@ pub(super) fn codex_duration_seconds(value: Option<&Value>) -> Option<f64> {
 
 pub(super) fn codex_exec_command_event_result(payload: &Value, fallback_output: &str) -> Value {
     let mut result = Map::new();
-    if let Some(command) = payload.get("command") {
-        result.insert("command".to_string(), command.clone());
+    if let Some(command) = codex_command_value(payload) {
+        result.insert("command".to_string(), command);
+    }
+    if let Some(command) = payload.get("command").filter(|v| v.is_array()) {
+        result.insert("commandArgs".to_string(), command.clone());
     }
     if let Some(cwd) = payload.get("cwd") {
         result.insert("cwd".to_string(), cwd.clone());
@@ -123,6 +126,31 @@ pub(super) fn codex_exec_command_event_result(payload: &Value, fallback_output: 
     Value::Object(result)
 }
 
+pub(super) fn codex_command_value(payload: &Value) -> Option<Value> {
+    // Codex's parsed command is the original shell text, without the host
+    // shell's argv wrapper. Keep it copyable instead of joining argv with
+    // commas. Only use an unambiguous single parsed command; retain the raw
+    // representation when the record does not supply that text.
+    if let Some(argv) = payload.get("command").and_then(Value::as_array)
+        && argv.len() == 3
+        && let Some(shell) = argv[0].as_str().and_then(|path| path.rsplit('/').next())
+        && matches!(shell, "sh" | "bash" | "zsh" | "dash" | "ksh")
+        && matches!(argv[1].as_str(), Some("-c" | "-lc"))
+        && argv[2].is_string()
+    {
+        // A compound script may produce several parsed_cmd entries. Its
+        // shell -c argument still carries the complete original command.
+        return Some(argv[2].clone());
+    }
+    if let Some(parsed) = payload.get("parsed_cmd").and_then(Value::as_array)
+        && parsed.len() == 1
+        && let Some(command) = parsed[0].get("cmd").and_then(Value::as_str)
+    {
+        return Some(json!(command));
+    }
+    payload.get("command").cloned()
+}
+
 pub(super) fn codex_patch_event_patch(path: &str, change: &Value) -> Option<Value> {
     let change_type = change.get("type").and_then(|v| v.as_str())?;
     let mut patch = Map::new();
@@ -133,6 +161,24 @@ pub(super) fn codex_patch_event_patch(path: &str, change: &Value) -> Option<Valu
     }
     if let Some(unified_diff) = change.get("unified_diff").and_then(|v| v.as_str()) {
         patch.insert("diff".to_string(), json!(unified_diff));
+    } else if matches!(change_type, "add" | "delete")
+        && let Some(content) = change.get("content").and_then(Value::as_str)
+    {
+        // Completed file items persist full content for additions/deletions,
+        // unlike updates which carry a unified diff. Build the corresponding
+        // hunk from those authoritative bytes so the diff view has a body.
+        let line_count = content.lines().count();
+        let (header, prefix) = if change_type == "add" {
+            (format!("@@ -0,0 +1,{line_count} @@"), '+')
+        } else {
+            (format!("@@ -1,{line_count} +0,0 @@"), '-')
+        };
+        let mut lines = vec![header];
+        lines.extend(content.lines().map(|line| format!("{prefix}{line}")));
+        if !content.is_empty() && !content.ends_with('\n') {
+            lines.push("\\ No newline at end of file".to_string());
+        }
+        patch.insert("diff".to_string(), json!(lines.join("\n")));
     }
     Some(Value::Object(patch))
 }
@@ -158,9 +204,7 @@ pub(super) fn codex_patch_event_result(payload: &Value) -> Value {
         result.insert("changes".to_string(), changes.clone());
         if let Some(change_map) = changes.as_object() {
             for (path, change) in change_map {
-                if let Some(patch) = codex_patch_event_patch(path, change) {
-                    patches.push(patch);
-                }
+                let patch = codex_patch_event_patch(path, change);
                 let header = match change.get("type").and_then(|v| v.as_str()) {
                     Some("add") => format!("*** Add File: {path}"),
                     Some("delete") => format!("*** Delete File: {path}"),
@@ -170,8 +214,15 @@ pub(super) fn codex_patch_event_result(payload: &Value) -> Value {
                 if let Some(move_path) = change.get("move_path").and_then(|v| v.as_str()) {
                     combined.push(format!("*** Move to: {move_path}"));
                 }
-                if let Some(unified_diff) = change.get("unified_diff").and_then(|v| v.as_str()) {
+                if let Some(unified_diff) = patch
+                    .as_ref()
+                    .and_then(|p| p.get("diff"))
+                    .and_then(Value::as_str)
+                {
                     combined.push(unified_diff.to_string());
+                }
+                if let Some(patch) = patch {
+                    patches.push(patch);
                 }
             }
         }
@@ -197,9 +248,10 @@ pub(super) fn codex_mcp_tool_call_event_result(payload: &Value) -> Value {
         let success = raw_result.get("Err").is_none()
             && !raw_result
                 .get("Ok")
-                .and_then(|ok| ok.get("is_error"))
+                .and_then(|ok| ok.get("isError").or_else(|| ok.get("is_error")))
                 .and_then(|v| v.as_bool())
-                .unwrap_or(false);
+                .unwrap_or(false)
+            && payload.get("status").and_then(Value::as_str) != Some("failed");
         result.insert("success".to_string(), json!(success));
     }
     if let Some(duration) = codex_duration_seconds(payload.get("duration")) {

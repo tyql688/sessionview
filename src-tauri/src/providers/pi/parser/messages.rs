@@ -115,6 +115,7 @@ fn push_agent_messages(
                 None,
             );
         }
+        PiAgentMessage::System(_) => {}
     }
 }
 

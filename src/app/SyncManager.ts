@@ -6,7 +6,6 @@ import {
   reindexProviders,
   getPricingCatalogStatus,
   refreshPricingCatalog,
-  clearUsageStats,
 } from "@/lib/tauri";
 import { i18next } from "@/i18n/index";
 import { toastError, toastInfo } from "@/stores/toast";
@@ -93,12 +92,8 @@ export function createSyncManager(callbacks: SyncCallbacks) {
   }
 
   /**
-   * First use: the pricing catalog has never been fetched, so the index pass
-   * would cost every session at $0. Fetch the catalog up front, then clear any
-   * stats a previous catalog-less run left behind so the reindex that follows
-   * re-parses everything with real prices. Once the fetch succeeds the catalog
-   * timestamp is set and this never runs again; on failure (e.g. offline) it
-   * retries on the next launch.
+   * First use: fetch prices and reprice the cached index in one backend job.
+   * A failed fetch leaves existing usage intact and retries next launch.
    */
   async function bootstrapPricingIfNeeded() {
     const t = (key: string): string => i18next.t(key);
@@ -116,7 +111,6 @@ export function createSyncManager(callbacks: SyncCallbacks) {
     for (let attempt = 1; attempt <= PRICING_FETCH_ATTEMPTS; attempt++) {
       try {
         await refreshPricingCatalog();
-        await clearUsageStats();
         return;
       } catch (error) {
         if (attempt === PRICING_FETCH_ATTEMPTS) {

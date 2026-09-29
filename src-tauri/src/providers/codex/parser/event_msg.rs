@@ -6,19 +6,15 @@ use std::path::Path;
 use serde_json::Value;
 
 use crate::models::{Message, MessageRole, Provider};
-use crate::provider::UsageEvent;
 use crate::provider::util::{ContentPartsRender, render_content_parts};
 use crate::tool_metadata::{
     ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata,
 };
 
 use super::super::tools::*;
-use super::usage::{
-    add_usage_to_last_assistant, codex_token_usage_from_counts, codex_usage_from_info,
-    extract_codex_model,
-};
+use super::usage::{codex_usage_from_info, extract_codex_model};
 use super::value_helpers::{
-    codex_call_id, codex_content_items_text, codex_exec_command_event_result,
+    codex_call_id, codex_command_value, codex_content_items_text, codex_exec_command_event_result,
     codex_image_generation_result, codex_mcp_tool_call_event_result, codex_patch_event_result,
     dynamic_tool_input, dynamic_tool_result, enrich_existing_tool_message, push_system_event,
 };
@@ -54,9 +50,7 @@ impl CodexScanAccum {
             else {
                 return;
             };
-            let (input, cached, output, reasoning, total) = usage_counts;
-            let any_nonzero =
-                input != 0 || cached != 0 || output != 0 || reasoning != 0 || total != 0;
+            let any_nonzero = usage_counts.any_nonzero();
             let resolved_model = extract_codex_model(info)
                 .or_else(|| extract_codex_model(payload))
                 .or_else(|| self.current_model.clone())
@@ -77,10 +71,12 @@ impl CodexScanAccum {
                     // Defer instead of dropping: scan_lines backfills
                     // these once the file's model is known.
                     match entry.timestamp.as_ref() {
-                        Some(ts) => {
-                            self.pending_unresolved_usage
-                                .push((ts.clone(), input, cached, output))
-                        }
+                        Some(ts) => self.pending_unresolved_usage.push((
+                            ts.clone(),
+                            self.current_turn_id.clone(),
+                            usage_counts,
+                            self.previous_token_totals,
+                        )),
                         None => {
                             self.unresolved_usage_event_count =
                                 self.unresolved_usage_event_count.saturating_add(1);
@@ -91,43 +87,27 @@ impl CodexScanAccum {
             };
             self.models_seen.insert(resolved_model.clone());
             // Codex re-emits some token_count events verbatim. Count an
-            // event identical in (timestamp, model, input, cached,
-            // output, reasoning, total) only once.
+            // event identical in timestamp, model, usage, and snapshot once.
             if let Some(ts) = entry.timestamp.as_ref() {
                 let key = (
                     ts.clone(),
                     resolved_model.clone(),
-                    input,
-                    cached,
-                    output,
-                    reasoning,
-                    total,
+                    usage_counts,
+                    self.previous_token_totals,
                 );
                 if !self.seen_token_events.insert(key) {
                     return;
                 }
             }
             if any_nonzero && let Some(ts) = entry.timestamp.as_ref() {
-                self.usage_events.push(UsageEvent {
-                    timestamp: ts.clone(),
-                    model: resolved_model.clone(),
-                    turn_count: 1,
-                    input_tokens: input.saturating_sub(cached.min(input)),
-                    output_tokens: output,
-                    cache_read_input_tokens: cached.min(input),
-                    cache_creation_input_tokens: 0,
-                    // Rollouts never repeat a token_count across
-                    // files; batch-scoped dedup would only make
-                    // incremental rescans nondeterministic.
-                    usage_hash: None,
-                    cost_usd: None,
-                });
+                self.ingest_token_count_usage(
+                    ts,
+                    resolved_model.clone(),
+                    usage_counts,
+                    self.current_turn_id.clone(),
+                );
             }
-            let Some(usage) = codex_token_usage_from_counts(usage_counts) else {
-                return;
-            };
-            self.current_model = Some(resolved_model.clone());
-            add_usage_to_last_assistant(&mut self.messages, usage, Some(resolved_model));
+            self.current_model = Some(resolved_model);
         }
     }
 
@@ -137,6 +117,42 @@ impl CodexScanAccum {
         let event_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
         // agent_message is a duplicate of response_item/message/assistant — skip
         match event_type {
+            "task_started" => {
+                // Usage can arrive before turn_context (e.g. compaction at
+                // the start of a resumed turn). The lifecycle id is already
+                // authoritative at this point.
+                if let Some(turn_id) = payload.get("turn_id").and_then(Value::as_str) {
+                    self.begin_usage_turn(Some(turn_id));
+                }
+            }
+            "thread_settings_applied" => {
+                if let Some(model) = payload
+                    .pointer("/thread_settings/model")
+                    .and_then(Value::as_str)
+                    .filter(|model| !model.is_empty())
+                {
+                    self.current_model = Some(model.to_string());
+                    self.models_seen.insert(model.to_string());
+                }
+            }
+            "thread_goal_updated" => {
+                // Null means the goal was cleared; otherwise retain the
+                // typed objective, status, and usage snapshot in the timeline.
+                if let Some(goal) = payload.get("goal") {
+                    push_system_event(
+                        &mut self.messages,
+                        entry.timestamp.clone(),
+                        format!("[goal]\n{goal}"),
+                    );
+                } else {
+                    log::warn!(
+                        "skipping Codex thread_goal_updated without goal in '{}' at {:?}",
+                        path.display(),
+                        entry.timestamp
+                    );
+                    self.parse_warning_count = self.parse_warning_count.saturating_add(1);
+                }
+            }
             "user_message" => {
                 let pending = self.pending_user_message.take();
                 let fallback_content = pending.as_ref().map(|message| message.content.clone());
@@ -169,21 +185,7 @@ impl CodexScanAccum {
                     &mut self.content_parts,
                     &mut self.first_user_message,
                 );
-                let item = payload.get("item");
-                if item.and_then(|v| v.get("type")).and_then(|v| v.as_str()) == Some("Plan") {
-                    let text = item
-                        .and_then(|v| v.get("text"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    if !text.trim().is_empty() {
-                        self.content_parts.push(text.to_string());
-                        self.messages.push(Message {
-                            timestamp: entry.timestamp.clone(),
-                            model: self.current_model.clone(),
-                            ..Message::assistant(text.to_string())
-                        });
-                    }
-                }
+                self.handle_completed_item(entry, payload, path);
             }
             "thread_name_updated" => {
                 if let Some(name) = payload
@@ -295,6 +297,23 @@ impl CodexScanAccum {
                 let Some(call_id) = codex_call_id(payload) else {
                     return;
                 };
+                // Older rollouts can persist only the typed completion event.
+                // Its call id and revised prompt identify the image tool without
+                // an outer response_item; later mirrors enrich this same row.
+                if self
+                    .call_id_map
+                    .message_mut(Some(call_id), &mut self.messages)
+                    .is_none()
+                {
+                    self.push_event_only_tool_call(
+                        "image_generation_call",
+                        call_id,
+                        payload
+                            .get("revised_prompt")
+                            .map(|prompt| serde_json::json!({"revised_prompt": prompt})),
+                        entry.timestamp.clone(),
+                    );
+                }
                 let Some(message) = self
                     .call_id_map
                     .message_mut(Some(call_id), &mut self.messages)
@@ -403,8 +422,8 @@ impl CodexScanAccum {
                     // Some exec streams carry no response_item pair — this
                     // event is the only record, so materialize the call.
                     let mut input = serde_json::Map::new();
-                    if let Some(command) = payload.get("command") {
-                        input.insert("command".to_string(), command.clone());
+                    if let Some(command) = codex_command_value(payload) {
+                        input.insert("command".to_string(), command);
                     }
                     if let Some(cwd) = payload.get("cwd") {
                         input.insert("cwd".to_string(), cwd.clone());
@@ -425,7 +444,11 @@ impl CodexScanAccum {
 
                 let result_value = codex_exec_command_event_result(payload, &message.content);
                 let status = payload.get("status").and_then(|v| v.as_str());
-                let is_error = status.map(|status| matches!(status, "failed" | "declined"));
+                let is_error = payload
+                    .get("exit_code")
+                    .and_then(Value::as_i64)
+                    .map(|code| code != 0)
+                    .or_else(|| status.map(|status| matches!(status, "failed" | "declined")));
                 if (message.content.is_empty() || message.content.trim_start().starts_with('{'))
                     && let Some(formatted_output) = result_value
                         .get("formattedOutput")
@@ -498,7 +521,20 @@ impl CodexScanAccum {
                 {
                     message.content = text;
                 }
-                enrich_existing_tool_message(message, result_value, is_error, None);
+                if message.content.is_empty()
+                    && let Some(error) = payload.pointer("/result/Err")
+                {
+                    message.content = error
+                        .as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| error.to_string());
+                }
+                enrich_existing_tool_message(
+                    message,
+                    result_value,
+                    is_error,
+                    payload.get("status").and_then(Value::as_str),
+                );
             }
             "patch_apply_end" => {
                 let Some(call_id) = payload.get("call_id").and_then(|v| v.as_str()) else {
@@ -625,6 +661,13 @@ impl CodexScanAccum {
                     && last.role == MessageRole::System
                     && last.content.starts_with("[thinking]\n")
                 {
+                    // The legacy reasoning event and completed item can
+                    // mirror the same section consecutively.
+                    if last.content.strip_prefix("[thinking]\n") == Some(text)
+                        || last.content.ends_with(&format!("\n\n{text}"))
+                    {
+                        return;
+                    }
                     last.content.push_str("\n\n");
                     last.content.push_str(text);
                     return;

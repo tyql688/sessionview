@@ -272,6 +272,11 @@ fn build_usage_stats(
             output_tokens: row.output_tokens,
             cache_tokens: row.cache_read_tokens + row.cache_write_tokens,
             cost: row.cost_usd,
+            estimated_turns: row.estimated_turns,
+            reported_turns: row.reported_turns,
+            unpriced_turns: row
+                .turns
+                .saturating_sub(row.estimated_turns + row.reported_turns),
         })
         .collect();
 

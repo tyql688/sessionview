@@ -34,6 +34,13 @@ pub trait ProviderDescriptor: Send + Sync {
     /// CLI command name for the security whitelist (e.g. "claude", "agent").
     /// Empty string if dynamic (e.g. cc-mirror variants).
     fn cli_command(&self) -> &'static str;
+
+    /// Bump when the parser changes what an unchanged source file yields
+    /// (transcript, search text, tool counts). The indexer re-parses every
+    /// file of this provider once whenever the stored revision differs.
+    fn parser_revision(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 pub trait SessionProvider: Send + Sync {

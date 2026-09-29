@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::models::{SearchFilters, SearchResult, SessionMeta};
 
-use super::super::row_mapper::row_to_session_meta;
+use super::super::row_mapper::{SESSION_META_COLUMNS, row_to_session_meta};
 
 const LIKE_SNIPPET_CONTEXT_CHARS: usize = 80;
 
@@ -39,18 +39,12 @@ pub(super) fn search_with_fts(
     filters: &SearchFilters,
     query: &str,
 ) -> Result<Vec<SearchResult>, rusqlite::Error> {
-    let mut sql = String::from(
-        "SELECT s.id, s.provider, s.title, s.project_path, s.project_name,
-                s.created_at, s.updated_at, s.message_count, s.file_size_bytes, s.source_path, s.is_sidechain,
-                s.variant_name, s.model, s.cc_version, s.git_branch, s.parent_id,
-                    input_tokens,
-                    output_tokens,
-                    cache_read_tokens,
-                    cache_write_tokens,
+    let mut sql = format!(
+        "SELECT {SESSION_META_COLUMNS},
                 snippet(sessions_fts, -1, '<mark>', '</mark>', '...', 64) AS snip
          FROM sessions_fts
          JOIN sessions s ON s.rowid = sessions_fts.rowid
-         WHERE sessions_fts MATCH ?",
+         WHERE sessions_fts MATCH ?"
     );
     let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(query.to_string())];
     append_search_filters(&mut sql, &mut param_values, filters);
@@ -75,25 +69,11 @@ pub(super) fn search_with_like(
         vec![raw.clone()]
     };
 
-    let mut sql = String::from(
-        "SELECT s.id, s.provider, s.title, s.project_path, s.project_name,
-                s.created_at, s.updated_at, s.message_count, s.file_size_bytes, s.source_path, s.is_sidechain,
-                s.variant_name, s.model, s.cc_version, s.git_branch, s.parent_id,
-                    input_tokens,
-                    output_tokens,
-                    cache_read_tokens,
-                    cache_write_tokens,
-                CASE
-                    WHEN ?1 <> '' THEN substr(s.content_text, 1, 200)
-                    ELSE ''
-                END AS snip,
-                s.title AS like_title,
-                s.content_text AS like_content_text,
-                s.project_name AS like_project_name
-         FROM sessions s
-         WHERE 1=1",
-    );
-    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(raw.clone())];
+    // No content in the result columns: SQLite computes them for every
+    // matching row before the LIMIT, and each `content_text` read
+    // decompresses. `query_like_search_results` loads it per returned row.
+    let mut sql = format!("SELECT {SESSION_META_COLUMNS}, s.rowid FROM sessions s WHERE 1=1");
+    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     let mut token_indices: Vec<usize> = Vec::new();
 
     for token in &tokens {
@@ -230,27 +210,32 @@ fn query_like_search_results(
     tokens: &[String],
 ) -> Result<Vec<SearchResult>, rusqlite::Error> {
     let mut stmt = conn.prepare(sql)?;
+    let mut content_stmt = conn.prepare("SELECT content_text FROM sessions WHERE rowid = ?1")?;
     let params_refs: Vec<&dyn rusqlite::types::ToSql> = param_values
         .iter()
         .map(std::convert::AsRef::as_ref)
         .collect();
     let rows = stmt.query_map(params_refs.as_slice(), |row| {
-        let fallback_snippet: String = row.get(20)?;
-        let title: String = row.get(21)?;
-        let content_text: String = row.get(22)?;
-        let project_name: String = row.get(23)?;
-        let snippet = build_like_snippet(&title, &content_text, &project_name, tokens)
-            .unwrap_or(fallback_snippet);
-
-        Ok(SearchResult {
-            session: row_to_session_meta(row)?,
-            snippet,
-        })
+        Ok((row_to_session_meta(row)?, row.get::<_, i64>(20)?))
     })?;
 
     let mut results = Vec::new();
     for row in rows {
-        results.push(row?);
+        let (session, rowid) = row?;
+        // Filter-only queries carry no snippet.
+        let snippet = if tokens.is_empty() {
+            String::new()
+        } else {
+            let content_text: String = content_stmt.query_row([rowid], |row| row.get(0))?;
+            // No literal hit (LIKE also treats `%` / `_` as wildcards): show
+            // the head of the content.
+            build_like_snippet(&session.title, &content_text, &session.project_name, tokens)
+                .unwrap_or_else(|| {
+                    content_text[..byte_index_for_char(&content_text, LIKE_SNIPPET_MAX_CHARS)]
+                        .to_string()
+                })
+        };
+        results.push(SearchResult { session, snippet });
     }
     Ok(results)
 }
@@ -261,10 +246,6 @@ fn build_like_snippet(
     project_name: &str,
     tokens: &[String],
 ) -> Option<String> {
-    if tokens.is_empty() {
-        return Some(String::new());
-    }
-
     for source in [title, content_text, project_name] {
         if source.trim().is_empty() {
             continue;

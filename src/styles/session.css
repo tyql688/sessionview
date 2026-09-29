@@ -1042,6 +1042,11 @@
   overflow-wrap: anywhere;
 }
 
+.session-info-variant {
+  opacity: 0.9;
+  overflow-wrap: anywhere;
+}
+
 .session-info-version {
   opacity: 0.82;
   font-variant-numeric: tabular-nums;

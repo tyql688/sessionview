@@ -16,6 +16,7 @@ import type {
   ProjectDailyUsage,
   ProjectToolUsageStats,
   Message,
+  MessageRole,
 } from "@/lib/types";
 
 /// Sentinel returned by the backend when a load was cancelled mid-flight.
@@ -73,6 +74,20 @@ export interface SessionRoleCounts {
 export interface SessionTurnOutline {
   turns: SessionTurnOutlineEntry[];
   role_counts: SessionRoleCounts;
+}
+
+/** A renderable user/assistant message at its absolute session index — the
+ * only text in-session search runs over. */
+interface SessionSearchMessage {
+  message_index: number;
+  role: MessageRole;
+  content: string;
+}
+
+export interface SessionSearchText {
+  /** Session message count this snapshot was built from. */
+  total: number;
+  messages: SessionSearchMessage[];
 }
 
 /**
@@ -158,6 +173,7 @@ type BackendCommandMap = {
     SessionMessagesWindow
   >;
   get_session_turn_outline: CommandSpec<{ sessionId: string; requestSeq: number }, SessionTurnOutline>;
+  get_session_search_text: CommandSpec<{ sessionId: string }, SessionSearchText>;
   cancel_session_load: CommandSpec<{ sessionId: string; requestId?: string }, void>;
   resolve_persisted_output: CommandSpec<{ path: string }, string>;
   search_sessions: CommandSpec<{ filters: SearchFilters }, SearchResult[]>;
@@ -297,6 +313,10 @@ export async function getSessionTurnOutline(sessionId: string): Promise<SessionT
   });
 }
 
+export async function getSessionSearchText(sessionId: string): Promise<SessionSearchText> {
+  return invokeCommand("get_session_search_text", { sessionId });
+}
+
 export async function cancelSessionLoad(sessionId: string, requestId?: string): Promise<void> {
   return invokeCommand("cancel_session_load", {
     sessionId,
@@ -360,10 +380,6 @@ export async function clearIndex(): Promise<void> {
 
 export async function startRefreshUsage(): Promise<boolean> {
   return invokeCommand("start_refresh_usage");
-}
-
-export async function clearUsageStats(): Promise<void> {
-  return invokeCommand("clear_usage_stats");
 }
 
 export async function detectTerminal(): Promise<string> {

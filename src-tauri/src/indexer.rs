@@ -6,11 +6,27 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use rayon::prelude::*;
 
 use crate::db::Database;
+use crate::db::sync::INDEX_CONTENT_REVISION;
 use crate::models::{Provider, SessionMeta, TreeNode, TreeNodeType};
-use crate::pricing::{self, PRICING_CATALOG_JSON_KEY, PricingCatalog};
+use crate::pricing::{
+    self, PRICING_CATALOG_JSON_KEY, PRICING_CATALOG_UPDATED_AT_KEY, PricingCatalog,
+};
 use crate::provider::{ParsedSession, SessionProvider, TokenStatRow};
 use crate::services::error::{ServiceError, ServiceResult};
 use crate::services::image_cache::ImageCacheService;
+
+/// Meta key holding the `ProviderDescriptor::parser_revision` whose snapshot
+/// last committed. It advances only after a commit, so the first scan with a
+/// new parser refreshes old data.
+fn parser_revision_key(provider: &Provider) -> String {
+    format!("{}_parser_revision", provider.key())
+}
+
+/// Meta key holding the `INDEX_CONTENT_REVISION` a provider's stored search
+/// content was last committed with; a mismatch re-parses the provider once.
+fn index_content_revision_key(provider: &Provider) -> String {
+    format!("{}_index_content_revision", provider.key())
+}
 
 #[derive(Clone)]
 pub struct Indexer {
@@ -24,6 +40,10 @@ struct ProviderWork {
     sessions: Vec<ParsedSession>,
     unchanged_source_paths: Vec<String>,
     stats_batch: Vec<(String, Vec<TokenStatRow>)>,
+    pricing_revision: String,
+    /// Re-parsed for an `INDEX_CONTENT_REVISION` change: every session's
+    /// indexed content is rewritten.
+    rewrites_index: bool,
 }
 
 fn epoch_millis(time: SystemTime) -> ServiceResult<i64> {
@@ -127,12 +147,25 @@ impl Indexer {
     ) -> ServiceResult<usize> {
         let start = Instant::now();
         let mut total = 0usize;
-        let pricing_catalog = self.cached_pricing_catalog();
+        let pricing_catalog = self.cached_pricing_catalog()?;
+        let pricing_revision = format!(
+            "1:{}",
+            self.db
+                .get_meta(PRICING_CATALOG_UPDATED_AT_KEY)
+                .map_err(|e| ServiceError::Message(format!(
+                    "failed to read pricing revision: {e}"
+                )))?
+                .unwrap_or_else(|| "no-catalog".to_string())
+        );
         let now_millis = epoch_millis(SystemTime::now())?;
 
         let provider_refs = self.selected_providers(filter);
-        let works =
-            self.collect_provider_work(&provider_refs, pricing_catalog.as_ref(), force_parse)?;
+        let works = self.collect_provider_work(
+            &provider_refs,
+            pricing_catalog.as_ref(),
+            &pricing_revision,
+            force_parse,
+        )?;
 
         // Phase 2 (sequential, DB writer): commit each provider's snapshot.
         // SQLite has a single writer mutex; serializing here avoids contention
@@ -157,12 +190,18 @@ impl Indexer {
             log::warn!("post-reindex WAL checkpoint failed: {error}");
         }
 
-        // Reclaim freelist bloat (mass deletions, clear+rebuild churn). The
-        // 10% threshold inside makes this a no-op on ordinary passes; when it
-        // does fire it shrinks the file to live data. Best-effort like the
-        // checkpoint above.
-        match self.db.compact_if_bloated() {
-            Ok(true) => log::info!("post-reindex compaction reclaimed freelist pages"),
+        // Reclaim file bloat (mass deletions, clear+rebuild churn, FTS
+        // postings left behind by rewritten sessions). The thresholds inside
+        // make this a no-op on ordinary passes; when it does fire it shrinks
+        // the file to live data. A pass that rewrote a provider's whole index
+        // compacts regardless. Best-effort like the checkpoint above.
+        let compaction = if works.iter().any(|work| work.rewrites_index) {
+            self.db.compact().map(|()| true)
+        } else {
+            self.db.compact_if_bloated()
+        };
+        match compaction {
+            Ok(true) => log::info!("post-reindex compaction shrank the database to its live data"),
             Ok(false) => {}
             Err(error) => log::warn!("post-reindex compaction failed: {error}"),
         }
@@ -176,21 +215,15 @@ impl Indexer {
         Ok(total)
     }
 
-    fn cached_pricing_catalog(&self) -> Option<PricingCatalog> {
-        match self.db.get_meta(PRICING_CATALOG_JSON_KEY) {
-            Ok(Some(json)) => match pricing::parse_catalog(&json) {
-                Ok(catalog) => Some(catalog),
-                Err(error) => {
-                    log::warn!("failed to parse cached pricing catalog: {error}");
-                    None
-                }
-            },
-            Ok(None) => None,
-            Err(error) => {
-                log::warn!("failed to read cached pricing catalog: {error}");
-                None
-            }
-        }
+    fn cached_pricing_catalog(&self) -> ServiceResult<Option<PricingCatalog>> {
+        self.db
+            .get_meta(PRICING_CATALOG_JSON_KEY)
+            .map_err(|error| {
+                ServiceError::Message(format!("failed to read pricing catalog: {error}"))
+            })?
+            .map(|json| pricing::parse_catalog(&json))
+            .transpose()
+            .map_err(|error| ServiceError::Message(format!("invalid pricing catalog: {error}")))
     }
 
     fn selected_providers<'a>(
@@ -211,6 +244,7 @@ impl Indexer {
         &self,
         providers: &[&dyn SessionProvider],
         pricing_catalog: Option<&PricingCatalog>,
+        pricing_revision: &str,
         force_parse: bool,
     ) -> ServiceResult<Vec<ProviderWork>> {
         // Phase 1 (parallel, CPU/IO): scan each provider's files and compute
@@ -219,7 +253,9 @@ impl Indexer {
         // scan), so providers don't share state and can run in parallel.
         providers
             .par_iter()
-            .map(|provider| self.scan_provider_work(*provider, pricing_catalog, force_parse))
+            .map(|provider| {
+                self.scan_provider_work(*provider, pricing_catalog, pricing_revision, force_parse)
+            })
             .collect()
     }
 
@@ -227,6 +263,7 @@ impl Indexer {
         &self,
         provider: &dyn SessionProvider,
         pricing_catalog: Option<&PricingCatalog>,
+        pricing_revision: &str,
         force_parse: bool,
     ) -> ServiceResult<ProviderWork> {
         let provider_kind = provider.provider();
@@ -236,7 +273,28 @@ impl Indexer {
         // already indexed". A forced parse hands the provider an empty
         // snapshot instead: every file reads as changed and gets re-parsed,
         // without the destructive mtime-zeroing the old refresh path used.
-        let known = if force_parse {
+        let meta_differs = |key: &str, expected: &str| -> ServiceResult<bool> {
+            let stored = self.db.get_meta(key).map_err(|e| {
+                ServiceError::LoadProviderSourceSnapshot(
+                    provider_kind.key().to_string(),
+                    e.to_string(),
+                )
+            })?;
+            Ok(stored.as_deref() != Some(expected))
+        };
+        let parser_changed = match provider_kind.descriptor().parser_revision() {
+            Some(revision) => meta_differs(&parser_revision_key(&provider_kind), revision)?,
+            None => false,
+        };
+        let pricing_changed = meta_differs(
+            &format!("usage_pricing_revision:{}", provider_kind.key()),
+            pricing_revision,
+        )?;
+        let content_changed = meta_differs(
+            &index_content_revision_key(&provider_kind),
+            INDEX_CONTENT_REVISION,
+        )?;
+        let known = if force_parse || parser_changed || pricing_changed || content_changed {
             HashMap::new()
         } else {
             self.db
@@ -260,6 +318,8 @@ impl Indexer {
             sessions,
             unchanged_source_paths,
             stats_batch,
+            pricing_revision: pricing_revision.to_string(),
+            rewrites_index: content_changed,
         })
     }
 
@@ -285,6 +345,34 @@ impl Indexer {
             .map_err(|e| {
                 ServiceError::SyncProvider(work.provider_kind.key().to_string(), e.to_string())
             })?;
+
+        self.db
+            .set_meta(
+                &format!("usage_pricing_revision:{}", work.provider_kind.key()),
+                &work.pricing_revision,
+            )
+            .map_err(|e| {
+                ServiceError::SyncProvider(work.provider_kind.key().to_string(), e.to_string())
+            })?;
+
+        self.db
+            .set_meta(
+                &index_content_revision_key(&work.provider_kind),
+                INDEX_CONTENT_REVISION,
+            )
+            .map_err(|e| {
+                ServiceError::SyncProvider(work.provider_kind.key().to_string(), e.to_string())
+            })?;
+
+        if let Some(revision) = work.provider_kind.descriptor().parser_revision()
+            && !work.sessions.is_empty()
+        {
+            self.db
+                .set_meta(&parser_revision_key(&work.provider_kind), revision)
+                .map_err(|e| {
+                    ServiceError::SyncProvider(work.provider_kind.key().to_string(), e.to_string())
+                })?;
+        }
 
         for parsed in &work.sessions {
             image_service.cache_images(&parsed.messages);

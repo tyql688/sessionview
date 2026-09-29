@@ -1,3 +1,4 @@
+mod history;
 pub mod parser;
 mod tools;
 
@@ -30,6 +31,9 @@ impl crate::provider::ProviderDescriptor for Descriptor {
     }
     fn cli_command(&self) -> &'static str {
         "codex"
+    }
+    fn parser_revision(&self) -> Option<&'static str> {
+        Some("7")
     }
 }
 
@@ -170,7 +174,9 @@ impl SessionProvider for CodexProvider {
     }
 
     fn scan_all(&self) -> Result<Vec<ParsedSession>, ProviderError> {
-        let files = self.collect_jsonl_files();
+        let files = history::leaf_paths(self.collect_jsonl_files()).map_err(|error| {
+            ProviderError::Parse(format!("Codex history resolution failed: {error:#}"))
+        })?;
         if files.is_empty() {
             return Ok(Vec::new());
         }
@@ -188,7 +194,9 @@ impl SessionProvider for CodexProvider {
         &self,
         known: &HashMap<String, SourceState>,
     ) -> Result<ScanOutcome, ProviderError> {
-        let files = self.collect_jsonl_files();
+        let files = history::leaf_paths(self.collect_jsonl_files()).map_err(|error| {
+            ProviderError::Parse(format!("Codex history resolution failed: {error:#}"))
+        })?;
         let index_titles = self.load_session_index();
         let (mut to_parse, mut unchanged_source_paths) = partition_files_by_freshness(files, known);
         // A rename only rewrites `session_index.jsonl` — the rollout file
@@ -197,7 +205,16 @@ impl SessionProvider for CodexProvider {
         // new name lands; user-customized titles carry `title: None` and
         // are never promoted (upsert preserves them anyway).
         unchanged_source_paths.retain(|path_str| {
-            let stale = session_uuid_from_filename(path_str)
+            let id = match history::read_header(Path::new(path_str)) {
+                Ok(Some(header)) => Some(header.id),
+                Ok(None) => session_uuid_from_filename(path_str),
+                Err(error) => {
+                    log::warn!("cannot read Codex source identity '{path_str}': {error:#}");
+                    to_parse.push(PathBuf::from(path_str));
+                    return false;
+                }
+            };
+            let stale = id
                 .and_then(|id| index_titles.get(&id))
                 .zip(known.get(path_str).and_then(|state| state.title.as_ref()))
                 .is_some_and(|(index_title, stored_title)| index_title != stored_title);

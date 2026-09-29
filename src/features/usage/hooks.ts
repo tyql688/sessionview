@@ -347,6 +347,9 @@ export function useUsageResources(selectedProviderKeys: string[], options: Usage
       ) {
         setActiveMaintenanceJob(null);
       }
+      if (payload.phase === "finished" || payload.phase === "failed") {
+        handleUsageDataChanged();
+      }
     }).then((unlisten) => {
       // The component may unmount before listen() resolves; drop the stale
       // subscription immediately instead of leaking it.

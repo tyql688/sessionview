@@ -41,6 +41,14 @@ impl CodexScanAccum {
 
         match item_type {
             "message" => {
+                // item_completed.AgentMessage and response_item.message
+                // share the response id, in either arrival order.
+                if role_str == "assistant"
+                    && let Some(id) = payload.get("id").and_then(Value::as_str)
+                    && !self.seen_assistant_items.insert(id.to_string())
+                {
+                    return;
+                }
                 let text = omit_base64_image_sources(&extract_codex_content(payload));
                 let normalized_text = strip_inline_image_sources(&text);
                 let role = match role_str {
@@ -198,7 +206,18 @@ impl CodexScanAccum {
                 }
 
                 // Merge output into the matching function_call message
-                let call_id = payload.get("call_id").and_then(|v| v.as_str());
+                let mut call_id = payload.get("call_id").and_then(|v| v.as_str());
+                let response_id = payload.get("id").and_then(Value::as_str);
+                if self
+                    .call_id_map
+                    .message_mut(call_id, &mut self.messages)
+                    .is_none()
+                {
+                    call_id = response_id.or(call_id);
+                }
+                if let Some(index) = self.call_id_map.index_of(call_id) {
+                    self.call_id_map.register(response_id, index);
+                }
                 if let Some(message) = self.call_id_map.message_mut(call_id, &mut self.messages) {
                     let result_value = codex_tool_result_value(&raw_output, &output);
                     message.content = output;
@@ -217,6 +236,11 @@ impl CodexScanAccum {
                     return;
                 }
                 // Fallback: standalone output message
+                self.call_id_map.register(response_id, self.messages.len());
+                self.call_id_map.register(
+                    payload.get("call_id").and_then(Value::as_str),
+                    self.messages.len(),
+                );
                 self.messages.push(Message {
                     timestamp: entry.timestamp.clone(),
                     ..Message::new(MessageRole::Tool, output)

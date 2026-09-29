@@ -1,26 +1,62 @@
 # Changelog
 
-## Unreleased
+## [0.8.3] - 2026-09-24
+
+### Changed
+
+- In-session search counts every match in the session's user and assistant messages without loading the whole session into the timeline. Stepping through matches loads the window around each one and centers the match itself, also inside long messages. Queries typed while the session's text is still loading share one request.
+- Global search covers the same user and assistant messages as in-session search; tool output and thinking are not indexed. OpenCode sessions index all of their text parts.
+- The index database stores each session's search text zstd-compressed, which shrinks the file, and compacts itself when rewritten sessions have grown it. The first launch converts the existing database in place and re-indexes every session once. Earlier SessionView versions, including an older `npx sessionview` still in the npm cache, cannot use the converted database: indexing and search fail with `unknown function: session_content_text()`. To go back to an earlier version, quit SessionView and delete `sessions.db`, `sessions.db-wal`, and `sessions.db-shm` from `~/.sessionview` (or from the directory passed to `--data-dir`). The earlier version rebuilds its index on the next launch; favorites and renamed titles are stored in that database and are lost.
+
+### Fixed
+
+- A large session is parsed once while it opens: the background parse, the minimap outline, message windows, and in-session search share a single parse, and a parse that finishes is kept even when the request that started it was canceled. On a 1.8 GB Codex session, opening it and searching during the load peaks at 1.7 GB of memory instead of 3.3 GB, and typing a query during the load at 1.4 GB instead of 5.8 GB.
+- Codex `WebSearch` completion records are parsed as web searches with their query, actions, and results.
+- Pi sessions parse current records: system-prompt snapshots, usage entries such as cache warming (counted toward usage), and context edits are recognized, and an entry that fails to parse keeps the rest of its branch linked. Compaction and branch-summary usage is attributed to the model in effect at that point in the tree; usage without an attributable model is skipped with a parse warning. Extension JSONL files without a session header are skipped, and a session file copied into several project directories is indexed once, from its most recently modified copy.
+- The timeline stays still when rows below the viewport resize or rows change height during a rubber-band bounce at either edge, and expanding a thinking block keeps its header in place.
+- Replies that quote `<system-reminder>` in their text are shown; a message is hidden as injected content only when a system reminder opens it.
+- Terminal tool output that starts with a brace is shown as-is without console warnings.
+
+## [0.8.2] - 2026-09-08
+
+### Fixed
+
+- Codex histories retained after a revert now resolve the referenced physical rollout file while preserving the logical session identity, byte and ordinal boundaries, and duplicate protection. Existing Codex indexes refresh automatically to recover previously unreadable history.
+- Codex image-generation completion events retain their prompt and saved image even when the log has no preceding call record. Repeated events and completed-item mirrors merge into one tool entry. Completed `clock.sleep` records retain their duration; malformed or unknown records still raise parse warnings.
+- Image caching skips directories, including placeholder paths such as `...` that Windows can resolve to the current directory, preventing failed image-copy warnings.
+
+### Changed
+
+- Provider icons use official static LobeHub SVGs, removing unrelated UI and emoji dependencies, React 19 peer conflicts, and deprecated packages. Dependency patches address known npm audit findings, and the reviewed Lefthook install script is explicitly allowed for newer npm versions.
+- SVG transforms are limited to SVG imports, and production React Compiler transforms skip unused source maps. The plugin timing advisory is disabled for these intentional transforms; runtime warning reporting remains enabled.
+
+## [0.8.1] - 2026-09-07
+
+### Fixed
+
+- Current Kimi usage records are paired per model step without double-counting their fallback records; interruptions, retries, and profile metadata are retained. DSH agent presets and Grok hook/plugin bookkeeping are recognized, and session toolbars show the provider's agent or profile when available.
+- Pi messages containing unpaired UTF-16 surrogate escapes retain their readable content with replacement characters instead of dropping the entire record; other malformed JSON still raises a parse warning.
+- Refreshing model prices now recalculates historical usage before reporting success, with per-provider pricing revisions so unchanged files and interrupted refreshes are retried safely. Catalog writes are atomic and existing statistics survive refresh failures.
+- Pi client-calculated zero costs no longer override available model rates. Cost coverage distinguishes estimates, service-reported amounts (including zero), and fully or partially unpriced usage; explicit free model rates are retained, and cached model aliases resolve deterministically without borrowing prices from a different model version or paid tier.
+- Codex desktop rollouts now retain nested command executions, file changes, MCP and dynamic tools, image previews/generation, web searches, agent activity, reasoning, and goal updates from current structured records. Code-mode `exec` is displayed separately from shell commands; mirrored assistant messages and tool outputs are deduplicated by their recorded ids, and command/MCP failures keep their error status.
+- Codex usage emitted after `task_started` but before `turn_context` is attributed to the new turn and explicitly applied model settings. Existing Codex indexes refresh once when the parser changes, so previously unchanged logs gain the corrected transcript, search text, tool counts, and usage without clearing favorites or existing data first.
+- Codex repeated cumulative token snapshots no longer inflate usage when re-emitted at a later timestamp. New response records, cache components, equal-sized requests with advancing totals, and usage after compaction remain counted; existing Codex statistics are rebuilt automatically.
+- Fresh Codex subagents retain their first model response's usage. Parent replay is skipped only when an explicit fork or inherited session metadata identifies it, rather than assuming every spawned agent starts with replayed usage.
+- Codex paginated history now resolves `history_base` using its thread identity, byte boundary, and ordinal boundary, retaining the referenced prefix before reading the continuation. Physical segments no longer overwrite each other's session and token statistics during full and incremental scans; missing or ambiguous history fails explicitly, and loading or renaming a continued session uses its logical thread identity.
+
+## [0.8.0] - 2026-09-02
 
 ### Added
 
-- MiniMax Code (mcode) sessions: the provider reads the SQLite index and
-  per-session `messages.jsonl` files under `~/.minimax/v2/` (or
-  `$MINIMAX_DATA_DIR/v2`, with `$MAVIS_DATA_DIR` as the legacy fallback).
-  User prompts use the wire's `canonicalTextRange` so the injected
-  `<system-reminder>` block is not treated as the user turn. Assistant
-  thinking, prose, and tool calls stay in wire order; tool results merge
-  onto the matching call; images become `[Image: source: data:…]`
-  markers. Per-turn `usage` blobs become `UsageEvent` rows (so the
-  usage dashboard is not zeroed by an empty cost-only event). Resumes
-  through `mcode --session <id>`. Filters by `runtime = 'pi-agent'`,
-  hides `origin = 'root-repair'` scaffolding, and uses
-  `parent_session_id` as the typed subagent signal. A `task` tool result
-  carries `details.sub_session_id` (also in `<task_result session_id>`);
-  that becomes the child's Agent `agentId` so "Open subagent" works.
-  `agent_name` (mavis / explore / worker / verifier) is stored as
-  `variant_name`. Model prefers `extra_data_json.effectiveModel` and
-  falls back to the first assistant turn's `message.model`.
+- Command Code sessions: the provider reads the append-only v3 transcript tree under `~/.commandcode/projects/<project>/<session-id>.jsonl` together with its mutable `.meta.json` sidecar. The timeline follows the active last-leaf `parentId` chain after rewind/branch operations, while usage and provider-reported USD cost include every assistant call that actually ran across all branches. Text, thinking, images, tool calls/results, compaction summaries, visible mod messages, model changes, renamed sessions, and git-branch metadata are preserved. Typed `agent` calls become limited inline children (`<session>:<tool-call-id>`) that can be opened from the parent, including foreground results and background `agent_output` waits. Command Code does not persist the child agent's internal trace, model, or disjoint usage, so SessionView leaves those unknown fields empty instead of inventing them. Fork/clone lineage is not misclassified as a subagent, malformed records surface through the parse-warning badge, and sessions resume through `commandcode --session <id>`.
+
+- GitHub Copilot CLI sessions: the provider reads `$COPILOT_HOME/session-state/<uuid>/events.jsonl` (`~/.copilot` by default), mutable `workspace.yaml`, and `session-store.db` plus its WAL as one freshness graph. User turns use the wire's `content`, never the system-context-wrapped `transformedContent`; assistant reasoning stays out of the transcript; `tool.execution_start` / `tool.execution_complete` pair into one Tool message by `toolCallId`. Image attachments resolve only from complete typed `session.binary_asset` records with an explicit MIME type; malformed or unresolved attachments retain useful sibling text, render an honest attachment marker, and raise a parse warning. `task` subagents run inline in the parent log; their events are routed by `parentToolCallId` into child sessions (`<session>:<toolCallId>`, titled by `agentDisplayName`, agent type as `variant_name`), and the parent's Agent tool message links to them so "Open subagent" works. Usage prefers `session-store.db`'s per-call `assistant_usage_events` (timestamped, per model, subagent calls attributed to their child) and falls back to `session.shutdown.modelMetrics`; unknown child scopes warn and are skipped instead of being charged to the root. Both sources are cache-inclusive and normalised to disjoint input / cache-read / cache-write. Under auto mode the model is refined from `assistant.message.model` (the selection itself is the literal `auto`). Resumes through `copilot --resume <id>`.
+
+- MiniMax Code (mcode) sessions: the provider reads the SQLite index, non-empty WAL, every session `manifest.json`, and referenced `messages.jsonl` under `~/.minimax/v2/` (or `$MINIMAX_DATA_DIR/v2`, with `$MAVIS_DATA_DIR` as the legacy fallback) as one incremental freshness graph. User prompts use the wire's `canonicalTextRange` so the injected `<system-reminder>` block is not treated as the user turn. Assistant thinking, prose, and tool calls stay in wire order; results merge by `toolCallId`, while orphan results remain standalone Tool messages with structured status instead of becoming system prose. Images require both an explicit MIME type and payload; malformed blocks raise parse warnings without dropping valid sibling text. Unknown visible content is counted, known siblings remain visible, and unknown tool-result payloads are preserved as raw output. Per-turn `usage` blobs become authoritative `UsageEvent` rows; missing model/timestamp fields warn while totals remain preserved. Resumes through `mcode --session <id>`. The provider filters by `runtime = 'pi-agent'`, hides `origin = 'root-repair'` scaffolding, and uses `parent_session_id` as the typed subagent signal. A `task` tool result carries `details.sub_session_id` (also in `<task_result session_id>`); that becomes the child's Agent `agentId` so "Open subagent" works. `agent_name` (mavis / explore / worker / verifier) is stored as `variant_name`. Model prefers `extra_data_json.effectiveModel` and falls back to the first assistant turn's `message.model`.
+
+### Fixed
+
+- OpenCode: after the v2 `workspace_domain` migration the `workspace` table no longer has a `branch` column, so every scan failed with `no such column: w.branch` and the provider was skipped. The branch lookup now gates on the column, and the session simply has no branch when it is absent.
 
 ## [0.7.8] - 2026-08-17
 

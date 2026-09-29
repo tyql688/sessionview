@@ -132,6 +132,7 @@ mod tests {
                 Provider::Dsh,
                 Provider::Mcode,
                 Provider::Copilot,
+                Provider::CommandCode,
             ]
         );
         assert_eq!(snapshots.len(), Provider::all().len());

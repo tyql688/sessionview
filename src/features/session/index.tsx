@@ -22,7 +22,7 @@ import { processMessages } from "@/features/session/hooks";
 import { SessionToolbar } from "@/features/session/SessionToolbar";
 import { SessionSearch } from "@/features/session/SessionSearch";
 import { TimelineMinimapDriver } from "@/features/session/TimelineMinimap";
-import { activeMatchTarget, paintVisibleHighlights, scrollRangeIntoView } from "@/features/session/search-utils";
+import { activeMatchTarget, paintVisibleHighlights } from "@/features/session/search-utils";
 import { useFavoriteSync } from "@/features/session/useFavoriteSync";
 import { useSessionCommandEvents } from "@/features/session/useSessionCommandEvents";
 import { useRoleFilter } from "@/features/session/createRoleFilter";
@@ -31,7 +31,8 @@ import { useSessionPagination, INITIAL_TAIL } from "@/features/session/createSes
 import {
   distanceToNewest,
   distanceToOldest,
-  rowAtEntryIndex,
+  overscrolledBottom,
+  overscrolledTop,
   viewportBottom,
 } from "@/features/session/timelineGeometry";
 
@@ -121,10 +122,6 @@ export function SessionView(props: { session: SessionRef; active: boolean }) {
 
   // Navigation over the column-reverse scroller (coordinate model lives in
   // timelineGeometry.ts).
-  const scrollToItem = useCallback((index: number, align: "start" | "center" | "end") => {
-    const el = messagesRef.current;
-    if (el) rowAtEntryIndex(el, index)?.scrollIntoView({ block: align === "center" ? "center" : align });
-  }, []);
   const scrollToBottom = useCallback(() => {
     // scrollTop 0 IS the newest message — engine-anchored.
     messagesRef.current?.scrollTo({ top: 0 });
@@ -137,28 +134,19 @@ export function SessionView(props: { session: SessionRef; active: boolean }) {
     setMessagesEl(el);
   }, []);
 
-  const {
-    setTotalMessages,
-    resolveCompleteSearchMatch,
-    revealEntry,
-    revealMessageIndex,
-    revealNewest,
-    scrollToEnd,
-    loadOlder,
-    loadNewer,
-  } = useSessionPagination({
-    sessionId: props.session.id,
-    filteredEntries,
-    windowStart,
-    setWindowStart,
-    loadedCount: messages.length,
-    scrollElement: messagesEl,
-    setMessages,
-    setMeta,
-    withTokenTotals,
-    scrollToItem,
-    scrollToBottom,
-  });
+  const { totalMessages, setTotalMessages, revealMessageIndex, revealNewest, scrollToEnd, loadOlder, loadNewer } =
+    useSessionPagination({
+      sessionId: props.session.id,
+      filteredEntries,
+      windowStart,
+      setWindowStart,
+      loadedCount: messages.length,
+      scrollElement: messagesEl,
+      setMessages,
+      setMeta,
+      withTokenTotals,
+      scrollToBottom,
+    });
 
   // In-session search slice: query signals + data-level match locations.
   const {
@@ -171,11 +159,17 @@ export function SessionView(props: { session: SessionRef; active: boolean }) {
     matchLocations,
     navigateMatch,
   } = useSessionSearch({
-    filteredEntries,
+    hiddenRoles,
     loading,
     sessionId: props.session.id,
-    resolveCompleteSearchMatch,
-    revealEntry,
+    totalMessages,
+    revealMatch: (term, target) =>
+      revealMessageIndex(target.messageIndex, (row) =>
+        paintVisibleHighlights(messagesRef.current ?? undefined, term, {
+          entryKey: row.getAttribute("data-entry-key") ?? "",
+          occurrence: target.occurrence,
+        }),
+      ),
     registerDebounce: (clear) => {
       sessionSearchDebounceRef.current = clear;
     },
@@ -429,8 +423,9 @@ export function SessionView(props: { session: SessionRef; active: boolean }) {
         // bottom-anchored coordinate space under the view.
         if (row.offsetTop >= bottomEdge) delta += newHeight - oldHeight;
       }
-      // Never fight a bottom-edge rubber-band bounce (scrollTop > 0).
-      if (delta !== 0 && root.scrollTop <= 0) root.scrollTop -= delta;
+      // Never fight a rubber-band bounce at either edge: scrollTop writes lose
+      // against WKWebView's elastic animation and land somewhere arbitrary.
+      if (delta !== 0 && !overscrolledTop(root) && !overscrolledBottom(root)) root.scrollTop -= delta;
     });
     const io = new IntersectionObserver(
       (entries) => {
@@ -463,27 +458,26 @@ export function SessionView(props: { session: SessionRef; active: boolean }) {
       rowObserversRef.current?.io.unobserve(el);
     };
   }, []);
-  // Paint search highlights when the query, matches, or active match change.
-  // Every row is real DOM (content-visibility rendering), so ranges are stable
-  // and there is NO need to repaint on scroll — the browser applies the
-  // highlight to each row as it paints. Counting stays data-level in the hook.
-  const lastScrolledMatchRef = useRef<string | null>(null);
+  // Paint search highlights when the query, matches, active match, or loaded
+  // rows change. Every row is real DOM (content-visibility rendering), so
+  // ranges are stable and there is NO need to repaint on scroll — the browser
+  // applies the highlight to each row as it paints. Counting stays data-level
+  // in the hook, and scrolling to the active match is its reveal's job.
   useEffect(() => {
     if (!activeSessionSearch || !messagesEl) return;
     const frame = requestAnimationFrame(() => {
       const target = activeMatchTarget(matchLocations, searchMatchIdx);
-      const activeKey = target !== null ? filteredEntries[target.entryIndex]?.key : undefined;
-      const activeRange = paintVisibleHighlights(
+      // Undefined until the match's message is in the loaded window.
+      const activeKey =
+        target === null
+          ? undefined
+          : filteredEntries.find((entry) => entry.type === "message" && entry.messageIndex === target.messageIndex)
+              ?.key;
+      paintVisibleHighlights(
         messagesEl,
         activeSessionSearch,
         target !== null && activeKey !== undefined ? { entryKey: activeKey, occurrence: target.occurrence } : null,
       );
-      // Center the active match once per navigation step.
-      const scrollKey = `${activeSessionSearch}#${searchMatchIdx}`;
-      if (activeRange && lastScrolledMatchRef.current !== scrollKey) {
-        lastScrolledMatchRef.current = scrollKey;
-        scrollRangeIntoView(activeRange);
-      }
     });
     return () => cancelAnimationFrame(frame);
   }, [activeSessionSearch, searchMatchIdx, matchLocations, messagesEl, filteredEntries]);

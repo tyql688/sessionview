@@ -7,7 +7,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use walkdir::WalkDir;
 
-use crate::models::TokenUsage;
+use crate::models::{Message, MessageRole, TokenUsage};
 
 mod content_parts;
 mod tool_pairing;
@@ -131,6 +131,20 @@ pub fn collect_subagent_jsonl_files(subagents_dir: &Path) -> Vec<std::path::Path
             }
         })
         .collect()
+}
+
+/// The user + assistant dialogue of `messages`, one message per line: the
+/// text search covers, in-session and global alike.
+pub fn dialogue_text(messages: &[Message]) -> String {
+    messages
+        .iter()
+        .filter(|message| {
+            matches!(message.role, MessageRole::User | MessageRole::Assistant)
+                && !message.content.trim().is_empty()
+        })
+        .map(|message| message.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub fn is_system_content(trimmed: &str) -> bool {

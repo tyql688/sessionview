@@ -3,7 +3,6 @@ import type { Dispatch, SetStateAction } from "react";
 import { flushSync } from "react-dom";
 import { cancelSessionLoad, getSessionMessagesWindow, isLoadCanceledError } from "@/lib/tauri";
 import type { Message, SessionMeta, TokenTotals } from "@/lib/types";
-import { findFirstMatchingEntryIndex } from "@/features/session/search-utils";
 import {
   overscrolledBottom,
   overscrolledTop,
@@ -40,8 +39,6 @@ export interface CreateSessionPaginationOptions {
   setMeta: Dispatch<SetStateAction<SessionMeta>>;
   /** Apply fresh token totals onto a meta object. */
   withTokenTotals: (metaData: SessionMeta, totals: TokenTotals) => SessionMeta;
-  /** Scroll a row (by index in `filteredEntries`) into view. */
-  scrollToItem: (index: number, align: "start" | "center" | "end") => void;
   /** Scroll to the newest row. */
   scrollToBottom: () => void;
 }
@@ -49,9 +46,7 @@ export interface CreateSessionPaginationOptions {
 export interface CreateSessionPaginationResult {
   totalMessages: number;
   setTotalMessages: Dispatch<SetStateAction<number>>;
-  resolveCompleteSearchMatch: (term: string) => Promise<number | null>;
-  revealEntry: (entryIndex: number) => void;
-  revealMessageIndex: (messageIndex: number) => Promise<boolean>;
+  revealMessageIndex: (messageIndex: number, locate?: (row: Element) => Range | null) => Promise<boolean>;
   revealNewest: () => Promise<boolean>;
   scrollToEnd: () => void;
   /** Page in the previous/next batch — wired to the edge-prefetch scroll handler. */
@@ -71,8 +66,9 @@ export interface CreateSessionPaginationResult {
  * pages land at the DOM start with a measured scrollTop compensation. A jump
  * far outside the window (minimap tick, reveal) re-centers the window around
  * the target instead of paging everything in between, then scrolls the target
- * row into view via the DOM. Only a committed in-session search loads the
- * complete session (counting must cover every message).
+ * row into view via the DOM. In-session search navigates the same way: its
+ * matches are counted on the session's searchable text, and each one is
+ * revealed through its message, centering the match itself.
  *
  * Every returned callback is referentially stable (empty-dep useCallback over
  * latest-value refs): SessionView's per-frame scroll handler depends on
@@ -283,13 +279,6 @@ export function useSessionPagination(opts: CreateSessionPaginationOptions): Crea
     void loadNewerTail();
   }, [loadNewerTail]);
 
-  const revealEntry = useCallback((entryIndex: number) => {
-    const total = filteredEntriesRef.current.length;
-    if (entryIndex < 0 || entryIndex >= total) return;
-    positionedRef.current = true;
-    optsRef.current.scrollToItem(entryIndex, "center");
-  }, []);
-
   /** Re-center the loaded window around a target message, REPLACING the current
    * window. A far jump (minimap tick near the top of a 13k-message session)
    * must not page in everything in between — re-centering costs the same IPC as
@@ -341,24 +330,34 @@ export function useSessionPagination(opts: CreateSessionPaginationOptions): Crea
     [beginWindowRequest, finishWindowRequest],
   );
 
+  /** Make the loaded window cover a message, re-centering when the target is
+   * outside it — or near its end while more messages exist beyond it: aligning
+   * there clamps against the loaded bottom, and a truncated tail makes that
+   * clamp land mid-air. */
+  const ensureWindowCovers = useCallback(
+    async (messageIndex: number, navigationGeneration: number): Promise<boolean> => {
+      const start = windowStartRef.current;
+      const end = start + loadedCountRef.current;
+      const nearTruncatedEnd = end < totalMessagesRef.current && messageIndex >= end - Math.floor(INITIAL_TAIL / 4);
+      if (messageIndex >= start && messageIndex < end && !nearTruncatedEnd) return true;
+      const recentered = await recenterWindowAround(messageIndex, navigationGeneration);
+      return recentered && navigationGenerationRef.current === navigationGeneration;
+    },
+    [recenterWindowAround],
+  );
+
+  /** Scroll a message into view, re-centering the window first when needed.
+   * The row's top aligns to the viewport top; when `locate` finds a range
+   * inside the row (a search match), that range is centered instead — a long
+   * message would put it far below the row's top. */
   const revealMessageIndex = useCallback(
-    async (messageIndex: number): Promise<boolean> => {
+    async (messageIndex: number, locate?: (row: Element) => Range | null): Promise<boolean> => {
       if (messageIndex < 0 || messageIndex >= totalMessagesRef.current) {
         return false;
       }
       const revealGeneration = ++navigationGenerationRef.current;
       positionedRef.current = true;
-
-      const start = windowStartRef.current;
-      const end = start + loadedCountRef.current;
-      // Also recenter when the target sits near the loaded window's end while
-      // more messages exist beyond it: "align to viewport top" clamps against
-      // the loaded bottom, and a truncated tail makes that clamp land mid-air.
-      const nearTruncatedEnd = end < totalMessagesRef.current && messageIndex >= end - Math.floor(INITIAL_TAIL / 4);
-      if (messageIndex < start || messageIndex >= end || nearTruncatedEnd) {
-        const recentered = await recenterWindowAround(messageIndex, revealGeneration);
-        if (!recentered || navigationGenerationRef.current !== revealGeneration) return false;
-      }
+      if (!(await ensureWindowCovers(messageIndex, revealGeneration))) return false;
 
       const entries = filteredEntriesRef.current;
       let entryIndex = entries.findIndex((entry) => entry.type === "message" && entry.messageIndex === messageIndex);
@@ -377,6 +376,8 @@ export function useSessionPagination(opts: CreateSessionPaginationOptions): Crea
 
       const row = scrollElementRef.current ? rowAtEntryIndex(scrollElementRef.current, entryIndex) : null;
       if (!row) return false;
+      const range = locate?.(row) ?? null;
+      const target = range?.startContainer.parentElement ?? row;
 
       // content-visibility initially lays out a newly revealed window from its
       // intrinsic size estimates. Real heights arrive in waves: each alignment
@@ -385,13 +386,13 @@ export function useSessionPagination(opts: CreateSessionPaginationOptions): Crea
       // quiet period. ponytail: five bounded passes cover a wholly new 300-row
       // page; raise the cap only if runtime evidence shows residual drift.
       for (let attempt = 0; attempt < 5; attempt += 1) {
-        row.scrollIntoView({ block: "start" });
+        target.scrollIntoView({ block: range ? "center" : "start" });
         const settleStartedAt = performance.now();
-        let previousTop = row.getBoundingClientRect().top;
+        let previousTop = target.getBoundingClientRect().top;
         await settleFrames(
           () => {
-            if (navigationGenerationRef.current !== revealGeneration || !row.isConnected) return true;
-            const top = row.getBoundingClientRect().top;
+            if (navigationGenerationRef.current !== revealGeneration || !target.isConnected) return true;
+            const top = target.getBoundingClientRect().top;
             const stable = Math.abs(top - previousTop) < 1;
             previousTop = top;
             return performance.now() - settleStartedAt >= 80 && stable;
@@ -401,94 +402,23 @@ export function useSessionPagination(opts: CreateSessionPaginationOptions): Crea
         );
 
         const root = scrollElementRef.current;
-        if (navigationGenerationRef.current !== revealGeneration || !row.isConnected || !root?.contains(row)) {
+        if (navigationGenerationRef.current !== revealGeneration || !target.isConnected || !root?.contains(target)) {
           return false;
         }
-        // The scroller's 18px top padding is the smallest possible offset for
-        // the oldest row, so anything within 24px is correctly aligned.
-        if (Math.abs(row.getBoundingClientRect().top - root.getBoundingClientRect().top) <= 24) return true;
+        const viewport = root.getBoundingClientRect();
+        if (range) {
+          // On screen is enough: centering clamps at either end of the timeline.
+          const rect = range.getBoundingClientRect();
+          if (rect.top >= viewport.top && rect.bottom <= viewport.bottom) return true;
+        } else if (Math.abs(row.getBoundingClientRect().top - viewport.top) <= 24) {
+          // The scroller's 18px top padding is the smallest possible offset for
+          // the oldest row, so anything within 24px is correctly aligned.
+          return true;
+        }
       }
       return false;
     },
-    [recenterWindowAround],
-  );
-
-  /** Load whatever the window is missing so search covers every message.
-   * Applied in ONE synchronous commit, not the chunked landing: the user just
-   * committed a search and expects the pause, and dripping a 13k-message
-   * history at landing pace would stall the search for many seconds. The
-   * common shape (window is the newest tail) prepends history — free in the
-   * bottom-anchored scroller; a window missing BOTH sides is replaced whole,
-   * restoring the viewport by re-anchoring the previously-top row. */
-  const ensureCompleteWindowForSearch = useCallback(async (): Promise<boolean> => {
-    if (windowFetchInFlightRef.current) return false;
-    const start = windowStartRef.current;
-    const end = start + loadedCountRef.current;
-    const total = totalMessagesRef.current;
-    if (start <= 0 && end >= total) return true;
-
-    const request = beginWindowRequest("search");
-    windowFetchInFlightRef.current = true;
-    try {
-      if (end >= total) {
-        const older = await getSessionMessagesWindow(request.sessionId, 0, start, request.requestId);
-        if (request.sessionId !== sessionIdRef.current) return false;
-        flushSync(() => {
-          const current = optsRef.current;
-          current.setMeta((prev) => current.withTokenTotals(prev, older.token_totals));
-          current.setMessages((prev) => [...older.messages, ...prev]);
-          current.setWindowStart(older.start);
-          setTotalMessages(older.total);
-        });
-        return older.start === 0;
-      }
-
-      const complete = await getSessionMessagesWindow(request.sessionId, 0, total, request.requestId);
-      if (request.sessionId !== sessionIdRef.current) return false;
-      // Replacing the window inserts newer content INSIDE the bottom-anchored
-      // coordinate space, which would shift the view (and a zero-match search
-      // never re-scrolls). Re-anchor on the row that was at the viewport top.
-      const el = scrollElementRef.current;
-      const anchorRow = el
-        ? (document
-            .elementFromPoint(el.getBoundingClientRect().left + 24, el.getBoundingClientRect().top + 24)
-            ?.closest(".session-entry") ?? null)
-        : null;
-      const anchorKey = anchorRow?.getAttribute("data-entry-key") ?? null;
-      const anchorTop = anchorRow?.getBoundingClientRect().top ?? 0;
-      flushSync(() => {
-        const current = optsRef.current;
-        current.setMeta((prev) => current.withTokenTotals(prev, complete.token_totals));
-        current.setMessages(complete.messages);
-        current.setWindowStart(complete.start);
-        setTotalMessages(complete.total);
-      });
-      if (el && anchorKey !== null) {
-        const restored = el.querySelector(`[data-entry-key="${CSS.escape(anchorKey)}"]`);
-        if (restored) el.scrollTop += restored.getBoundingClientRect().top - anchorTop;
-      }
-      return complete.start === 0;
-    } catch (e) {
-      if (isLoadCanceledError(e)) return false;
-      console.warn("load complete session for search failed:", e);
-      return false;
-    } finally {
-      finishWindowRequest(request.requestId);
-      windowFetchInFlightRef.current = false;
-    }
-  }, [beginWindowRequest, finishWindowRequest]);
-
-  const resolveCompleteSearchMatch = useCallback(
-    async (term: string): Promise<number | null> => {
-      if (windowStartRef.current > 0 || windowStartRef.current + loadedCountRef.current < totalMessagesRef.current) {
-        const loadedCompleteWindow = await ensureCompleteWindowForSearch();
-        if (!loadedCompleteWindow) return null;
-      }
-
-      const matchIndex = findFirstMatchingEntryIndex(filteredEntriesRef.current, term);
-      return matchIndex >= 0 ? matchIndex : null;
-    },
-    [ensureCompleteWindowForSearch],
+    [ensureWindowCovers],
   );
 
   const scrollToEnd = useCallback(() => {
@@ -516,8 +446,6 @@ export function useSessionPagination(opts: CreateSessionPaginationOptions): Crea
   return {
     totalMessages,
     setTotalMessages,
-    resolveCompleteSearchMatch,
-    revealEntry,
     revealMessageIndex,
     revealNewest,
     scrollToEnd,

@@ -12,6 +12,178 @@ use tempfile::TempDir;
 
 struct DefaultStatsProvider;
 
+struct IncrementalCodexProvider;
+
+impl SessionProvider for IncrementalCodexProvider {
+    fn provider(&self) -> Provider {
+        Provider::Codex
+    }
+    fn source_roots(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
+    fn scan_all(&self) -> Result<Vec<ParsedSession>, ProviderError> {
+        let mut message = Message::assistant("updated transcript");
+        message.model = Some("gpt-5.4".into());
+        message.timestamp = Some("2026-04-09T12:00:00Z".into());
+        message.token_usage = token_usage(100, 50);
+        let mut parsed = make_session(Some("gpt-5.4"), vec![message]);
+        parsed.meta.provider = Provider::Codex;
+        parsed.content_text = "updated transcript".into();
+        Ok(vec![parsed])
+    }
+    fn scan_incremental(
+        &self,
+        known: &std::collections::HashMap<String, crate::provider::SourceState>,
+    ) -> Result<crate::provider::ScanOutcome, ProviderError> {
+        if known.contains_key("/tmp/source.jsonl") {
+            Ok(crate::provider::ScanOutcome {
+                parsed: Vec::new(),
+                unchanged_source_paths: vec!["/tmp/source.jsonl".into()],
+            })
+        } else {
+            Ok(crate::provider::ScanOutcome {
+                parsed: self.scan_all()?,
+                unchanged_source_paths: Vec::new(),
+            })
+        }
+    }
+    fn load_messages(
+        &self,
+        _session_id: &str,
+        _source_path: &str,
+    ) -> Result<LoadedSession, ProviderError> {
+        Ok(LoadedSession::new(Vec::new()))
+    }
+}
+
+#[test]
+fn pricing_revision_reprices_unchanged_sources_and_survives_failed_refresh() {
+    use crate::db::queries::UsageBucketBounds;
+    use crate::pricing::{PRICING_CATALOG_JSON_KEY, PRICING_CATALOG_UPDATED_AT_KEY};
+    let dir = TempDir::new().unwrap();
+    let db = Arc::new(Database::open(dir.path()).unwrap());
+    let indexer = super::Indexer::new(
+        db.clone(),
+        vec![Box::new(IncrementalCodexProvider)],
+        dir.path().to_path_buf(),
+    );
+    assert_eq!(indexer.reindex().unwrap(), 1);
+    assert_eq!(indexer.reindex().unwrap(), 0);
+    let rows = || {
+        db.usage_by_model(&["codex".into()], UsageBucketBounds::default())
+            .unwrap()
+    };
+    assert_eq!(rows()[0].cost_usd, 0.0);
+    assert_eq!(rows()[0].estimated_turns, 0);
+    db.set_meta(
+        PRICING_CATALOG_JSON_KEY,
+        r#"{"gpt-5.4":{"input_cost_per_token":0.01,"output_cost_per_token":0.02}}"#,
+    )
+    .unwrap();
+    db.set_meta(PRICING_CATALOG_UPDATED_AT_KEY, "revision-1")
+        .unwrap();
+    // A scoped scan cannot claim that other providers have been repriced.
+    assert_eq!(
+        indexer
+            .reindex_providers(Some(&[Provider::Pi]), false)
+            .unwrap(),
+        0
+    );
+    assert_eq!(indexer.reindex().unwrap(), 1);
+    assert_eq!(rows()[0].cost_usd, 2.0);
+    assert_eq!(rows()[0].estimated_turns, 1);
+    assert_eq!(rows()[0].reported_turns, 0);
+    assert_eq!(indexer.reindex().unwrap(), 0);
+    db.set_meta(PRICING_CATALOG_UPDATED_AT_KEY, "revision-2")
+        .unwrap();
+    db.set_meta(PRICING_CATALOG_JSON_KEY, "invalid JSON")
+        .unwrap();
+    assert!(indexer.reindex().is_err());
+    assert_eq!(rows()[0].cost_usd, 2.0);
+    assert_eq!(
+        db.get_meta("usage_pricing_revision:codex")
+            .unwrap()
+            .as_deref(),
+        Some("1:revision-1")
+    );
+    db.set_meta(
+        PRICING_CATALOG_JSON_KEY,
+        r#"{"gpt-5.4":{"input_cost_per_token":0.02,"output_cost_per_token":0.04}}"#,
+    )
+    .unwrap();
+    assert_eq!(indexer.reindex().unwrap(), 1);
+    assert_eq!(rows()[0].cost_usd, 4.0);
+    assert_eq!(rows()[0].input_tokens, 100);
+    assert_eq!(rows()[0].output_tokens, 50);
+}
+
+#[test]
+fn index_content_revision_refreshes_unchanged_sources_once() {
+    let dir = TempDir::new().unwrap();
+    let db = Arc::new(Database::open(dir.path()).unwrap());
+    let indexer = super::Indexer::new(
+        db.clone(),
+        vec![Box::new(IncrementalCodexProvider)],
+        dir.path().to_path_buf(),
+    );
+    assert_eq!(indexer.reindex().unwrap(), 1);
+    assert_eq!(indexer.reindex().unwrap(), 0);
+    // Content stored under an older definition of what gets indexed, and a
+    // compaction baseline no growth reaches: only the rewrite compacts.
+    let revision_key = super::index_content_revision_key(&Provider::Codex);
+    db.set_meta(&revision_key, "0").unwrap();
+    let out_of_reach = i64::MAX.to_string();
+    db.set_meta(crate::db::COMPACTED_PAGE_COUNT_KEY, &out_of_reach)
+        .unwrap();
+    assert_eq!(indexer.reindex().unwrap(), 1);
+    assert_eq!(
+        db.get_meta(&revision_key).unwrap().as_deref(),
+        Some(crate::db::sync::INDEX_CONTENT_REVISION)
+    );
+    assert_ne!(
+        db.get_meta(crate::db::COMPACTED_PAGE_COUNT_KEY)
+            .unwrap()
+            .as_deref(),
+        Some(out_of_reach.as_str()),
+        "a rewritten index is compacted"
+    );
+    assert_eq!(indexer.reindex().unwrap(), 0);
+}
+
+#[test]
+fn codex_parser_revision_refreshes_unchanged_sources_once() {
+    let dir = TempDir::new().unwrap();
+    let db = Arc::new(Database::open(dir.path()).unwrap());
+    let mut old = make_session(Some("gpt-5.4"), Vec::new());
+    old.meta.provider = Provider::Codex;
+    db.sync_provider_snapshot(&Provider::Codex, &[old], false, &[])
+        .unwrap();
+    let revision_key = super::parser_revision_key(&Provider::Codex);
+    db.set_meta(&revision_key, "1").unwrap();
+    let indexer = super::Indexer::new(
+        db.clone(),
+        vec![Box::new(IncrementalCodexProvider)],
+        dir.path().to_path_buf(),
+    );
+    assert_eq!(
+        indexer
+            .reindex_providers(Some(&[Provider::Codex]), false)
+            .unwrap(),
+        1
+    );
+    assert_eq!(db.list_sessions().unwrap()[0].message_count, 1);
+    assert_eq!(
+        db.get_meta(&revision_key).unwrap().as_deref(),
+        Provider::Codex.descriptor().parser_revision()
+    );
+    assert_eq!(
+        indexer
+            .reindex_providers(Some(&[Provider::Codex]), false)
+            .unwrap(),
+        0
+    );
+}
+
 impl SessionProvider for DefaultStatsProvider {
     fn provider(&self) -> Provider {
         Provider::Claude
@@ -347,6 +519,7 @@ fn usage_events_dedup_same_hash_across_sessions() {
             cache_read_input_tokens: 25,
             cache_creation_input_tokens: 0,
             usage_hash: Some("shared-call".into()),
+            cost_is_estimate: false,
             cost_usd: None,
         });
         parsed

@@ -104,7 +104,7 @@ export function SessionToolbar(props: SessionToolbarProps) {
               </TooltipTrigger>
               <TooltipContent side="bottom">{t("session.analytics")}</TooltipContent>
             </Tooltip>
-            {!(props.meta.is_sidechain && props.meta.provider === "kimi") && (
+            {!(props.meta.is_sidechain && ["kimi", "commandcode"].includes(props.meta.provider)) && (
               <>
                 <Tooltip>
                   <TooltipTrigger
@@ -192,6 +192,14 @@ export function SessionToolbar(props: SessionToolbarProps) {
             <span className="info-sep">&middot;</span>
             <span className="session-info-model" title={props.meta.model}>
               {props.meta.model}
+            </span>
+          </>
+        )}
+        {props.meta.variant_name && props.meta.provider !== "cc-mirror" && (
+          <>
+            <span className="info-sep">&middot;</span>
+            <span className="session-info-variant" title={`${t("session.agent")}: ${props.meta.variant_name}`}>
+              {t("session.agent")}: {props.meta.variant_name}
             </span>
           </>
         )}

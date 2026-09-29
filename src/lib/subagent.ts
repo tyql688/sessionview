@@ -1,6 +1,8 @@
 import type { Message, ToolMetadata } from "@/lib/types";
 
-/** Providers where subagents are stored as separate session files (can be opened). */
+/** Providers whose subagents are indexed as openable child sessions.
+ *  Copilot and Command Code persist them inline in the parent source, but the
+ *  backend still materializes independently loadable normalized children. */
 export const SUBAGENT_FILE_PROVIDERS = new Set([
   "claude",
   "codex",
@@ -10,6 +12,8 @@ export const SUBAGENT_FILE_PROVIDERS = new Set([
   "antigravity",
   "grok",
   "mcode",
+  "copilot",
+  "commandcode",
 ]);
 
 /**

@@ -1,31 +1,17 @@
-import type { ProcessedEntry } from "@/features/session/hooks";
-import { preferredScrollBehavior } from "@/lib/motion";
+import type { MessageRole } from "@/lib/types";
 
 export const SESSION_SEARCH_DEBOUNCE_MS = 180;
 
+/** A searchable message (see `getSessionSearchText`) with its content
+ * lowercased once, so each query only scans. */
+export interface SearchableMessage {
+  messageIndex: number;
+  role: MessageRole;
+  haystack: string;
+}
+
 function normalizeSessionSearch(term: string): string {
   return term.trim().toLocaleLowerCase();
-}
-
-function entryMatchesSearch(entry: ProcessedEntry, normalizedTerm: string): boolean {
-  if (!normalizedTerm) return false;
-  // `searchHaystack` is lowercased once at normalize time; using it directly
-  // skips a `toLocaleLowerCase()` per entry per keystroke, which dominates
-  // in-session search cost on 4k-message sessions.
-  return entry.searchHaystack.includes(normalizedTerm);
-}
-
-export function findFirstMatchingEntryIndex(entries: ProcessedEntry[], term: string): number {
-  const normalizedTerm = normalizeSessionSearch(term);
-  if (!normalizedTerm) return -1;
-
-  for (let i = 0; i < entries.length; i++) {
-    if (entryMatchesSearch(entries[i], normalizedTerm)) {
-      return i;
-    }
-  }
-
-  return -1;
 }
 
 // --- DOM highlighting via the CSS Custom Highlight API -----------------------
@@ -66,8 +52,9 @@ function ensureHighlightStyles(): void {
  * All occurrences of `term` inside [data-searchable] subtrees, as Ranges in
  * document order — which, with the virtualized top-down timeline, is also
  * visual order. Only the rows currently mounted by the virtualizer are
- * scanned; match counting and navigation run on entry data instead
- * (`buildMatchLocations`), so the DOM walk stays a cheap paint-only pass.
+ * scanned; match counting and navigation run on the session's searchable
+ * text instead (`buildMatchLocations`), so the DOM walk stays a cheap
+ * paint-only pass.
  */
 export function collectSearchRanges(container: HTMLElement | undefined, term: string): Range[] {
   const normalized = normalizeSessionSearch(term);
@@ -94,36 +81,44 @@ export function collectSearchRanges(container: HTMLElement | undefined, term: st
   return ranges;
 }
 
-/** One element per occurrence of `term` across the loaded entries: the value
- * is the entry index the occurrence lives in. Counting runs on entry data —
- * not the DOM — so totals cover the whole loaded session even though the
- * virtualizer only mounts the rows near the viewport. */
-export function buildMatchLocations(entries: ProcessedEntry[], term: string): number[] {
+/** One element per occurrence of `term` across the session's dialogue: the
+ * absolute index of the message it lives in. Counting runs on the searchable
+ * text — not the DOM or the loaded window — so totals cover the whole session
+ * while only the window around the active match is loaded. Roles hidden in
+ * the filter toolbar are skipped, as their rows are. */
+export function buildMatchLocations(
+  messages: SearchableMessage[],
+  term: string,
+  hiddenRoles: ReadonlySet<MessageRole>,
+): number[] {
   const normalized = normalizeSessionSearch(term);
   if (!normalized) return [];
   const locations: number[] = [];
-  entries.forEach((entry, entryIndex) => {
-    const haystack = entry.searchHaystack;
+  for (const { messageIndex, role, haystack } of messages) {
+    if (hiddenRoles.has(role)) continue;
     for (let at = haystack.indexOf(normalized); at !== -1; at = haystack.indexOf(normalized, at + normalized.length)) {
-      locations.push(entryIndex);
+      locations.push(messageIndex);
     }
-  });
+  }
   return locations;
 }
 
-/** The active match, addressed as (entry index, nth occurrence within that
- * entry) — the shape the DOM paint pass needs to pick the right Range. */
-export function activeMatchTarget(
-  locations: number[],
-  activeIdx: number,
-): { entryIndex: number; occurrence: number } | null {
-  const entryIndex = locations[activeIdx];
-  if (entryIndex === undefined) return null;
+/** A match addressed as (message index, nth occurrence within that message)
+ * — the shape the DOM paint pass needs to pick the right Range. */
+export interface MatchTarget {
+  messageIndex: number;
+  occurrence: number;
+}
+
+/** The active match's target, or null when `activeIdx` is out of range. */
+export function activeMatchTarget(locations: number[], activeIdx: number): MatchTarget | null {
+  const messageIndex = locations[activeIdx];
+  if (messageIndex === undefined) return null;
   let occurrence = 0;
-  for (let i = activeIdx - 1; i >= 0 && locations[i] === entryIndex; i -= 1) {
+  for (let i = activeIdx - 1; i >= 0 && locations[i] === messageIndex; i -= 1) {
     occurrence += 1;
   }
-  return { entryIndex, occurrence };
+  return { messageIndex, occurrence };
 }
 
 /** Paint highlights over the currently mounted rows and return the active
@@ -166,11 +161,4 @@ export function applySearchHighlight(ranges: Range[], activeIndex: number | null
   } else {
     CSS.highlights.delete(ACTIVE_HIGHLIGHT_NAME);
   }
-}
-
-/** Scroll a range's nearest element into view. */
-export function scrollRangeIntoView(range: Range): void {
-  const node = range.startContainer;
-  const element = node instanceof Element ? node : (node.parentElement ?? null);
-  element?.scrollIntoView({ behavior: preferredScrollBehavior(), block: "center" });
 }

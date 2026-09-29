@@ -172,21 +172,21 @@ describe("ToolMessage", () => {
     expect(container.textContent?.match(/Call Read before editing/g)).toHaveLength(1);
   });
 
-  it("does not warn for bracket-prefixed terminal text output", () => {
+  it("renders brace-prefixed terminal text as-is without warnings", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
-      render(
-        <ToolMessage
-          message={{
-            ...bashOutputMessage,
-            content: "[Image: source: C:/tmp/example.png]",
-          }}
-        />,
+      const command = "{ echo one; echo two; } > out.log";
+      const output = "{'title': 'example', 'count': 1}";
+      const { container } = render(
+        <ToolMessage message={{ ...bashOutputMessage, tool_input: command, content: output }} />,
       );
+      const header = container.querySelector(".terminal-tool-toggle");
+      if (!header) throw new Error("expected tool header");
+      fireEvent.click(header);
 
-      expect(
-        warn.mock.calls.some((call) => String(call[0]).includes("failed to parse terminal tool content JSON")),
-      ).toBe(false);
+      expect(container.querySelector(".terminal-tool-command-text")?.textContent).toBe(command);
+      expect(container.querySelector(".msg-tool-output pre")?.textContent).toBe(output);
+      expect(warn).not.toHaveBeenCalled();
     } finally {
       warn.mockRestore();
     }

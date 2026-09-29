@@ -294,7 +294,7 @@ impl Database {
                     SUM(s.output_tokens), \
                     SUM(s.cache_read_tokens), \
                     SUM(s.cache_write_tokens), \
-                    SUM(s.cost_usd) \
+                    SUM(s.cost_usd), SUM(s.estimated_turns), SUM(s.reported_turns) \
              FROM session_token_stats s \
              JOIN sessions sess ON s.session_id = sess.id{} \
              GROUP BY COALESCE(NULLIF(s.model, ''), sess.model, '') \
@@ -311,6 +311,8 @@ impl Database {
                 cache_read_tokens: row.get(4)?,
                 cache_write_tokens: row.get(5)?,
                 cost_usd: row.get(6)?,
+                estimated_turns: row.get(7)?,
+                reported_turns: row.get(8)?,
             })
         })?;
         rows.collect()
@@ -603,6 +605,7 @@ pub(super) mod tests {
             cache_read_tokens: tokens[2],
             cache_write_tokens: tokens[3],
             cost_usd: cost,
+            ..Default::default()
         }
     }
 
@@ -699,6 +702,7 @@ pub(super) mod tests {
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
                 cost_usd: 0.01,
+                ..Default::default()
             }],
         )
         .unwrap();
@@ -724,6 +728,7 @@ pub(super) mod tests {
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
                 cost_usd: 0.01,
+                ..Default::default()
             }],
         )
         .unwrap();
@@ -759,6 +764,7 @@ pub(super) mod tests {
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
                 cost_usd: 0.1,
+                ..Default::default()
             }],
         )
         .unwrap();

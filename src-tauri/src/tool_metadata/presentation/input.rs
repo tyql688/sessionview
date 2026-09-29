@@ -29,7 +29,7 @@ pub(super) fn input_detail_for(metadata: &ToolMetadata, value: &Value) -> Option
         "Read" | "ReadMediaFile" => Some(read_input_detail(obj)),
         "Bash" => Some(detail(vec![line(
             "command",
-            first_string(obj, &["command", "cmd", "CommandLine"]).unwrap_or_default(),
+            pick_field(obj, &["command", "cmd", "CommandLine"]).unwrap_or_default(),
         )])),
         "Plan" => Some(plan_input_detail(obj)),
         "Grep" => Some(grep_input_detail(obj)),

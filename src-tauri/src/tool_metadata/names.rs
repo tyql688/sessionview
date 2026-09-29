@@ -65,4 +65,23 @@ mod tests {
             "Agent"
         );
     }
+
+    #[test]
+    fn codex_code_mode_and_current_tools_keep_provider_specific_meaning() {
+        assert_eq!(
+            canonical_tool_name(Provider::Codex, "exec"),
+            "CodeExecution"
+        );
+        assert_eq!(canonical_tool_name(Provider::Pi, "exec"), "Bash");
+        assert_eq!(canonical_tool_name(Provider::Codex, "exec_command"), "Bash");
+        assert_eq!(canonical_tool_name(Provider::Codex, "wait"), "Wait");
+        assert_eq!(
+            canonical_tool_name(Provider::Codex, "request_user_input_async"),
+            "AskUserQuestion"
+        );
+        assert_eq!(
+            canonical_tool_name(Provider::Codex, "interrupt_agent"),
+            "Agent"
+        );
+    }
 }

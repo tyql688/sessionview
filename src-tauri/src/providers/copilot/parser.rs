@@ -1,16 +1,9 @@
-//! GitHub Copilot `events.jsonl` parser.
+//! GitHub Copilot CLI `events.jsonl` parser.
 //!
-//! One session lives in a single JSONL event log. Two hosts write the same
-//! wire format (producer `copilot-agent`):
-//!
-//! - Copilot CLI: `$COPILOT_HOME/session-state/<uuid>/events.jsonl`
-//!   (`COPILOT_HOME` defaults to `~/.copilot`). CLI sessions carry
-//!   `data.context.{cwd,gitRoot,branch}` on the `session.start` event.
-//! - VS Code Copilot Chat / agent panel:
-//!   `<Code user dir>/workspaceStorage/<hash>/GitHub.copilot-chat/transcripts/<uuid>.jsonl`.
-//!   These transcripts omit `data.context`; the project comes from the
-//!   per-workspace `workspace.json` (`{"folder": "file:///..."}`) two
-//!   directories up.
+//! One session lives in a single JSONL event log (producer `copilot-agent`)
+//! at `$COPILOT_HOME/session-state/<uuid>/events.jsonl` (`COPILOT_HOME`
+//! defaults to `~/.copilot`). Sessions carry `data.context.{cwd,gitRoot,branch}`
+//! on the `session.start` event.
 //!
 //! Envelope: every line is `{"type", "data", "id", "timestamp", "parentId"}`
 //! with an RFC 3339 `timestamp`. The format is explicitly not a stable
@@ -21,13 +14,23 @@
 //! Surface mapping:
 //! - `user.message`: `data.content` is the user's own words — never
 //!   `transformedContent`, which wraps the prompt in injected system context
-//!   (datetime reminders, SQL-table notices). Attachments render as generic
-//!   `[Attachment]` markers when content alone would be empty.
+//!   (datetime reminders, SQL-table notices). Image attachments reference a
+//!   preceding `session.binary_asset` by `assetId`; that asset's base64
+//!   payload replaces the `[image: <name>]` placeholder with an
+//!   `[Image: source: data:<mime>;base64,…]` marker the renderer understands.
+//!   Attachments without a captured asset render as generic `[Attachment]`
+//!   markers when content alone would be empty.
 //! - `assistant.message`: `data.content` is the visible reply.
 //!   `reasoningText`/`reasoningOpaque` are internal reasoning that Copilot
 //!   never shows its own users, so they are skipped. `toolRequests` are
 //!   announcements of work about to run and duplicate the authoritative
 //!   `tool.execution_start` records, so they contribute no messages here.
+//!   `data.model` names the model that actually produced the reply; it
+//!   becomes the per-message model and the session's current model.
+//! - `session.model_change`: the user's selection. Under auto mode this is
+//!   the literal `auto` — kept as-is, since it is what the user chose — and
+//!   each subsequent `assistant.message.model` refines it to the model the
+//!   router actually picked. A session with no reply yet stays `auto`.
 //! - `tool.execution_start`: surfaces a Tool message. `arguments` arrives as
 //!   a JSON object (newer builds) or a JSON string (older ones); both are
 //!   accepted. The result from the paired `tool.execution_complete` is
@@ -35,14 +38,54 @@
 //!   Tool message.
 //! - `system.message`: the system prompt dump, dropped like DSH's
 //!   agent-instructions rows.
-//! - `session.shutdown`: the only persisted usage source. Its
-//!   `modelMetrics.<model>.usage.inputTokens` is **cache-inclusive**
-//!   (verified against GitHub staff statements and ecosystem parsers), so
-//!   the cached portions are subtracted back out to keep SessionView's
-//!   disjoint input / cache-read / cache-write invariant. Sessions that
-//!   never shut down cleanly (crash, SIGKILL, still running, or most VS
-//!   Code-hosted transcripts) carry no usage events at all — partial
-//!   accounting is never fabricated from per-message `outputTokens`.
+//!
+//! Subagents (`task` tool) run **inline in the same log**, not in a separate
+//! file. `subagent.started` / `subagent.completed` bracket the run and carry
+//! the display name, agent type and model; every event the subagent itself
+//! produces (`assistant.message`, `tool.execution_*`) carries
+//! `parentToolCallId` = the `toolCallId` of the parent's `task` call. That
+//! field — not the bracket — is the typed routing signal: in sync mode the
+//! parent's own `task` completion lands *inside* the bracket, and in
+//! background mode the user keeps talking to the parent while the subagent
+//! runs. The one subagent event without the field is its opening
+//! `user.message` (the prompt). The persisted wire exposes no stable call-id
+//! alias on that event, so the parser correlates it only when exactly one open
+//! typed `task` call has the same `arguments.prompt`; an ambiguous match stays
+//! on the root with a warning. Each subagent becomes a child `ParsedSession`
+//! (`parent_id` set, `is_sidechain`, id `<parent id>:<toolCallId>`, so a
+//! nested subagent is `<root>:<outer>:<inner>`), and the parent's Agent
+//! tool message carries that `toolCallId` as `agentId` so "Open subagent"
+//! resolves it. A background `task` answers with a runtime agent hash
+//! (`Agent started in background with agent_id: …`) that later
+//! `read_agent` calls name in `arguments.agent_id`; the parser maps that
+//! hash back to the `task` call id so those calls link to the same child.
+//! Nested subagents chain through the session that issued the inner call.
+//!
+//! Freshness: the root title comes from the `workspace.yaml` sidecar, which
+//! the CLI rewrites on its own schedule, while per-call usage comes from the
+//! shared store and WAL. `source_state` fingerprints every component's
+//! presence, size, and nanosecond mtime, so a title-only or usage-only change
+//! reparses immediately even when the event log is untouched.
+//!
+//! Usage: `session-store.db` (`assistant_usage_events`, read by the
+//! provider and passed in as [`UsageRow`]s) records one row per model call
+//! with a timestamp, the model, and `parent_tool_call_id` for subagent
+//! calls — so usage lands in the right 15-minute bucket and on the right
+//! child session, and live sessions accrue usage before they end. Every
+//! model call also yields exactly one `assistant.message` event (empty
+//! content when the reply was only tool requests), written right after the
+//! store row; within one scope (root or a given subagent) the k-th row is
+//! the k-th assistant event, so per-message usage is attached by that
+//! order, guarded by matching model names, for display only — the stats
+//! pipeline reads the `UsageEvent`s. When the
+//! store has no rows for a session the parser falls back to
+//! `session.shutdown.modelMetrics`, the only usage the log itself persists.
+//! Both sources report cache-inclusive `inputTokens` (verified against the
+//! shutdown `tokenDetails` breakdown and GitHub staff statements), so the
+//! cached portions are subtracted back out to keep SessionView's disjoint
+//! input / cache-read / cache-write invariant. Sessions with neither source
+//! carry no usage events at all — partial accounting is never fabricated
+//! from per-message `outputTokens`.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -55,10 +98,12 @@ use crate::models::{Message, MessageRole, Provider, SessionMeta, TokenUsage};
 use crate::provider::util::{
     UsageKeys, parse_rfc3339_epoch_seconds, session_title, token_usage_from,
 };
-use crate::provider::{ParsedSession, UsageEvent, system_time_to_epoch_seconds};
+use crate::provider::{ParsedSession, SourceState, UsageEvent};
 use crate::tool_metadata::{
     ToolCallFacts, ToolResultFacts, build_tool_metadata, enrich_tool_metadata,
 };
+
+mod messages;
 
 /// Shutdown usage field paths (camelCase, cache-inclusive input).
 const SHUTDOWN_USAGE_KEYS: UsageKeys = UsageKeys {
@@ -68,36 +113,189 @@ const SHUTDOWN_USAGE_KEYS: UsageKeys = UsageKeys {
     cache_write: &["cacheWriteTokens"],
 };
 
+/// One `assistant_usage_events` row from `session-store.db`.
+#[derive(Debug, Clone)]
+pub(crate) struct UsageRow {
+    pub row_id: i64,
+    /// `task` call this model call ran under; `None` for the root agent.
+    pub parent_tool_call_id: Option<String>,
+    pub model: String,
+    /// `created_at` as stored (RFC 3339 in practice).
+    pub created_at: String,
+    /// Cache-inclusive input, like `session.shutdown`.
+    pub usage: TokenUsage,
+}
+
+/// Per-session accumulator. Index 0 of `ParseState::sessions` is the root;
+/// every other entry is a subagent keyed by its `task` call id.
 #[derive(Default)]
-struct ParseState {
+struct SessionAccum {
+    /// `task` call id for a subagent; `None` for the root.
+    call_id: Option<String>,
+    /// Index of the session that issued the `task` call.
+    parent: Option<usize>,
     messages: Vec<Message>,
     content_parts: Vec<String>,
-    parse_warning_count: u32,
     /// `toolCallId` → index into `messages` for the surfaced Tool message.
     tool_by_call_id: HashMap<String, usize>,
     first_user_text: Option<String>,
+    first_timestamp_secs: Option<i64>,
     last_timestamp_secs: Option<i64>,
-    /// Most recent active model (`session.model_change`, then
-    /// `session.shutdown.currentModel`). `session.start` carries none.
+    /// Most recent active model.
     model: Option<String>,
+    /// `agentDisplayName` / `agentDescription` from `subagent.started`.
+    title: Option<String>,
+    /// `agentName` from `subagent.started` (`explore`, `task`, …).
+    agent_name: Option<String>,
+    /// Prompt the parent passed to `task`; identifies the subagent's
+    /// opening `user.message`, which carries no `parentToolCallId`.
+    prompt: Option<String>,
+    /// Between `subagent.started` and `subagent.completed`.
+    open: bool,
+    usage_events: Vec<UsageEvent>,
+    /// One entry per `assistant.message` event in order — the surfaced
+    /// message's index, or `None` when the reply carried no visible text —
+    /// so store rows can be attached by position.
+    assistant_calls: Vec<Option<usize>>,
+}
+
+#[derive(Default)]
+struct ParseState {
+    sessions: Vec<SessionAccum>,
+    /// `task` `toolCallId` → subagent index.
+    by_call_id: HashMap<String, usize>,
+    /// Any tool `toolCallId` → session that issued it (parents nested subagents).
+    call_owner: HashMap<String, usize>,
+    /// `task` call id → `arguments.prompt`, consumed by `subagent.started`.
+    task_prompts: HashMap<String, String>,
+    /// `session.binary_asset` id → rendered image marker.
+    assets: HashMap<String, String>,
+    /// Background agent runtime hash → the `task` call id that spawned it.
+    agent_hash_to_call: HashMap<String, String>,
+    parse_warning_count: u32,
     session_id: Option<String>,
     copilot_version: Option<String>,
     cwd: Option<String>,
     git_branch: Option<String>,
-    created_at: Option<i64>,
-    usage_events: Vec<UsageEvent>,
 }
 
-/// Sidecar metadata read next to the event log. Both fields are optional;
-/// the transcript wins for everything it carries.
+impl ParseState {
+    fn new() -> Self {
+        Self {
+            sessions: vec![SessionAccum::default()],
+            ..Self::default()
+        }
+    }
+
+    /// Session an event belongs to, by its `parentToolCallId`. An id no
+    /// `subagent.started` announced is a broken log (torn or reordered):
+    /// the event stays with the root, and the session gets a warning badge.
+    fn route(&mut self, data: &Value) -> usize {
+        let Some(id) = data.get("parentToolCallId").and_then(Value::as_str) else {
+            return 0;
+        };
+        match self.by_call_id.get(id) {
+            Some(index) => *index,
+            None => {
+                log::warn!(
+                    "Copilot event names unknown subagent {id:?} in session {:?}; keeping it on the root",
+                    self.session_id
+                );
+                self.parse_warning_count = self.parse_warning_count.saturating_add(1);
+                0
+            }
+        }
+    }
+}
+
+/// Sidecar `workspace.yaml` metadata read next to the event log. Both fields
+/// are optional; the transcript wins for everything it carries.
 struct WorkspaceSidecar {
     title: Option<String>,
     cwd: Option<String>,
 }
 
-/// Parse one `events.jsonl` artifact into a [`ParsedSession`]. Returns `None`
+/// Freshness key for every source that can change this parsed session. The
+/// `mtime` slot carries a deterministic metadata fingerprint rather than a
+/// literal timestamp, so a same-length sidecar rewrite is still visible even
+/// when another shared source has a newer modification time.
+pub(crate) fn source_state(path: &Path, store_path: &Path) -> Option<SourceState> {
+    let sidecar_path = path.parent()?.join("workspace.yaml");
+    let wal_path = std::path::PathBuf::from(format!("{}-wal", store_path.to_string_lossy()));
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    let mut size = 0_u64;
+
+    fingerprint_file(&mut hash, &mut size, b"events", path, true, true)?;
+    fingerprint_file(
+        &mut hash,
+        &mut size,
+        b"workspace",
+        &sidecar_path,
+        false,
+        true,
+    )?;
+    fingerprint_file(&mut hash, &mut size, b"store", store_path, false, true)?;
+    fingerprint_file(&mut hash, &mut size, b"store-wal", &wal_path, false, false)?;
+
+    Some(SourceState {
+        size,
+        mtime: i64::try_from(hash & (i64::MAX as u64))
+            .unwrap_or(i64::MAX)
+            .max(1),
+        title: None,
+    })
+}
+
+fn fingerprint_file(
+    hash: &mut u64,
+    total_size: &mut u64,
+    tag: &[u8],
+    path: &Path,
+    required: bool,
+    include_empty: bool,
+) -> Option<()> {
+    hash_bytes(hash, tag);
+    match std::fs::metadata(path) {
+        Ok(metadata) if include_empty || metadata.len() > 0 => {
+            hash_bytes(hash, &[1]);
+            hash_bytes(hash, &metadata.len().to_le_bytes());
+            let modified = metadata
+                .modified()
+                .ok()?
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_nanos();
+            hash_bytes(hash, &modified.to_le_bytes());
+            *total_size = total_size.saturating_add(metadata.len());
+            Some(())
+        }
+        Ok(_) => {
+            hash_bytes(hash, &[0]);
+            Some(())
+        }
+        Err(error) if !required && error.kind() == std::io::ErrorKind::NotFound => {
+            hash_bytes(hash, &[0]);
+            Some(())
+        }
+        Err(_) => None,
+    }
+}
+
+fn hash_bytes(hash: &mut u64, bytes: &[u8]) {
+    for byte in bytes {
+        *hash ^= u64::from(*byte);
+        *hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+}
+
+/// Parse one `events.jsonl` artifact into the root [`ParsedSession`] followed
+/// by one child per subagent that produced messages. Returns an empty vec
 /// when the file cannot be opened/read or carries no surfaced messages.
-pub(crate) fn parse_session_file(path: &Path) -> Option<ParsedSession> {
+pub(crate) fn parse_session_file(
+    path: &Path,
+    usage_rows: &[UsageRow],
+    source_state: &SourceState,
+) -> Vec<ParsedSession> {
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) => {
@@ -105,52 +303,126 @@ pub(crate) fn parse_session_file(path: &Path) -> Option<ParsedSession> {
                 "failed to open Copilot session '{}': {error}",
                 path.display()
             );
-            return None;
+            return Vec::new();
         }
     };
-    let metadata = match std::fs::metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) => {
-            log::warn!(
-                "failed to read Copilot session metadata '{}': {error}",
-                path.display()
-            );
-            return None;
-        }
-    };
-    let file_size = metadata.len();
-    let source_mtime = metadata
-        .modified()
-        .ok()
-        .and_then(system_time_to_epoch_seconds)
-        .unwrap_or(0);
+    let file_size = source_state.size;
+    let source_mtime = source_state.mtime;
 
-    let mut state = ParseState::default();
+    let mut state = ParseState::new();
     scan_records(BufReader::new(file), path, &mut state);
-    if state.messages.is_empty() {
+    if state.sessions[0].messages.is_empty() {
         log::debug!(
             "skipping Copilot session '{}': no surfaced messages",
             path.display()
         );
-        return None;
+        return Vec::new();
     }
+    attach_store_usage(&mut state, usage_rows);
 
     // The sidecar fills gaps only; it can change without touching the
     // event log, so a regenerated summary simply appears on the next
     // reparse triggered by any activity.
     let sidecar = read_workspace_sidecar(path);
+    let root_id = state
+        .session_id
+        .clone()
+        .unwrap_or_else(|| fallback_session_id(path));
+    let project_path = state
+        .cwd
+        .clone()
+        .or_else(|| sidecar.cwd.clone())
+        .unwrap_or_default();
 
-    let content_text = state.content_parts.join("\n");
-    let meta = assemble_session_meta(path, &state, &sidecar, file_size, source_mtime);
-    Some(ParsedSession {
-        meta,
-        messages: state.messages,
-        content_text,
-        parse_warning_count: state.parse_warning_count,
-        child_session_ids: Vec::new(),
-        usage_events: state.usage_events,
-        source_mtime,
-    })
+    // Parents are always created before their children, so each id can
+    // chain onto an already-computed parent id.
+    let mut ids: Vec<String> = Vec::with_capacity(state.sessions.len());
+    for accum in &state.sessions {
+        let id = match (&accum.call_id, accum.parent) {
+            (Some(call_id), Some(parent)) => format!("{}:{call_id}", ids[parent]),
+            _ => root_id.clone(),
+        };
+        ids.push(id);
+    }
+    let mut child_ids_by_parent: HashMap<usize, Vec<String>> = HashMap::new();
+    for (index, accum) in state.sessions.iter().enumerate() {
+        if let Some(parent) = accum.parent
+            && !accum.messages.is_empty()
+        {
+            child_ids_by_parent
+                .entry(parent)
+                .or_default()
+                .push(ids[index].clone());
+        }
+    }
+
+    let mut out = Vec::with_capacity(state.sessions.len());
+    for (index, accum) in state.sessions.into_iter().enumerate() {
+        if accum.messages.is_empty() {
+            continue;
+        }
+        let is_child = accum.parent.is_some();
+        let title = if is_child {
+            accum
+                .title
+                .clone()
+                .filter(|title| !title.trim().is_empty())
+                .unwrap_or_else(|| session_title(accum.first_user_text.as_deref()))
+        } else {
+            sidecar
+                .title
+                .clone()
+                .filter(|title| !title.trim().is_empty())
+                .unwrap_or_else(|| session_title(accum.first_user_text.as_deref()))
+        };
+        let created_at = accum.first_timestamp_secs.unwrap_or(0);
+        let updated_at = accum
+            .last_timestamp_secs
+            .or(accum.first_timestamp_secs)
+            .unwrap_or(source_mtime);
+        let token_totals = crate::provider::token_totals_from_usage_events(&accum.usage_events);
+        let meta = SessionMeta {
+            id: ids[index].clone(),
+            provider: Provider::Copilot,
+            title,
+            project_path: project_path.clone(),
+            project_name: if project_path.is_empty() {
+                String::new()
+            } else {
+                path_basename(&project_path).to_string()
+            },
+            created_at,
+            updated_at,
+            message_count: accum.messages.len() as u32,
+            file_size_bytes: file_size,
+            source_path: path.to_string_lossy().to_string(),
+            is_sidechain: is_child,
+            variant_name: accum.agent_name.clone(),
+            model: accum.model.clone(),
+            cc_version: state.copilot_version.clone(),
+            git_branch: state.git_branch.clone(),
+            parent_id: accum.parent.map(|parent| ids[parent].clone()),
+            input_tokens: token_totals.input_tokens,
+            output_tokens: token_totals.output_tokens,
+            cache_read_tokens: token_totals.cache_read_tokens,
+            cache_write_tokens: token_totals.cache_write_tokens,
+        };
+        out.push(ParsedSession {
+            meta,
+            messages: accum.messages,
+            content_text: accum.content_parts.join("\n"),
+            // Line-level damage is a property of the file; report it once.
+            parse_warning_count: if is_child {
+                0
+            } else {
+                state.parse_warning_count
+            },
+            child_session_ids: child_ids_by_parent.remove(&index).unwrap_or_default(),
+            usage_events: accum.usage_events,
+            source_mtime,
+        });
+    }
+    out
 }
 
 fn scan_records(mut reader: BufReader<File>, path: &Path, state: &mut ParseState) {
@@ -171,24 +443,29 @@ fn scan_records(mut reader: BufReader<File>, path: &Path, state: &mut ParseState
         if n == 0 {
             break;
         }
-        if buffer.last() != Some(&b'\n') {
+        let terminated = buffer.last() == Some(&b'\n');
+        if terminated {
+            line_no += 1;
+        }
+        let current_line_no = if terminated {
+            line_no
+        } else {
+            line_no.saturating_add(1)
+        };
+        let raw = if terminated {
+            &buffer[..buffer.len() - 1]
+        } else {
             // Final chunk without a trailing newline. If it is a complete
             // record the writer just hasn't flushed the newline yet — parse
             // it; if it is mid-write garbage it fails to deserialize and is
             // dropped below like any torn tail.
-        } else {
-            line_no += 1;
-        }
-        let raw = if buffer.last() == Some(&b'\n') {
-            &buffer[..buffer.len() - 1]
-        } else {
             &buffer[..]
         };
         let line = match std::str::from_utf8(raw) {
             Ok(line) => line,
             Err(error) => {
                 log::warn!(
-                    "skipping non-UTF-8 Copilot record at line {line_no} in '{}': {error}",
+                    "skipping non-UTF-8 Copilot record at line {current_line_no} in '{}': {error}",
                     path.display()
                 );
                 state.parse_warning_count = state.parse_warning_count.saturating_add(1);
@@ -203,11 +480,11 @@ fn scan_records(mut reader: BufReader<File>, path: &Path, state: &mut ParseState
             Err(error) => {
                 // An unterminated final fragment is a crash artifact, not a
                 // data problem; anything else is a real malformed line.
-                if buffer.last() != Some(&b'\n') {
+                if !terminated {
                     log::debug!("dropping torn final record in '{}'", path.display());
                 } else {
                     log::warn!(
-                        "skipping malformed Copilot record at line {line_no} in '{}': {error}",
+                        "skipping malformed Copilot record at line {current_line_no} in '{}': {error}",
                         path.display()
                     );
                     state.parse_warning_count = state.parse_warning_count.saturating_add(1);
@@ -215,223 +492,19 @@ fn scan_records(mut reader: BufReader<File>, path: &Path, state: &mut ParseState
                 continue;
             }
         };
-        handle_record(&record, state);
+        messages::handle_record(&record, path, current_line_no, state);
     }
-}
-
-fn handle_record(record: &Value, state: &mut ParseState) {
-    let timestamp_secs = record
-        .get("timestamp")
-        .and_then(Value::as_str)
-        .and_then(parse_rfc3339_epoch_seconds);
-    if let Some(secs) = timestamp_secs
-        && state.last_timestamp_secs.is_none_or(|seen| secs >= seen)
-    {
-        state.last_timestamp_secs = Some(secs);
-    }
-    if state.created_at.is_none() {
-        state.created_at = timestamp_secs;
-    }
-    let timestamp = record
-        .get("timestamp")
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    let Some(event_type) = record.get("type").and_then(Value::as_str) else {
-        log::warn!("skipping Copilot record without a type tag");
-        state.parse_warning_count = state.parse_warning_count.saturating_add(1);
-        return;
-    };
-    let data = record.get("data").unwrap_or(&Value::Null);
-    match event_type {
-        "session.start" => handle_session_start(data, state),
-        "user.message" => handle_user_message(data, timestamp, state),
-        "assistant.message" => handle_assistant_message(data, timestamp, state),
-        "tool.execution_start" => handle_tool_start(data, timestamp, state),
-        "tool.execution_complete" => handle_tool_complete(data, timestamp, state),
-        "session.model_change" => {
-            if let Some(model) = data
-                .get("model")
-                .or_else(|| data.get("newModel"))
-                .and_then(Value::as_str)
-                .filter(|model| !model.is_empty())
-            {
-                state.model = Some(model.to_string());
-            }
-        }
-        "session.shutdown" => handle_shutdown(data, timestamp, state),
-        _ => {
-            // The event stream intentionally carries internal/ephemeral
-            // types (hooks, plan/mode changes, compaction brackets, usage
-            // info, subagent bookkeeping, …) that no external consumer can
-            // rely on; none alter the meaning of the surfaced transcript.
-            log::debug!("skipping unknown Copilot event '{event_type}'");
-        }
-    }
-}
-
-fn handle_session_start(data: &Value, state: &mut ParseState) {
-    if state.session_id.is_none() {
-        state.session_id = data
-            .get("sessionId")
-            .and_then(Value::as_str)
-            .map(str::to_string);
-    }
-    if state.copilot_version.is_none() {
-        state.copilot_version = data
-            .get("copilotVersion")
-            .and_then(Value::as_str)
-            .map(str::to_string);
-    }
-    let context = data.get("context");
-    if state.cwd.is_none() {
-        state.cwd = context
-            .and_then(|c| c.get("cwd"))
-            .and_then(Value::as_str)
-            .filter(|cwd| !cwd.is_empty())
-            .map(str::to_string);
-    }
-    if state.git_branch.is_none() {
-        state.git_branch = context
-            .and_then(|c| c.get("branch"))
-            .and_then(Value::as_str)
-            .filter(|branch| !branch.is_empty())
-            .map(str::to_string);
-    }
-}
-
-fn handle_user_message(data: &Value, timestamp: Option<String>, state: &mut ParseState) {
-    let mut text = data
-        .get("content")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    if text.trim().is_empty() {
-        let attachment_count = data
-            .get("attachments")
-            .and_then(Value::as_array)
-            .map(Vec::len)
-            .unwrap_or(0);
-        if attachment_count == 0 {
-            return;
-        }
-        text = vec!["[Attachment]"; attachment_count].join("\n");
-    }
-    if state.first_user_text.is_none() {
-        state.first_user_text = Some(text.clone());
-    }
-    state.content_parts.push(text.clone());
-    state.messages.push(Message {
-        timestamp,
-        ..Message::user(text)
-    });
-}
-
-fn handle_assistant_message(data: &Value, timestamp: Option<String>, state: &mut ParseState) {
-    let Some(content) = data.get("content").and_then(Value::as_str) else {
-        return;
-    };
-    if content.trim().is_empty() {
-        return;
-    }
-    state.content_parts.push(content.to_string());
-    // Assistant messages carry no model on the wire; leave the field unset
-    // rather than attributing the currently-active model guesswork.
-    state.messages.push(Message {
-        timestamp,
-        ..Message::assistant(content.to_string())
-    });
-}
-
-fn handle_tool_start(data: &Value, timestamp: Option<String>, state: &mut ParseState) {
-    let Some(call_id) = data.get("toolCallId").and_then(Value::as_str) else {
-        return;
-    };
-    if state.tool_by_call_id.contains_key(call_id) {
-        // Out-of-order duplicate start for a call we already surfaced.
-        return;
-    }
-    let raw_name = data
-        .get("toolName")
-        .and_then(Value::as_str)
-        .unwrap_or("tool");
-    let arguments_value = data.get("arguments").unwrap_or(&Value::Null);
-    let arguments_raw = normalize_arguments(arguments_value);
-    let metadata = build_tool_metadata(ToolCallFacts {
-        provider: Provider::Copilot,
-        raw_name,
-        input: if arguments_value.is_object() {
-            Some(arguments_value)
-        } else {
-            None
-        },
-        call_id: Some(call_id),
-        assistant_id: None,
-    });
-    let canonical_name = metadata.canonical_name.clone();
-    let index = state.messages.len();
-    state.messages.push(Message {
-        timestamp,
-        tool_name: Some(canonical_name),
-        tool_input: Some(arguments_raw),
-        tool_metadata: Some(metadata),
-        ..Message::new(MessageRole::Tool, String::new())
-    });
-    state.tool_by_call_id.insert(call_id.to_string(), index);
-}
-
-fn handle_tool_complete(data: &Value, timestamp: Option<String>, state: &mut ParseState) {
-    let Some(call_id) = data.get("toolCallId").and_then(Value::as_str) else {
-        return;
-    };
-    let is_error = data.get("success").and_then(Value::as_bool) == Some(false);
-    let result_text = extract_result_text(data.get("result").unwrap_or(&Value::Null));
-    let result_facts = ToolResultFacts {
-        is_error: if data.get("success").is_some() {
-            Some(is_error)
-        } else {
-            None
-        },
-        ..ToolResultFacts::default()
-    };
-    if let Some(&index) = state.tool_by_call_id.get(call_id) {
-        if !result_text.is_empty() {
-            state.messages[index].content = result_text;
-        }
-        if let Some(metadata) = state.messages[index].tool_metadata.as_mut() {
-            metadata
-                .ids
-                .insert("tool_use_id".to_string(), call_id.to_string());
-            enrich_tool_metadata(metadata, result_facts);
-        }
-        return;
-    }
-    // Orphan completion: the paired start was never logged (interrupted
-    // turn). Standalone Tool message so the result is not lost.
-    let mut metadata = build_tool_metadata(ToolCallFacts {
-        provider: Provider::Copilot,
-        raw_name: "tool",
-        input: None,
-        call_id: Some(call_id),
-        assistant_id: None,
-    });
-    enrich_tool_metadata(&mut metadata, result_facts);
-    let canonical_name = metadata.canonical_name.clone();
-    state.messages.push(Message {
-        timestamp,
-        tool_name: Some(canonical_name),
-        tool_metadata: Some(metadata),
-        ..Message::new(MessageRole::Tool, result_text)
-    });
 }
 
 fn handle_shutdown(data: &Value, timestamp: Option<String>, state: &mut ParseState) {
-    if state.model.is_none()
+    let root = &mut state.sessions[0];
+    if root.model.is_none()
         && let Some(current) = data
             .get("currentModel")
             .and_then(Value::as_str)
             .filter(|model| !model.is_empty())
     {
-        state.model = Some(current.to_string());
+        root.model = Some(current.to_string());
     }
     let Some(metrics) = data.get("modelMetrics").and_then(Value::as_object) else {
         return;
@@ -456,22 +529,10 @@ fn handle_shutdown(data: &Value, timestamp: Option<String>, state: &mut ParseSta
             .and_then(Value::as_u64)
             .filter(|count| *count > 0)
             .unwrap_or(1);
-        // `inputTokens` includes both cached portions (confirmed by GitHub
-        // staff for the whole Copilot surface); subtract them so summing the
-        // four components never double-counts. Saturating: a malformed row
-        // must not produce a negative wrap.
-        let cache_total = usage.cache_read_input_tokens + usage.cache_creation_input_tokens;
-        let pure_input = usage.input_tokens.saturating_sub(cache_total);
-        let normalized = TokenUsage {
-            input_tokens: pure_input,
-            output_tokens: usage.output_tokens,
-            cache_read_input_tokens: usage.cache_read_input_tokens,
-            cache_creation_input_tokens: usage.cache_creation_input_tokens,
-        };
-        if normalized.total_tokens() == 0 {
+        let Some(normalized) = disjoint_usage(&usage) else {
             continue;
-        }
-        state.usage_events.push(UsageEvent {
+        };
+        root.usage_events.push(UsageEvent {
             timestamp: timestamp.clone(),
             model: model.clone(),
             turn_count,
@@ -480,9 +541,139 @@ fn handle_shutdown(data: &Value, timestamp: Option<String>, state: &mut ParseSta
             cache_read_input_tokens: u64::from(normalized.cache_read_input_tokens),
             cache_creation_input_tokens: u64::from(normalized.cache_creation_input_tokens),
             usage_hash: None,
+            cost_is_estimate: false,
             cost_usd: None,
         });
     }
+}
+
+/// Subtract the cached portions from a cache-inclusive `input` so summing
+/// the four components never double-counts. Saturating: a malformed row
+/// must not produce a negative wrap. `None` when nothing remains.
+fn disjoint_usage(usage: &TokenUsage) -> Option<TokenUsage> {
+    let cache_total = usage
+        .cache_read_input_tokens
+        .saturating_add(usage.cache_creation_input_tokens);
+    let normalized = TokenUsage {
+        input_tokens: usage.input_tokens.saturating_sub(cache_total),
+        output_tokens: usage.output_tokens,
+        cache_read_input_tokens: usage.cache_read_input_tokens,
+        cache_creation_input_tokens: usage.cache_creation_input_tokens,
+    };
+    (normalized.total_tokens() > 0).then_some(normalized)
+}
+
+/// Replace the shutdown aggregate with per-call store rows when the store
+/// has any for this session, routing subagent calls to their child.
+fn attach_store_usage(state: &mut ParseState, rows: &[UsageRow]) {
+    if rows.is_empty() {
+        return;
+    }
+    for accum in &mut state.sessions {
+        accum.usage_events.clear();
+    }
+    // Position of the next unmatched assistant event per scope.
+    let mut next_call: Vec<usize> = vec![0; state.sessions.len()];
+    for row in rows {
+        let Some(timestamp) = rfc3339_timestamp(&row.created_at) else {
+            log::warn!(
+                "skipping Copilot usage row {} with unparseable created_at {:?}",
+                row.row_id,
+                row.created_at
+            );
+            state.parse_warning_count = state.parse_warning_count.saturating_add(1);
+            continue;
+        };
+        let Some(normalized) = disjoint_usage(&row.usage) else {
+            continue;
+        };
+        let index = match row.parent_tool_call_id.as_deref() {
+            None => 0,
+            Some(call_id) => {
+                let Some(index) = state.by_call_id.get(call_id).copied() else {
+                    log::warn!(
+                        "skipping Copilot usage row {} for unknown child scope",
+                        row.row_id
+                    );
+                    state.parse_warning_count = state.parse_warning_count.saturating_add(1);
+                    continue;
+                };
+                index
+            }
+        };
+        attach_row_to_message(
+            &mut state.sessions[index],
+            &mut next_call[index],
+            row,
+            &normalized,
+        );
+        state.sessions[index].usage_events.push(UsageEvent {
+            timestamp,
+            model: row.model.clone(),
+            turn_count: 1,
+            input_tokens: u64::from(normalized.input_tokens),
+            output_tokens: u64::from(normalized.output_tokens),
+            cache_read_input_tokens: u64::from(normalized.cache_read_input_tokens),
+            cache_creation_input_tokens: u64::from(normalized.cache_creation_input_tokens),
+            usage_hash: Some(format!("copilot-store:{}", row.row_id)),
+            cost_is_estimate: false,
+            cost_usd: None,
+        });
+    }
+}
+
+/// Attach a store row's usage to the assistant message at the same
+/// position in this scope. A model mismatch means the order assumption
+/// broke for this session; stop attaching rather than mislabel.
+fn attach_row_to_message(
+    accum: &mut SessionAccum,
+    next_call: &mut usize,
+    row: &UsageRow,
+    normalized: &TokenUsage,
+) {
+    let Some(slot) = accum.assistant_calls.get(*next_call) else {
+        return;
+    };
+    *next_call += 1;
+    let Some(message_index) = *slot else {
+        return;
+    };
+    let message = &mut accum.messages[message_index];
+    if message
+        .model
+        .as_deref()
+        .is_some_and(|model| model != row.model)
+    {
+        log::warn!(
+            "Copilot usage row {} model {:?} does not match its assistant message ({:?}); leaving per-message usage unset",
+            row.row_id,
+            row.model,
+            message.model
+        );
+        *next_call = usize::MAX;
+        return;
+    }
+    message.token_usage = Some(normalized.clone());
+}
+
+/// `created_at` is RFC 3339 as written by the CLI; the column default
+/// (`datetime('now')`, `YYYY-MM-DD HH:MM:SS` UTC) is accepted too.
+fn rfc3339_timestamp(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if parse_rfc3339_epoch_seconds(raw).is_some() {
+        return Some(raw.to_string());
+    }
+    let candidate = format!("{}Z", raw.replacen(' ', "T", 1));
+    parse_rfc3339_epoch_seconds(&candidate).map(|_| candidate)
+}
+
+/// Runtime hash a background `task` reports: `… agent_id: <hash>…`.
+fn background_agent_hash(result_text: &str) -> Option<&str> {
+    let rest = &result_text[result_text.find("agent_id:")? + "agent_id:".len()..];
+    rest.trim_start()
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        .next()
+        .filter(|hash| !hash.is_empty())
 }
 
 /// Accept both argument shapes seen in the wild: a JSON object (newer
@@ -511,150 +702,40 @@ fn extract_result_text(value: &Value) -> String {
     }
 }
 
-/// Read the optional sidecar metadata next to an event log.
-///
-/// - `workspace.yaml` (CLI / VS Code coding-agent session dirs): minimal
-///   flat `key: value` lines — parsed by hand because the interesting keys
-///   are a fixed handful and no YAML dependency exists.
-/// - `<hash>/workspace.json` (VS Code transcripts): `{"folder": "file:///..."}`,
-///   resolved from the transcript's grandparent directory.
-///
-/// Returns `(title, cwd)`; both `None` when neither sidecar exists.
+/// Read the optional `workspace.yaml` sidecar next to an event log: minimal
+/// flat `key: value` lines, parsed by hand because the interesting keys are
+/// a fixed handful and no YAML dependency exists.
 fn read_workspace_sidecar(events_path: &Path) -> WorkspaceSidecar {
-    let dir = match events_path.parent() {
-        Some(dir) => dir,
-        None => {
-            return WorkspaceSidecar {
-                title: None,
-                cwd: None,
-            };
-        }
-    };
-    let yaml_path = dir.join("workspace.yaml");
-    if let Ok(content) = std::fs::read_to_string(&yaml_path) {
-        let mut title = None;
-        let mut cwd = None;
-        for line in content.lines() {
-            let Some((key, value)) = line.split_once(':') else {
-                continue;
-            };
-            let value = value.trim().trim_matches('"');
-            if value.is_empty() {
-                continue;
-            }
-            match key.trim() {
-                "name" | "summary" => title = title.or_else(|| Some(value.to_string())),
-                "cwd" => cwd = cwd.or_else(|| Some(value.to_string())),
-                _ => {}
-            }
-        }
-        return WorkspaceSidecar { title, cwd };
-    }
-    // The transcript sits at `<hash>/GitHub.copilot-chat/transcripts/x.jsonl`
-    // while its folder URI lives in `<hash>/workspace.json` — two levels up.
-    let workspace_json_path = dir.ancestors().nth(2).unwrap_or(dir).join("workspace.json");
-    if let Ok(content) = std::fs::read_to_string(&workspace_json_path)
-        && let Ok(value) = serde_json::from_str::<Value>(&content)
-        && let Some(folder) = value.get("folder").and_then(Value::as_str)
-        && let Some(cwd) = folder_uri_to_path(folder)
-    {
-        return WorkspaceSidecar {
-            title: None,
-            cwd: Some(cwd),
-        };
-    }
-    WorkspaceSidecar {
+    let mut sidecar = WorkspaceSidecar {
         title: None,
         cwd: None,
-    }
-}
-
-/// Convert a VS Code workspace URI (`file:///c%3A/code/repo`) into a plain
-/// filesystem-ish path. Percent-decoding is hand-rolled; the Windows
-/// drive-letter form loses its fake POSIX root (`/c:/…` → `c:/…`) so paths
-/// look like the OS they came from.
-fn folder_uri_to_path(uri: &str) -> Option<String> {
-    let rest = uri.strip_prefix("file://")?;
-    let mut decoded = String::with_capacity(rest.len());
-    let bytes = rest.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%' && index + 2 < bytes.len() {
-            let hex = &rest[index + 1..index + 3];
-            if let Ok(byte) = u8::from_str_radix(hex, 16) {
-                decoded.push(byte as char);
-                index += 3;
-                continue;
-            }
-        }
-        let ch = rest[index..].chars().next()?;
-        decoded.push(ch);
-        index += ch.len_utf8();
-    }
-    let trimmed = decoded.replace('\\', "/");
-    let trimmed = trimmed.trim_start_matches('/');
-    if trimmed.len() > 2 && trimmed.as_bytes()[1] == b':' {
-        Some(trimmed.to_string())
-    } else {
-        Some(format!("/{trimmed}"))
-    }
-}
-
-fn assemble_session_meta(
-    path: &Path,
-    state: &ParseState,
-    sidecar: &WorkspaceSidecar,
-    file_size: u64,
-    source_mtime: i64,
-) -> SessionMeta {
-    let id = state
-        .session_id
-        .clone()
-        .unwrap_or_else(|| fallback_session_id(path));
-    let project_path = state
-        .cwd
-        .clone()
-        .or_else(|| sidecar.cwd.clone())
-        .unwrap_or_default();
-    let project_name = if project_path.is_empty() {
-        String::new()
-    } else {
-        // Sessions recorded on another OS (e.g. Windows paths viewed from
-        // WSL) carry foreign separators; split on both so grouping works.
-        path_basename(&project_path).to_string()
     };
-    let title = sidecar
-        .title
-        .clone()
-        .filter(|title| !title.trim().is_empty())
-        .unwrap_or_else(|| session_title(state.first_user_text.as_deref()));
-    let updated_at = state
-        .last_timestamp_secs
-        .or(state.created_at)
-        .unwrap_or(source_mtime);
-    let token_totals = crate::provider::token_totals_from_usage_events(&state.usage_events);
-    SessionMeta {
-        id,
-        provider: Provider::Copilot,
-        title,
-        project_path,
-        project_name,
-        created_at: state.created_at.unwrap_or(0),
-        updated_at,
-        message_count: state.messages.len() as u32,
-        file_size_bytes: file_size,
-        source_path: path.to_string_lossy().to_string(),
-        is_sidechain: false,
-        variant_name: None,
-        model: state.model.clone(),
-        cc_version: state.copilot_version.clone(),
-        git_branch: state.git_branch.clone(),
-        parent_id: None,
-        input_tokens: token_totals.input_tokens,
-        output_tokens: token_totals.output_tokens,
-        cache_read_tokens: token_totals.cache_read_tokens,
-        cache_write_tokens: token_totals.cache_write_tokens,
+    let Some(dir) = events_path.parent() else {
+        return sidecar;
+    };
+    let Ok(content) = std::fs::read_to_string(dir.join("workspace.yaml")) else {
+        return sidecar;
+    };
+    for line in content.lines() {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let value = value.trim();
+        // YAML single-quoted scalars escape a quote by doubling it.
+        let value = match value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')) {
+            Some(inner) => inner.replace("''", "'"),
+            None => value.trim_matches('"').to_string(),
+        };
+        if value.is_empty() {
+            continue;
+        }
+        match key.trim() {
+            "name" | "summary" => sidecar.title = sidecar.title.or(Some(value)),
+            "cwd" => sidecar.cwd = sidecar.cwd.or(Some(value)),
+            _ => {}
+        }
     }
+    sidecar
 }
 
 /// Basename that understands both separator conventions, so a Windows
@@ -667,7 +748,7 @@ fn path_basename(path: &str) -> &str {
 }
 
 /// Fall back to the containing directory name when `session.start` was torn
-/// off (VS Code writes it as the first line, so this is vanishingly rare).
+/// off (the CLI writes it as the first line, so this is vanishingly rare).
 fn fallback_session_id(path: &Path) -> String {
     path.parent()
         .and_then(|parent| parent.file_name())
@@ -676,230 +757,4 @@ fn fallback_session_id(path: &Path) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::models::MessageRole;
-    use tempfile::TempDir;
-
-    /// Real-shape CLI event log: context on `session.start`, object-shaped
-    /// tool arguments, a completion carrying a result, and shutdown metrics
-    /// whose `inputTokens` are cache-inclusive.
-    const CLI_LOG: &str = r#"{"type":"session.start","data":{"sessionId":"09371a50-9a50-484a-8743-5c696de1623a","version":1,"producer":"copilot-agent","copilotVersion":"0.0.420","startTime":"2026-03-02T15:10:04.678Z","context":{"cwd":"/home/dev/my-project","gitRoot":"/home/dev/my-project","branch":"master"}},"id":"e0","timestamp":"2026-03-02T15:10:04.817Z","parentId":null}
-{"type":"user.message","data":{"content":"review my staged changes","transformedContent":"<current_datetime>noise</current_datetime>\n\nreview my staged changes","attachments":[],"interactionId":"i1"},"id":"e1","timestamp":"2026-03-02T15:10:45.058Z","parentId":"e0"}
-{"type":"assistant.message","data":{"messageId":"m1","content":"I'll review the staged diff.","toolRequests":[{"toolCallId":"tooluse_1","name":"powershell","arguments":{"command":"git --no-pager diff --cached"},"type":"function"}],"reasoningText":"internal reasoning"},"id":"e2","timestamp":"2026-03-02T15:10:50.235Z","parentId":"e1"}
-{"type":"tool.execution_start","data":{"toolCallId":"tooluse_1","toolName":"bash","arguments":{"command":"git --no-pager diff --cached"}},"id":"e3","timestamp":"2026-03-02T15:10:50.500Z","parentId":"e2"}
-{"type":"tool.execution_complete","data":{"toolCallId":"tooluse_1","success":true,"result":"diff --git a/src/main.rs"},"id":"e4","timestamp":"2026-03-02T15:10:51.000Z","parentId":"e3"}
-{"type":"assistant.message","data":{"messageId":"m2","content":"The staged diff looks good.","toolRequests":[],"reasoningText":""},"id":"e5","timestamp":"2026-03-02T15:10:55.000Z","parentId":"e4"}
-{"type":"session.shutdown","data":{"shutdownType":"routine","totalPremiumRequests":2,"modelMetrics":{"claude-sonnet-4.5":{"requests":{"count":10,"cost":2},"usage":{"inputTokens":71282,"outputTokens":900,"cacheReadTokens":35495,"cacheWriteTokens":35783}}},"currentModel":"claude-sonnet-4.5"},"id":"e6","timestamp":"2026-03-06T17:08:10.988Z","parentId":"e5"}
-"#;
-
-    fn write_session(dir: &TempDir, name: &str, body: &str) -> std::path::PathBuf {
-        let session_dir = dir.path().join("session-state").join(name);
-        std::fs::create_dir_all(&session_dir).unwrap();
-        let path = session_dir.join("events.jsonl");
-        std::fs::write(&path, body).unwrap();
-        path
-    }
-
-    fn parse_str(body: &str) -> ParsedSession {
-        let dir = TempDir::new().unwrap();
-        let path = write_session(&dir, "sid", body);
-        parse_session_file(&path).expect("fixture must parse")
-    }
-
-    #[test]
-    fn cli_session_parses_surface_and_context() {
-        let parsed = parse_str(CLI_LOG);
-        assert_eq!(parsed.meta.id, "09371a50-9a50-484a-8743-5c696de1623a");
-        assert_eq!(parsed.meta.provider, Provider::Copilot);
-        assert_eq!(parsed.meta.project_path, "/home/dev/my-project");
-        assert_eq!(parsed.meta.project_name, "my-project");
-        assert_eq!(parsed.meta.git_branch.as_deref(), Some("master"));
-        assert_eq!(parsed.meta.cc_version.as_deref(), Some("0.0.420"));
-        assert_eq!(parsed.meta.created_at, 1_772_464_204); // 2026-03-02T15:10:04Z
-        // transformedContent must never leak into the transcript.
-        assert_eq!(parsed.messages[0].role, MessageRole::User);
-        assert_eq!(parsed.messages[0].content, "review my staged changes");
-        // Assistant reasoningText stays out; visible text stays in.
-        assert!(
-            parsed
-                .messages
-                .iter()
-                .all(|m| !m.content.contains("internal reasoning"))
-        );
-        assert!(parsed.content_text.contains("I'll review the staged diff."));
-    }
-
-    #[test]
-    fn tool_call_pairs_with_result() {
-        let parsed = parse_str(CLI_LOG);
-        let tools: Vec<&Message> = parsed
-            .messages
-            .iter()
-            .filter(|m| m.role == MessageRole::Tool)
-            .collect();
-        assert_eq!(tools.len(), 1, "announced requests don't duplicate");
-        let tool = tools[0];
-        assert_eq!(tool.content, "diff --git a/src/main.rs");
-        let metadata = tool.tool_metadata.as_ref().unwrap();
-        assert_eq!(
-            metadata.ids.get("tool_use_id").map(String::as_str),
-            Some("tooluse_1")
-        );
-        assert!(metadata.status.as_deref() != Some("error"));
-    }
-
-    #[test]
-    fn shutdown_metrics_normalize_cache_inclusive_input() {
-        let parsed = parse_str(CLI_LOG);
-        // 71282 input - 35495 read - 35783 write = 4 pure input.
-        assert_eq!(parsed.usage_events.len(), 1);
-        let event = &parsed.usage_events[0];
-        assert_eq!(event.model, "claude-sonnet-4.5");
-        assert_eq!(event.input_tokens, 4);
-        assert_eq!(event.output_tokens, 900);
-        assert_eq!(event.cache_read_input_tokens, 35_495);
-        assert_eq!(event.cache_creation_input_tokens, 35_783);
-        assert_eq!(event.turn_count, 10);
-        assert_eq!(parsed.meta.input_tokens, 4);
-        assert_eq!(parsed.meta.cache_read_tokens, 35_495);
-        assert_eq!(parsed.meta.cache_write_tokens, 35_783);
-    }
-
-    #[test]
-    fn vscode_transcript_falls_back_to_workspace_json() {
-        let dir = TempDir::new().unwrap();
-        let storage = dir
-            .path()
-            .join("workspaceStorage")
-            .join("hash1")
-            .join("GitHub.copilot-chat")
-            .join("transcripts");
-        std::fs::create_dir_all(&storage).unwrap();
-        // Real layout: workspace.json sits in the per-workspace <hash> dir,
-        // two levels above the transcripts dir.
-        std::fs::write(
-            storage.ancestors().nth(2).unwrap().join("workspace.json"),
-            r#"{"folder":"file:///c%3A/SAPDevelop/repos/support-agent7"}"#,
-        )
-        .unwrap();
-        let log = concat!(
-            r#"{"type":"session.start","data":{"sessionId":"0a0c94fd-5d39-4be7-8765-40a6523e8541","version":1,"producer":"copilot-agent","copilotVersion":"0.47.0","vscodeVersion":"1.119.0","startTime":"2026-05-08T17:53:26.742Z"},"id":"v0","timestamp":"2026-05-08T17:53:26.742Z","parentId":null}"#,
-            "\n",
-            r#"{"type":"user.message","data":{"content":"change these 3 textarea to dropdowns","attachments":[]},"id":"v1","timestamp":"2026-05-09T00:19:34.067Z","parentId":"v0"}"#,
-            "\n",
-            r#"{"type":"assistant.message","data":{"messageId":"vm1","content":"Done.","toolRequests":[{"toolCallId":"call_x","name":"file_search","arguments":"{\"query\":\"app/**/*.py\"}","type":"function"}]},"id":"v2","timestamp":"2026-05-09T00:20:00.000Z","parentId":"v1"}"#,
-            "\n",
-        );
-        let path = storage.join("t1.jsonl");
-        std::fs::write(&path, log).unwrap();
-
-        let parsed = parse_session_file(&path).expect("fixture must parse");
-        assert_eq!(parsed.meta.id, "0a0c94fd-5d39-4be7-8765-40a6523e8541");
-        assert_eq!(
-            parsed.meta.project_path,
-            "c:/SAPDevelop/repos/support-agent7"
-        );
-        assert_eq!(parsed.meta.project_name, "support-agent7");
-        // No shutdown event → no usage at all (never fabricated).
-        assert!(parsed.usage_events.is_empty());
-        assert_eq!(parsed.meta.input_tokens, 0);
-        // Announced-but-unexecuted toolRequests produce no Tool message.
-        assert!(parsed.messages.iter().all(|m| m.role != MessageRole::Tool));
-        // No sidecar title → first user message.
-        assert_eq!(parsed.meta.title, "change these 3 textarea to dropdowns");
-    }
-
-    #[test]
-    fn attachment_only_user_message_renders_markers() {
-        let parsed = parse_str(
-            r#"{"type":"user.message","data":{"content":"","attachments":[{"name":"a.png"}]},"id":"u1","timestamp":"2026-03-02T15:10:45.058Z"}"#,
-        );
-        assert_eq!(parsed.messages.len(), 1);
-        assert_eq!(parsed.messages[0].content, "[Attachment]");
-    }
-
-    #[test]
-    fn orphan_completion_becomes_standalone_tool_message() {
-        let parsed = parse_str(
-            r#"{"type":"user.message","data":{"content":"go"},"id":"o0","timestamp":"2026-03-02T15:10:45.058Z"}
-{"type":"tool.execution_complete","data":{"toolCallId":"call_y","success":false,"result":"boom"},"id":"o1","timestamp":"2026-03-02T15:11:00.000Z"}"#,
-        );
-        let tools: Vec<&Message> = parsed
-            .messages
-            .iter()
-            .filter(|m| m.role == MessageRole::Tool)
-            .collect();
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].content, "boom");
-        assert_eq!(
-            tools[0].tool_metadata.as_ref().unwrap().status.as_deref(),
-            Some("error")
-        );
-    }
-
-    #[test]
-    fn malformed_line_warns_but_unknown_events_do_not() {
-        let parsed = parse_str(concat!(
-            r#"{"type":"user.message","data":{"content":"hi"},"id":"w0","timestamp":"2026-03-02T15:10:45.058Z"}"#,
-            "\nnot json\n",
-            r#"{"type":"hook.start","data":{}}"#,
-            "\n",
-            r#"{"no-type-here":true}"#,
-            "\n",
-        ));
-        assert_eq!(parsed.parse_warning_count, 2, "bad json + missing type");
-        assert_eq!(parsed.messages.len(), 1, "unknown/lifecycle rows stay out");
-    }
-
-    #[test]
-    fn torn_final_line_is_not_a_warning() {
-        let body = concat!(
-            r#"{"type":"user.message","data":{"content":"hi"},"id":"z0","timestamp":"2026-03-02T15:10:45.058Z"}"#,
-            "\n{\"type\":\"assistant.mess",
-        );
-        let parsed = parse_str(body);
-        assert_eq!(parsed.parse_warning_count, 0);
-        assert_eq!(parsed.messages.len(), 1);
-    }
-
-    #[test]
-    fn sidecar_title_and_cwd_fill_gaps() {
-        let dir = TempDir::new().unwrap();
-        let session_dir = dir.path().join("session-state").join("sid");
-        std::fs::create_dir_all(&session_dir).unwrap();
-        std::fs::write(
-            session_dir.join("workspace.yaml"),
-            "id: sid\ncwd: c:\\code\\tmp\\proj\nname: Improve case resolution\nsummary_count: 0\n",
-        )
-        .unwrap();
-        let log = r#"{"type":"user.message","data":{"content":"first prompt"},"id":"s0","timestamp":"2026-03-02T15:10:45.058Z"}"#;
-        std::fs::write(session_dir.join("events.jsonl"), log).unwrap();
-
-        let parsed =
-            parse_session_file(&session_dir.join("events.jsonl")).expect("fixture must parse");
-        assert_eq!(parsed.meta.title, "Improve case resolution");
-        assert_eq!(parsed.meta.project_path, "c:\\code\\tmp\\proj");
-        assert_eq!(parsed.meta.project_name, "proj");
-    }
-
-    #[test]
-    fn empty_log_yields_no_session() {
-        let dir = TempDir::new().unwrap();
-        let path = write_session(&dir, "empty", "");
-        assert!(parse_session_file(&path).is_none());
-    }
-
-    #[test]
-    fn folder_uri_decodes_percent_escapes() {
-        assert_eq!(
-            folder_uri_to_path("file:///c%3A/SAPDevelop/repos/repo7"),
-            Some("c:/SAPDevelop/repos/repo7".to_string())
-        );
-        assert_eq!(
-            folder_uri_to_path("file:///home/dev/my%20project"),
-            Some("/home/dev/my project".to_string())
-        );
-        assert_eq!(folder_uri_to_path("https://example.com/x"), None);
-    }
-}
+mod tests;

@@ -3,8 +3,8 @@ use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 
 use super::{
-    CancelFlagGuard, LoadRequest, build_session_turn_outline, session_window_bounds,
-    subagent_meta_title,
+    CancelFlagGuard, LoadRequest, SessionSearchMessage, build_session_search_text,
+    build_session_turn_outline, session_window_bounds, subagent_meta_title,
 };
 use crate::commands::LoadToken;
 use crate::models::{Message, MessageRole};
@@ -121,6 +121,37 @@ fn build_session_turn_outline_pairs_user_with_first_assistant_reply() {
     assert_eq!(outline[1].message_index, 5);
     assert_eq!(outline[1].user_text, "second question");
     assert!(outline[1].reply_text.is_empty());
+}
+
+#[test]
+fn search_text_keeps_renderable_dialogue_at_absolute_indices() {
+    let messages = vec![
+        Message::new(MessageRole::User, "First Question"),
+        Message::new(MessageRole::Tool, "tool output is never searched"),
+        Message::new(MessageRole::Assistant, "   "),
+        Message::new(MessageRole::System, "[thinking] not searched either"),
+        Message::new(MessageRole::Assistant, "the answer"),
+        Message::new(MessageRole::User, ""),
+    ];
+
+    let search_text = build_session_search_text(&messages);
+
+    assert_eq!(search_text.total, 6);
+    assert_eq!(
+        search_text.messages,
+        [
+            SessionSearchMessage {
+                message_index: 0,
+                role: MessageRole::User,
+                content: "First Question".into(),
+            },
+            SessionSearchMessage {
+                message_index: 4,
+                role: MessageRole::Assistant,
+                content: "the answer".into(),
+            },
+        ]
+    );
 }
 
 #[test]

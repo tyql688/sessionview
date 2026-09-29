@@ -323,6 +323,7 @@ pub(super) fn collect_anchor(anchors: &mut UpdateAnchors, line: &Value, updates_
                     cache_read_input_tokens: cache_read,
                     cache_creation_input_tokens: cache_creation,
                     usage_hash: None,
+                    cost_is_estimate: false,
                     cost_usd: model_cost,
                 });
             }
