@@ -11,8 +11,12 @@ const SEGMENT_ID: &str = "22222222-2222-4222-a222-222222222222";
 const NEXT_SEGMENT_ID: &str = "33333333-3333-4333-a333-333333333333";
 
 fn rows(start: u64, base: Option<(&str, u64, u64)>, text: &str) -> String {
+    rows_with_id(THREAD_ID, start, base, text)
+}
+
+fn rows_with_id(id: &str, start: u64, base: Option<(&str, u64, u64)>, text: &str) -> String {
     let mut header = json!({
-        "id": THREAD_ID, "cwd": "/tmp/project", "cli_version": "fixture",
+        "id": id, "cwd": "/tmp/project", "cli_version": "fixture",
     });
     if let Some((rollout_id, ordinal, bytes)) = base {
         header["history_base"] = json!({
@@ -183,4 +187,46 @@ fn pagination_rename_uses_header_identity_instead_of_segment_filename() {
     let next = provider.scan_incremental(&known).unwrap();
     assert_eq!(next.parsed.len(), 1);
     assert_eq!(next.parsed[0].meta.title, "renamed");
+}
+
+#[test]
+fn pagination_resolves_continuation_with_distinct_rollout_id() {
+    let home = TempDir::new().unwrap();
+    let dir = home.path().join(".codex/sessions");
+    fs::create_dir_all(&dir).unwrap();
+    let root = dir.join(format!("rollout-2026-09-01T00-00-00-{THREAD_ID}.jsonl"));
+    let leaf = dir.join(format!("rollout-2026-09-01T00-00-00-{SEGMENT_ID}.jsonl"));
+    let prefix = rows_with_id(THREAD_ID, 0, None, "retained history");
+    fs::write(
+        &root,
+        format!(
+            "{prefix}{}",
+            rows_with_id(THREAD_ID, 4, None, "discarded branch")
+        ),
+    )
+    .unwrap();
+    fs::write(
+        &leaf,
+        rows_with_id(
+            SEGMENT_ID,
+            4,
+            Some((THREAD_ID, 4, prefix.len() as u64)),
+            "new history",
+        ),
+    )
+    .unwrap();
+    let provider = CodexProvider {
+        home_dir: home.path().to_path_buf(),
+    };
+    let sessions = provider.scan_all().unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].meta.id, SEGMENT_ID);
+    assert_eq!(Path::new(&sessions[0].meta.source_path), leaf.as_path());
+    assert!(sessions[0].content_text.contains("retained history"));
+    assert!(sessions[0].content_text.contains("new history"));
+    assert!(!sessions[0].content_text.contains("discarded branch"));
+    let loaded = provider
+        .load_messages(SEGMENT_ID, &sessions[0].meta.source_path)
+        .unwrap();
+    assert_eq!(loaded.messages.len(), sessions[0].messages.len());
 }

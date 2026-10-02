@@ -360,11 +360,8 @@ impl CodexScanAccum {
         // Only process the first session_meta; subagent JSONL files
         // contain a second session_meta for the parent context which
         // would overwrite the subagent's own id/self.cwd/source fields.
-        if self.session_id.is_some()
-            && payload.get("history_base").is_some()
-            && payload.get("id").and_then(Value::as_str) == self.session_id.as_deref()
-        {
-            // Same-thread pagination starts a fresh usage counter. Its retained
+        if self.session_id.is_some() && payload.get("history_base").is_some() {
+            // Continuation starts a fresh usage counter. Its retained
             // prefix has already been parsed by the history reader.
             self.previous_token_totals = None;
             self.begin_usage_turn(None);
@@ -407,6 +404,7 @@ impl CodexScanAccum {
             .get("forked_from_id")
             .and_then(Value::as_str)
             .is_some_and(|id| !id.is_empty())
+            && payload.get("history_base").is_none()
         {
             self.replay_usage_skip = true;
         }

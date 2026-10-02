@@ -123,10 +123,11 @@ fn history_parts(
         }
         let mut candidates = Vec::new();
         for (candidate, previous) in catalog {
-            if previous.id == header.id
+            let candidate_uuid = super::session_uuid_from_filename(&candidate.to_string_lossy());
+            let matches_thread = candidate_uuid.as_deref() == Some(base.thread_id.as_str())
+                || previous.id == base.thread_id;
+            if matches_thread
                 && previous.ordinal < header.ordinal
-                && super::session_uuid_from_filename(&candidate.to_string_lossy()).as_deref()
-                    == Some(base.thread_id.as_str())
                 && boundary_matches(candidate, base)?
             {
                 candidates.push(candidate);
