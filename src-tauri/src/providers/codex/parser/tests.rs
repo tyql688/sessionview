@@ -76,8 +76,8 @@ fn parse_session_backfills_usage_when_file_names_exactly_one_model() {
 #[test]
 fn parse_session_skips_replay_burst_usage_in_fork_files() {
     // Fork/replay files re-dump the parent lineage's token_count events in
-    // one burst sharing the first event's second. That usage belongs to the
-    // parent's own file; only later-second events are this session's.
+    // a dense burst. That usage belongs to the parent's own file; a later
+    // pause separates the child session's own requests.
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("codex.jsonl");
     fs::write(
@@ -99,7 +99,7 @@ fn parse_session_skips_replay_burst_usage_in_fork_files() {
     assert_eq!(
         parsed.usage_events.len(),
         1,
-        "burst-second events are the parent's; got {:?}",
+        "replay-burst events are the parent's; got {:?}",
         parsed.usage_events
     );
     assert_eq!(parsed.usage_events[0].input_tokens, 50);
@@ -1096,14 +1096,14 @@ fn token_usage_record_before_legacy_event_is_deduplicated() {
 }
 
 #[test]
-fn token_usage_record_after_matching_legacy_event_enriches_existing_usage() {
+fn token_usage_record_after_legacy_event_with_matching_totals_enriches_existing_usage() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("codex.jsonl");
     let record = token_usage_record_line("2026-09-03T04:36:43Z", "response-after", 100, 40, 0, 10);
     let lines = [
         r#"{"timestamp":"2026-09-03T04:36:40Z","type":"turn_context","payload":{"turn_id":"turn-test","model":"gpt-5.6-sol"}}"#.to_string(),
         r#"{"timestamp":"2026-09-03T04:36:41Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}}"#.to_string(),
-        r#"{"timestamp":"2026-09-03T04:36:42Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":110}}}}"#.to_string(),
+        r#"{"timestamp":"2026-09-03T04:36:42Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":110},"total_token_usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":2,"total_tokens":110}}}}"#.to_string(),
         record,
     ];
     fs::write(&file, format!("{}\n", lines.join("\n"))).unwrap();

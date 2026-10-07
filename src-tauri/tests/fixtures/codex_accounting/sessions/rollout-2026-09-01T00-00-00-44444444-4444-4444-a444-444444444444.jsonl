@@ -1,0 +1,4 @@
+{"timestamp":"2026-09-01T00:00:00Z","ordinal":0,"type":"session_meta","payload":{"id":"44444444-4444-4444-a444-444444444444","cwd":"/tmp/project","cli_version":"fixture","source":"cli"}}
+{"timestamp":"2026-09-01T00:00:01Z","ordinal":1,"type":"turn_context","payload":{"turn_id":"turn-parent","model":"gpt-5"}}
+{"timestamp":"2026-09-01T00:00:02Z","ordinal":2,"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"synthetic parent"}]}}
+{"timestamp":"2026-09-01T00:00:03Z","ordinal":3,"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":0,"total_tokens":110},"total_token_usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":0,"output_tokens":10,"reasoning_output_tokens":0,"total_tokens":110}}}}

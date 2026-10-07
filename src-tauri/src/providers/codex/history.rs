@@ -7,6 +7,10 @@
 //! Codex's wire field `history_base.thread_id` identifies the physical rollout
 //! (the filename's final UUID). After a revert it differs from `session_meta.id`,
 //! which remains the stable logical thread ID across every retained segment.
+//! Reverts can also replace a thread with a fresh file without `history_base`.
+//! Select the newest filename timestamp, then the physical UUID as a
+//! tie-breaker. A referenced fork has a different logical
+//! ID and must not remove its parent's independently readable session.
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -33,6 +37,16 @@ pub(super) struct Header {
     pub(super) id: String,
     ordinal: u64,
     base: Option<HistoryBase>,
+    pub(super) usage_start_ordinal: Option<u64>,
+    pub(super) transcript_start_ordinal: Option<u64>,
+    pub(super) is_subagent: bool,
+}
+
+pub(super) struct ResolvedHistory {
+    pub(super) reader: Box<dyn BufRead>,
+    /// Only metadata at validated physical segment starts may replace identity.
+    pub(super) segment_headers: HashSet<(String, u64)>,
+    pub(super) header: Option<Header>,
 }
 
 impl Header {
@@ -68,6 +82,20 @@ pub(super) fn read_header(path: &Path) -> anyhow::Result<Option<Header>> {
         id: id.to_string(),
         ordinal,
         base,
+        usage_start_ordinal: row
+            .pointer("/payload/forked_from_ordinal_exclusive")
+            .and_then(Value::as_u64),
+        transcript_start_ordinal: row
+            .pointer("/payload/subagent_history_start_ordinal")
+            .and_then(Value::as_u64),
+        is_subagent: row
+            .pointer("/payload/source/subagent/thread_spawn")
+            .is_some()
+            || matches!(
+                row.pointer("/payload/thread_source")
+                    .and_then(Value::as_str),
+                Some("subagent" | "guardian_review")
+            ),
     }))
 }
 
@@ -123,10 +151,11 @@ fn history_parts(
         }
         let mut candidates = Vec::new();
         for (candidate, previous) in catalog {
-            if previous.id == header.id
+            let candidate_uuid = super::session_uuid_from_filename(&candidate.to_string_lossy());
+            // `history_base.thread_id` identifies exactly one physical file.
+            let matches_thread = candidate_uuid.as_deref() == Some(base.thread_id.as_str());
+            if matches_thread
                 && previous.ordinal < header.ordinal
-                && super::session_uuid_from_filename(&candidate.to_string_lossy()).as_deref()
-                    == Some(base.thread_id.as_str())
                 && boundary_matches(candidate, base)?
             {
                 candidates.push(candidate);
@@ -150,28 +179,48 @@ fn history_parts(
 
 pub(super) fn leaf_paths(files: Vec<PathBuf>) -> anyhow::Result<Vec<PathBuf>> {
     let catalog = headers(&files)?;
-    let mut inherited = HashSet::new();
-    for (path, header) in &catalog {
-        if header.base.is_none() {
+    let mut selected = HashMap::<&str, (&PathBuf, Option<(chrono::NaiveDateTime, String)>)>::new();
+    let mut leaves = Vec::new();
+    for path in &files {
+        let Some(header) = catalog.get(path) else {
+            leaves.push(path.clone());
             continue;
+        };
+        let key = rollout_order_key(path, &header.id);
+        if let Some((previous, previous_key)) = selected.get_mut(header.id.as_str()) {
+            let (Some(new_key), Some(old_key)) = (&key, previous_key.as_ref()) else {
+                bail!("multiple unrelated Codex rollouts claim the same thread id");
+            };
+            if new_key == old_key {
+                bail!("multiple Codex files claim the same physical rollout id");
+            }
+            if new_key > old_key {
+                *previous = path;
+                *previous_key = key;
+            }
+        } else {
+            selected.insert(&header.id, (path, key));
         }
+    }
+    leaves.extend(selected.into_values().map(|(path, _)| path.clone()));
+    leaves.sort();
+    for path in &leaves {
         let mut parts = Vec::new();
         history_parts(path, std::fs::metadata(path)?.len(), &catalog, &mut parts)?;
-        inherited.extend(parts.into_iter().skip(1).map(|(path, _)| path));
-    }
-    let leaves: Vec<_> = files
-        .into_iter()
-        .filter(|path| !inherited.contains(path))
-        .collect();
-    let mut ids = HashSet::new();
-    for path in &leaves {
-        if let Some(header) = catalog.get(path)
-            && !ids.insert(&header.id)
-        {
-            bail!("multiple unrelated Codex rollouts claim the same thread id");
-        }
     }
     Ok(leaves)
+}
+
+fn rollout_order_key(path: &Path, thread_id: &str) -> Option<(chrono::NaiveDateTime, String)> {
+    let stem = path.file_stem()?.to_str()?.strip_prefix("rollout-")?;
+    let timestamp =
+        chrono::NaiveDateTime::parse_from_str(stem.get(..19)?, "%Y-%m-%dT%H-%M-%S").ok()?;
+    let ids = stem.get(19..)?.strip_prefix('-')?;
+    let (owner, physical) = ids.split_once('_').unwrap_or((ids, ids));
+    if owner.len() != 36 || !owner.eq_ignore_ascii_case(thread_id) || physical.len() != 36 {
+        return None;
+    }
+    Some((timestamp, super::session_uuid_from_filename(physical)?))
 }
 
 pub(super) fn open_reader(
@@ -179,18 +228,43 @@ pub(super) fn open_reader(
     path: &Path,
     file: File,
     file_size: u64,
-) -> anyhow::Result<Box<dyn BufRead>> {
-    if read_header(path)?.is_none_or(|header| !header.is_continuation()) {
-        return Ok(Box::new(BufReader::new(file.take(file_size))));
+) -> anyhow::Result<ResolvedHistory> {
+    let header = read_header(path)?;
+    if header
+        .as_ref()
+        .is_none_or(|header| !header.is_continuation())
+    {
+        let segment_headers = header
+            .as_ref()
+            .map(|header| (header.id.clone(), header.ordinal))
+            .into_iter()
+            .collect();
+        return Ok(ResolvedHistory {
+            reader: Box::new(BufReader::new(file.take(file_size))),
+            segment_headers,
+            header,
+        });
     }
     let catalog = headers(&provider.collect_jsonl_files())?;
     let mut parts = Vec::new();
     history_parts(path, file_size, &catalog, &mut parts)?;
+    let segment_headers = parts
+        .iter()
+        .filter_map(|(part, _)| {
+            catalog
+                .get(part)
+                .map(|header| (header.id.clone(), header.ordinal))
+        })
+        .collect();
     let mut reader: Box<dyn Read> = Box::new(std::io::empty());
     for (part, limit) in parts.into_iter().rev() {
         reader = Box::new(reader.chain(File::open(&part)?.take(limit)));
     }
-    Ok(Box::new(BufReader::new(reader)))
+    Ok(ResolvedHistory {
+        reader: Box::new(BufReader::new(reader)),
+        segment_headers,
+        header,
+    })
 }
 
 #[cfg(test)]

@@ -25,16 +25,36 @@ impl CodexScanAccum {
     /// transcript skip is active, so usage never depends on transcript
     /// skipping heuristics.
     pub(super) fn handle_token_count(&mut self, entry: &CodexLine, payload: &Value, path: &Path) {
-        // Replayed parent usage is dumped in one burst sharing the fork
-        // file's first token_count second: prime the running totals so the
-        // first real event yields a clean delta, and count nothing.
+        if !self.owns_usage(entry, path) {
+            if let Some(info) = payload.get("info") {
+                let _ = codex_usage_from_info(info, &mut self.previous_token_totals);
+            }
+            return;
+        }
+        // Legacy copied history is written in a dense burst. Follow elapsed
+        // time between records so crossing a second boundary keeps the same
+        // inherited baseline. Typed boundaries end replay independently.
         if self.replay_usage_skip {
-            if let Some(ts) = entry.timestamp.as_deref() {
-                let second = ts.get(0..19).unwrap_or(ts);
-                match self.replay_second.as_deref() {
-                    None => self.replay_second = Some(second.to_string()),
-                    Some(replay) if replay == second => {}
-                    Some(_) => self.replay_usage_skip = false,
+            let timestamp = entry
+                .timestamp
+                .as_deref()
+                .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
+                .map(|ts| ts.timestamp_millis());
+            match (self.replay_last_timestamp_ms, timestamp) {
+                (None, Some(current)) => self.replay_last_timestamp_ms = Some(current),
+                (Some(previous), Some(current)) if (0..1_000).contains(&(current - previous)) => {
+                    self.replay_last_timestamp_ms = Some(current);
+                }
+                (Some(previous), Some(current)) if current >= previous => {
+                    self.replay_usage_skip = false;
+                }
+                _ => {
+                    log::warn!(
+                        "skipping Codex replay usage with missing, invalid, or decreasing timestamp in '{}' at {:?}",
+                        path.display(),
+                        entry.timestamp
+                    );
+                    self.parse_warning_count = self.parse_warning_count.saturating_add(1);
                 }
             }
             if self.replay_usage_skip {

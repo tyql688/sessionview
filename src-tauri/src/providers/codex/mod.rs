@@ -33,7 +33,7 @@ impl crate::provider::ProviderDescriptor for Descriptor {
         "codex"
     }
     fn parser_revision(&self) -> Option<&'static str> {
-        Some("7")
+        Some("8")
     }
 }
 

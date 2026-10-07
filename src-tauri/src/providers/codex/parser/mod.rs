@@ -24,7 +24,9 @@ use crate::tool_metadata::{ToolCallFacts, build_tool_metadata};
 use super::CodexProvider;
 use super::tools::*;
 
+mod dispatch;
 mod event_msg;
+mod metadata;
 mod response_item;
 mod usage;
 mod value_helpers;
@@ -34,6 +36,7 @@ use value_helpers::push_system_event;
 
 #[derive(Deserialize)]
 pub(super) struct CodexLine {
+    ordinal: Option<u64>,
     pub(super) timestamp: Option<String>,
     #[serde(rename = "type")]
     line_type: String,
@@ -53,6 +56,13 @@ pub(super) struct PendingCodexUserMessage {
 /// skip flag used by subagent files) so the loop body can run against
 /// either a full file or a seeked tail reader without duplication.
 pub(super) struct CodexScanAccum {
+    /// Metadata identities of validated physical history segments.
+    history_segment_headers: std::collections::HashSet<(String, u64)>,
+    owned_session_id: Option<String>,
+    segment_owns_usage: bool,
+    usage_start_ordinal: Option<u64>,
+    transcript_start_ordinal: Option<u64>,
+    target_is_subagent: bool,
     pub(super) messages: Vec<Message>,
     pub(super) usage_events: Vec<UsageEvent>,
     pub(super) first_user_message: Option<String>,
@@ -79,14 +89,12 @@ pub(super) struct CodexScanAccum {
         CodexRawUsageCounts,
         Option<CodexRawUsageCounts>,
     )>,
-    /// Fork/replay files re-dump the parent lineage's token_count events in
-    /// a single-second burst at file creation. Usage inside that second is
-    /// the parent's, already counted in its own file — skip it while
-    /// priming the running totals so the next real event deltas cleanly.
+    /// Copied parent usage forms a dense burst in legacy fork files. Skip
+    /// that burst while priming the cumulative baseline. Typed history and
+    /// task boundaries take precedence over this legacy timing check.
     pub(super) replay_usage_skip: bool,
-    /// Second (19-char RFC3339 prefix) of the first token_count in a replay
-    /// file; lazily captured, cleared once a later second is seen.
-    pub(super) replay_second: Option<String>,
+    /// Timestamp of the latest inherited usage in the legacy replay burst.
+    pub(super) replay_last_timestamp_ms: Option<i64>,
     pub(super) previous_token_totals: Option<CodexRawUsageCounts>,
     /// Codex re-emits some token_count events verbatim. Events identical in
     /// timestamp, model, per-response usage, and cumulative snapshot are counted
@@ -125,8 +133,23 @@ pub(super) struct CodexScanAccum {
 }
 
 impl CodexScanAccum {
+    fn set_history_header(&mut self, header: &super::history::Header) {
+        self.owned_session_id = Some(header.id.clone());
+        self.usage_start_ordinal = header
+            .usage_start_ordinal
+            .or(header.transcript_start_ordinal);
+        self.transcript_start_ordinal = header.transcript_start_ordinal;
+        self.target_is_subagent = header.is_subagent;
+    }
+
     fn new() -> Self {
         Self {
+            history_segment_headers: std::collections::HashSet::new(),
+            owned_session_id: None,
+            segment_owns_usage: true,
+            usage_start_ordinal: None,
+            transcript_start_ordinal: None,
+            target_is_subagent: false,
             messages: Vec::new(),
             usage_events: Vec::new(),
             first_user_message: None,
@@ -143,7 +166,7 @@ impl CodexScanAccum {
             models_seen: std::collections::BTreeSet::new(),
             pending_unresolved_usage: Vec::new(),
             replay_usage_skip: false,
-            replay_second: None,
+            replay_last_timestamp_ms: None,
             previous_token_totals: None,
             seen_token_events: std::collections::HashSet::new(),
             seen_completed_items: std::collections::HashSet::new(),
@@ -260,201 +283,13 @@ impl CodexScanAccum {
             .saturating_add(unresolved_usage_events);
     }
 
-    /// Per-record body of `scan_lines`; the shared JSONL helper owns the
-    /// read/parse/skip loop. `return` means skip the line.
-    fn scan_line(&mut self, entry: &CodexLine, path: &Path) {
-        if let Some(ref ts) = entry.timestamp {
-            if self.first_timestamp.is_none() {
-                self.first_timestamp = Some(ts.clone());
-            }
-            self.last_timestamp = Some(ts.clone());
-        }
-
-        let payload = match entry.payload {
-            Some(ref p) => p,
-            None => return,
-        };
-
-        // Skip forked parent context in subagent files. Clear the flag on
-        // the first subagent-owned `task_started` event (its `started_at`
-        // matches the subagent session's creation time). Older transcripts
-        // don't carry that marker — fall back to the textual
-        // `newly spawned agent` cue still present in their function-call
-        // output.
-        if self.skipping_fork_context {
-            // Usage is deduped by the replay-second check inside
-            // handle_token_count, not by the transcript skip: files whose
-            // skip marker never fires must still count their own turns.
-            if entry.line_type == "event_msg"
-                && payload.get("type").and_then(|v| v.as_str()) == Some("token_count")
-            {
-                self.handle_token_count(entry, payload, path);
-                return;
-            }
-            // The forked parent context is not this session's transcript,
-            // but its turn_context still names the model that every later
-            // token_count needs for cost attribution — harvest it without
-            // emitting messages.
-            if entry.line_type == "turn_context" {
-                if let Some(model) = payload
-                    .get("model")
-                    .and_then(|v| v.as_str())
-                    .filter(|model| !model.is_empty())
-                {
-                    self.current_model = Some(model.to_string());
-                    self.models_seen.insert(model.to_string());
-                    if self.model.is_none() {
-                        self.model = Some(model.to_string());
-                    }
-                }
-                return;
-            }
-            if entry.line_type == "event_msg"
-                && payload.get("type").and_then(|v| v.as_str()) == Some("task_started")
-            {
-                if let (Some(started_at), Some(sub_sec)) = (
-                    payload.get("started_at").and_then(|v| v.as_i64()),
-                    self.subagent_start_seconds,
-                ) && started_at >= sub_sec
-                {
-                    self.skipping_fork_context = false;
-                    self.replay_usage_skip = false;
-                    self.handle_event_msg(entry, payload, path);
-                    return;
-                }
-            } else if entry.line_type == "response_item"
-                && payload.get("type").and_then(|v| v.as_str()) == Some("function_call_output")
-            {
-                let output = payload.get("output").and_then(|v| v.as_str()).unwrap_or("");
-                if output.contains("newly spawned agent") {
-                    self.skipping_fork_context = false;
-                    self.replay_usage_skip = false;
-                }
-            }
-            return;
-        }
-
-        match entry.line_type.as_str() {
-            "session_meta" => self.handle_session_meta(entry, payload),
-            "compacted" => self.handle_compacted(entry, payload),
-            "response_item" => self.handle_response_item(entry, payload, path),
-            "turn_context" => self.handle_turn_context(payload),
-            "event_msg" => self.handle_event_msg(entry, payload, path),
-            "token_usage_record" => self.handle_token_usage_record(entry, payload, path),
-            // Environment snapshots and agent-team turn bookkeeping carry no
-            // transcript or usage data.
-            "world_state" | "inter_agent_communication_metadata" => {}
-            unknown => {
-                log::warn!("skipping unknown Codex record type '{unknown}'");
-                self.parse_warning_count = self.parse_warning_count.saturating_add(1);
-            }
-        }
-    }
-
-    /// Handle a `session_meta` line. The original arm's single early
-    /// `continue` (2nd `session_meta` = forked parent context, skip the
-    /// rest of the body) becomes a `return`; that is the last action
-    /// `scan_lines` takes for the line, so returning advances the loop
-    /// exactly as `continue` did.
-    fn handle_session_meta(&mut self, entry: &CodexLine, payload: &Value) {
-        // Only process the first session_meta; subagent JSONL files
-        // contain a second session_meta for the parent context which
-        // would overwrite the subagent's own id/self.cwd/source fields.
-        if self.session_id.is_some()
-            && payload.get("history_base").is_some()
-            && payload.get("id").and_then(Value::as_str) == self.session_id.as_deref()
-        {
-            // Same-thread pagination starts a fresh usage counter. Its retained
-            // prefix has already been parsed by the history reader.
-            self.previous_token_totals = None;
-            self.begin_usage_turn(None);
-        } else if self.session_id.is_some() {
-            // 2nd session_meta = start of forked parent context
-            if self.is_sidechain {
-                self.skipping_fork_context = true;
-                self.replay_usage_skip = true;
-            }
-            return;
-        }
-        if let Some(id) = payload.get("id").and_then(|v| v.as_str()) {
-            self.session_id = Some(id.to_string());
-        }
-        if let Some(c) = payload.get("cwd").and_then(|v| v.as_str()) {
-            self.cwd = Some(c.to_string());
-        }
-        if let Some(v) = payload.get("cli_version").and_then(|v| v.as_str())
-            && !v.is_empty()
-        {
-            self.cc_version = Some(v.to_string());
-        }
-        if let Some(m) = payload.get("model_provider").and_then(|v| v.as_str())
-            && !m.is_empty()
-        {
-            self.model_provider = Some(m.to_string());
-        }
-        if let Some(b) = payload
-            .get("git")
-            .and_then(|g| g.get("branch"))
-            .and_then(|v| v.as_str())
-            && !b.is_empty()
-            && b != "HEAD"
-        {
-            self.git_branch = Some(b.to_string());
-        }
-        // A fresh spawned agent has no inherited usage. Only an explicit fork
-        // or the second session_meta above proves that a parent replay exists.
-        if payload
-            .get("forked_from_id")
-            .and_then(Value::as_str)
-            .is_some_and(|id| !id.is_empty())
-        {
-            self.replay_usage_skip = true;
-        }
-        // Detect subagent sessions: source.subagent.thread_spawn
-        if let Some(spawn) = payload
-            .get("source")
-            .and_then(|s| s.get("subagent"))
-            .and_then(|a| a.get("thread_spawn"))
-        {
-            self.is_sidechain = true;
-            self.parent_id = spawn
-                .get("parent_thread_id")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            self.agent_nickname = payload
-                .get("agent_nickname")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            let sub_ts = parse_rfc3339_timestamp(
-                payload
-                    .get("timestamp")
-                    .and_then(|v| v.as_str())
-                    .or(entry.timestamp.as_deref()),
-            );
-            if sub_ts > 0 {
-                self.subagent_start_seconds = Some(sub_ts);
-            }
-        } else if self.parent_id.is_none() {
-            // Regular forks (source: "vscode" etc.) also carry
-            // a `forked_from_id` we can use as the parent. We
-            // intentionally leave is_sidechain=false so the
-            // forked session shows in the main list, just with
-            // provenance back to its origin.
-            if let Some(id) = payload
-                .get("forked_from_id")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-            {
-                self.parent_id = Some(id.to_string());
-            }
-        }
-    }
-
     /// Handle a top-level `compacted` line. Carries the post-compaction
     /// handoff summary in `payload.message`; surfaced as a System event
     /// so the user can see WHAT survived the compaction, not just that
-    /// one happened. No control flow beyond a single push.
+    /// one happened. The boundary also ends response/snapshot pairing.
     fn handle_compacted(&mut self, entry: &CodexLine, payload: &Value) {
+        self.unmatched_token_count_usage.clear();
+        self.unmatched_token_usage_records.clear();
         let message = payload
             .get("message")
             .and_then(|v| v.as_str())
@@ -522,8 +357,8 @@ impl CodexProvider {
         };
         let file_size = metadata.len();
 
-        let reader = match super::history::open_reader(self, path, file, file_size) {
-            Ok(reader) => reader,
+        let history = match super::history::open_reader(self, path, file, file_size) {
+            Ok(history) => history,
             Err(error) => {
                 log::warn!(
                     "cannot resolve Codex history '{}': {error:#}",
@@ -544,8 +379,11 @@ impl CodexProvider {
         //     `event_msg.task_started` whose `started_at` is at or
         //     after the subagent's own `session_meta.timestamp`.
         let mut accum = CodexScanAccum::new();
-
-        accum.scan_lines(reader, path);
+        if let Some(header) = &history.header {
+            accum.set_history_header(header);
+        }
+        accum.history_segment_headers = history.segment_headers;
+        accum.scan_lines(history.reader, path);
 
         // Hoist accumulator fields back to locals so the existing post-loop
         // finalization (title, project_path, content_text, meta assembly)
@@ -567,7 +405,7 @@ impl CodexProvider {
             models_seen: _,
             pending_unresolved_usage: _,
             replay_usage_skip: _,
-            replay_second: _,
+            replay_last_timestamp_ms: _,
             previous_token_totals: _,
             seen_token_events: _,
             seen_completed_items: _,
@@ -587,6 +425,7 @@ impl CodexProvider {
             unmatched_tool_event_count: _,
             unresolved_usage_event_count: _,
             parse_warning_count,
+            ..
         } = accum;
 
         flush_pending_user_message(
@@ -757,10 +596,8 @@ pub struct CodexTailResult {
 ///   whose matching `function_call` was earlier in the file surfaces
 ///   as a standalone tool message; the background full-parse promote
 ///   replaces the cache once it completes.
-/// - The Codex fork-context skip (used for subagent files whose JSONL
-///   starts with the parent's history) is a no-op here because the
-///   tail naturally starts past that region — `skipping_fork_context`
-///   stays at its default `false` and the loop dispatches normally.
+/// - Typed inherited-history boundaries are enforced in both whole-file and
+///   partial windows, using the canonical physical file header.
 /// - No token-total computation: the caller pulls totals from the DB.
 pub(crate) fn parse_session_tail(path: &Path, target_messages: usize) -> Option<CodexTailResult> {
     // Codex JSONL lines are noticeably bigger than Claude's (each turn
@@ -773,21 +610,32 @@ pub(crate) fn parse_session_tail(path: &Path, target_messages: usize) -> Option<
     let safety_buffer = target_messages / 2 + 100;
     let scan_lines = target_messages.saturating_add(safety_buffer);
     let (reader, window) = open_tail_reader(path, scan_lines, "Codex")?;
-    if window.covers_whole_file {
-        match super::history::read_header(path) {
-            Ok(Some(header)) if header.is_continuation() => return None,
-            Err(error) => {
-                log::warn!(
-                    "cannot read Codex history header '{}': {error:#}",
-                    path.display()
-                );
-                return None;
-            }
-            _ => {}
+    let header = match super::history::read_header(path) {
+        Ok(header) => header,
+        Err(error) => {
+            log::warn!(
+                "cannot read Codex history header '{}': {error:#}",
+                path.display()
+            );
+            return None;
         }
+    };
+    if window.covers_whole_file
+        && header
+            .as_ref()
+            .is_some_and(|header| header.is_continuation())
+    {
+        return None;
     }
 
     let mut accum = CodexScanAccum::new();
+    if let Some(header) = &header {
+        accum.set_history_header(header);
+        if !window.covers_whole_file {
+            accum.session_id = Some(header.id.clone());
+            accum.is_sidechain = header.is_subagent;
+        }
+    }
     if !window.covers_whole_file && !prime_tail_turn_context(path, window.start_offset, &mut accum)
     {
         log::debug!(
