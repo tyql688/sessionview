@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.8.4] - Unreleased
+
+### Added
+
+- `SESSIONVIEW_EXTRA_HOMES` indexes tool histories from additional home directories alongside the current user's home, including Windows histories mounted in WSL. Duplicate sessions are indexed once, and message and media access follows the home that owns each source.
+
+### Changed
+
+- DSH 0.2 and session generations v2–v4 retain the full conversation, delegated-child links, attachments, command results, interrupted and retry statuses, and billed model-attempt and compaction usage. Inherited usage stays attributed to the parent session.
+- Kimi Code 2.x journals retain structured input origins, interrupted output, lifecycle diagnostics, model and profile metadata, and local media references. Forked history remains readable, with copied usage attributed to its source.
+- Session status rows have English and Chinese labels for cancellation, failure, blocking, retries, deliverables, permission changes, informational notices, and Codex goals.
+
+### Fixed
+
+- Codex threads select their newest physical rollout and resolve retained history by physical file identity and validated byte and ordinal boundaries. Fork parents remain independently readable, and child transcript boundaries apply to both full-session and tail reads. Existing Codex indexes refresh automatically.
+- Codex usage preserves cumulative baselines across retained history segments, counts response records and matching snapshots once, and retains independent compaction requests. Child usage excludes inherited parent requests, and legacy replay bursts are tracked across timestamp second boundaries.
+- Delegated sessions referenced by inherited tool calls can open and preview by their exact session id across forks.
+- Grok project paths decode percent escapes while preserving multibyte characters and malformed literal escapes.
+
 ## [0.8.3] - 2026-09-24
 
 ### Changed
