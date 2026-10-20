@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.5] - Unreleased
+
+### Fixed
+
+- Codex sessions stored as `.jsonl.zst` are indexed, searchable, and readable with their token usage. Retained history validates decoded byte boundaries across plain and compressed rollouts, duplicate storage copies are indexed once, and incremental scans track physical file sizes. Existing Codex indexes refresh automatically.
+- JSONL scans stop on stream read errors, and Codex rejects incomplete reads so damaged compressed files cannot hang indexing or return partial sessions.
+- Kimi retry statuses accept finite, nonnegative fractional millisecond delays. Existing Kimi indexes refresh automatically.
+
 ## [0.8.4] - 2026-10-07
 
 ### Added
