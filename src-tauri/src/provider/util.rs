@@ -26,9 +26,9 @@ pub(crate) struct JsonlScanStats {
 }
 
 /// Iterate JSONL records from `reader`, deserializing each non-empty line as
-/// `T`. Unreadable and malformed lines are logged (with path + line number)
-/// and skipped; the returned stats let callers fold the skip counts into
-/// their parse-warning totals. The callback receives the 1-based line number
+/// `T`. Malformed lines are logged and skipped. An I/O error is logged and
+/// ends the scan, since a failed stream need not advance on another read.
+/// The returned stats include both kinds of failure. The callback receives the 1-based line number
 /// and may return `ControlFlow::Break(())` to stop the scan early.
 ///
 /// Line numbers are relative to the reader's first line — for seeked tail
@@ -72,7 +72,7 @@ where
                     path.display()
                 );
                 stats.read_error_count = stats.read_error_count.saturating_add(1);
-                continue;
+                break;
             }
         };
         if line.trim().is_empty() {
@@ -528,6 +528,27 @@ mod tests {
     }
 
     // --- for_each_jsonl_record ---
+
+    #[test]
+    fn jsonl_scan_stops_after_a_persistent_read_error() {
+        struct FailedReader(usize);
+        impl std::io::Read for FailedReader {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                self.0 += 1;
+                assert_eq!(self.0, 1, "a failed stream must not be retried");
+                Err(std::io::Error::other("broken stream"))
+            }
+        }
+        let mut reader = FailedReader(0);
+        let stats = for_each_jsonl_record(
+            std::io::BufReader::new(&mut reader),
+            Path::new("/synthetic/broken.jsonl"),
+            |_, _: Value| panic!("unreadable data must not reach the parser"),
+        );
+        assert_eq!(reader.0, 1);
+        assert_eq!(stats.read_error_count, 1);
+        assert_eq!(stats.parse_error_count, 0);
+    }
 
     #[test]
     fn jsonl_scan_skips_malformed_and_empty_lines() {

@@ -26,7 +26,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -128,6 +128,53 @@ fn audit_codex_real_history_usage() {
 
 fn audit_codex_token_usage_materialization(sessions: &[ParsedSession], roots: &[PathBuf]) {
     let catalog = reference_rollout_catalog(roots);
+    let parsed_ids: HashSet<_> = sessions
+        .iter()
+        .map(|session| session.meta.id.clone())
+        .collect();
+    let mut logical_ids = HashSet::new();
+    let mut inherited_only_ids = HashSet::new();
+    let mut physical_count = 0;
+    for path in catalog.values().flatten() {
+        let mut reader = BufReader::new(reference_reader(path, None).unwrap());
+        let mut first = String::new();
+        reader.read_line(&mut first).unwrap();
+        let header: Value = serde_json::from_str(&first).unwrap();
+        let id = header
+            .pointer("/payload/id")
+            .and_then(Value::as_str)
+            .unwrap();
+        if !parsed_ids.contains(id) {
+            // A spawned rollout may contain only its inherited prefix, with
+            // its own transcript starting immediately after EOF.
+            let start = header
+                .pointer("/payload/subagent_history_start_ordinal")
+                .and_then(Value::as_u64)
+                .expect("an omitted Codex session must declare an inherited-only transcript");
+            for line in reader.lines() {
+                let row: Value = serde_json::from_str(&line.unwrap()).unwrap();
+                assert!(
+                    row.get("ordinal")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|ordinal| ordinal < start),
+                    "an omitted Codex session contains its own transcript"
+                );
+            }
+            inherited_only_ids.insert(id.to_string());
+        } else {
+            logical_ids.insert(id.to_string());
+        }
+        physical_count += 1;
+    }
+    assert!(
+        logical_ids == parsed_ids,
+        "every parsed Codex session must have an on-disk logical identity"
+    );
+    eprintln!(
+        "  history coverage: {physical_count} physical rollouts, {} readable sessions, {} inherited-only sessions",
+        sessions.len(),
+        inherited_only_ids.len()
+    );
     assert_eq!(
         sessions
             .iter()
@@ -299,17 +346,23 @@ fn reference_rollout_catalog(roots: &[PathBuf]) -> HashMap<String, Vec<PathBuf>>
             .map(Result::unwrap)
             .filter(|entry| {
                 entry.file_type().is_file()
-                    && entry.path().extension().is_some_and(|ext| ext == "jsonl")
+                    && (entry.path().extension().is_some_and(|ext| ext == "jsonl")
+                        || entry.file_name().to_string_lossy().ends_with(".jsonl.zst"))
             })
             .map(walkdir::DirEntry::into_path)
             .collect::<Vec<_>>();
         files.sort();
         for path in files {
+            let plain = if path.extension().is_some_and(|ext| ext == "zst") {
+                path.with_extension("")
+            } else {
+                path.clone()
+            };
             // Active storage precedes its archived copy at the same relative path.
-            if !relative_paths.insert(path.strip_prefix(root).unwrap().to_path_buf()) {
+            if !relative_paths.insert(plain.strip_prefix(root).unwrap().to_path_buf()) {
                 continue;
             }
-            if let Some(stem) = path.file_stem().and_then(|stem| stem.to_str())
+            if let Some(stem) = plain.file_stem().and_then(|stem| stem.to_str())
                 && let Some(id) = stem.get(stem.len().saturating_sub(36)..)
             {
                 catalog
@@ -322,13 +375,29 @@ fn reference_rollout_catalog(roots: &[PathBuf]) -> HashMap<String, Vec<PathBuf>>
     catalog
 }
 
+fn reference_reader(path: &Path, physical_limit: Option<u64>) -> std::io::Result<Box<dyn Read>> {
+    let file = File::open(path)?;
+    let limit = physical_limit.unwrap_or(file.metadata()?.len());
+    let snapshot = file.take(limit);
+    if path.extension().is_some_and(|ext| ext == "zst") {
+        Ok(Box::new(zstd::stream::read::Decoder::new(snapshot)?))
+    } else {
+        Ok(Box::new(snapshot))
+    }
+}
+
 fn read_reference_history(
     path: &Path,
     limit: u64,
     catalog: &HashMap<String, Vec<PathBuf>>,
 ) -> std::io::Result<String> {
     let mut path = path.to_path_buf();
-    let mut limit = limit;
+    let mut physical_limit = Some(limit);
+    let mut limit = if path.extension().is_some_and(|ext| ext == "zst") {
+        u64::MAX
+    } else {
+        limit
+    };
     let mut parts = Vec::new();
     let mut visited = HashSet::new();
     loop {
@@ -336,7 +405,7 @@ fn read_reference_history(
             return Err(std::io::Error::other("invalid history graph"));
         }
         let mut content = String::new();
-        File::open(&path)?
+        reference_reader(&path, physical_limit)?
             .take(limit)
             .read_to_string(&mut content)?;
         let header: Value = serde_json::from_str(content.lines().next().unwrap_or_default())?;
@@ -369,7 +438,7 @@ fn read_reference_history(
             .and_then(Value::as_u64)
             .ok_or_else(|| std::io::Error::other("missing byte boundary"))?;
         let mut prefix = String::new();
-        File::open(parent)?
+        reference_reader(parent, None)?
             .take(limit)
             .read_to_string(&mut prefix)?;
         let last: Value = serde_json::from_str(prefix.lines().last().unwrap_or_default())?;
@@ -385,6 +454,7 @@ fn read_reference_history(
         }
         parts.push(content);
         path = parent.clone();
+        physical_limit = None;
     }
     Ok(parts.into_iter().rev().collect())
 }

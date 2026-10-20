@@ -13,6 +13,15 @@ use sessionview_lib::services::events::NullEventBus;
 
 #[test]
 fn codex_accounting_fixture_reconciles_scan_load_stats_and_incremental_reads() {
+    check_accounting_fixture(false);
+}
+
+#[test]
+fn compressed_codex_accounting_reconciles_scan_load_stats_and_incremental_reads() {
+    check_accounting_fixture(true);
+}
+
+fn check_accounting_fixture(compressed: bool) {
     let fixture =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex_accounting/sessions");
     let home = tempfile::TempDir::new().unwrap();
@@ -20,7 +29,17 @@ fn codex_accounting_fixture_reconciles_scan_load_stats_and_incremental_reads() {
     fs::create_dir_all(&sessions_dir).unwrap();
     for entry in fs::read_dir(fixture).unwrap() {
         let entry = entry.unwrap();
-        fs::copy(entry.path(), sessions_dir.join(entry.file_name())).unwrap();
+        let target = sessions_dir.join(entry.file_name());
+        if compressed {
+            let bytes = fs::read(entry.path()).unwrap();
+            fs::write(
+                target.with_extension("jsonl.zst"),
+                zstd::stream::encode_all(bytes.as_slice(), 0).unwrap(),
+            )
+            .unwrap();
+        } else {
+            fs::copy(entry.path(), target).unwrap();
+        }
     }
     let provider = CodexProvider::with_home(home.path().to_path_buf());
     let sessions = provider.scan_all().unwrap();
@@ -108,7 +127,28 @@ fn codex_accounting_fixture_reconciles_scan_load_stats_and_incremental_reads() {
             expected[session.meta.id.as_str()],
         );
     }
-    for _ in 0..2 {
+    for pass in 0..3 {
+        if pass == 2 && !compressed {
+            for entry in fs::read_dir(&sessions_dir).unwrap() {
+                let path = entry.unwrap().path();
+                fs::write(
+                    path.with_extension("jsonl.zst"),
+                    zstd::stream::encode_all(fs::read(&path).unwrap().as_slice(), 0).unwrap(),
+                )
+                .unwrap();
+                fs::remove_file(path).unwrap();
+            }
+            assert_eq!(state.indexer.reindex_providers(None, false).unwrap(), 5);
+            let detail = runtime
+                .block_on(sessionview_lib::commands::get_session_detail(
+                    "11111111-1111-4111-a111-111111111111".to_string(),
+                    None,
+                    state.clone(),
+                ))
+                .unwrap();
+            assert!(detail.meta.source_path.ends_with(".jsonl.zst"));
+            assert_eq!(detail.meta.input_tokens, 100);
+        }
         let usage = runtime
             .block_on(sessionview_lib::commands::get_usage_stats(
                 vec!["codex".to_string()],

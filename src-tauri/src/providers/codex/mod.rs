@@ -1,5 +1,6 @@
 mod history;
 pub mod parser;
+mod reader;
 mod tools;
 
 use std::path::{Path, PathBuf};
@@ -33,7 +34,7 @@ impl crate::provider::ProviderDescriptor for Descriptor {
         "codex"
     }
     fn parser_revision(&self) -> Option<&'static str> {
-        Some("8")
+        Some("9")
     }
 }
 
@@ -127,7 +128,9 @@ impl CodexProvider {
                 .filter_map(std::result::Result::ok)
                 .map(|entry| entry.into_path())
                 .filter(|path| {
-                    path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("jsonl")
+                    path.is_file()
+                        && (path.extension().is_some_and(|ext| ext == "jsonl")
+                            || reader::is_compressed(path))
                 })
                 .collect();
             dir_files.sort();
@@ -139,7 +142,8 @@ impl CodexProvider {
                     );
                     continue;
                 };
-                if seen_relative_paths.insert(relative.to_path_buf()) {
+                // Plain storage sorts before its compressed copy within a root.
+                if seen_relative_paths.insert(reader::plain_path(relative)) {
                     files.push(path);
                 }
             }
@@ -149,11 +153,12 @@ impl CodexProvider {
 }
 
 /// Extract the session uuid embedded at the end of a rollout filename
-/// (`rollout-<timestamp>-<uuid>.jsonl`), used to match files against
+/// (`rollout-<timestamp>-<uuid>.jsonl[.zst]`), used to match files against
 /// `session_index.jsonl` entries without opening them. Returns `None`
 /// when the name doesn't end in a well-formed uuid.
 fn session_uuid_from_filename(path: &str) -> Option<String> {
-    let stem = Path::new(path).file_stem()?.to_str()?;
+    let plain = reader::plain_path(Path::new(path));
+    let stem = plain.file_stem()?.to_str()?;
     let uuid = stem.get(stem.len().checked_sub(36)?..)?;
     let valid = uuid.char_indices().all(|(i, c)| match i {
         8 | 13 | 18 | 23 => c == '-',
@@ -291,7 +296,48 @@ mod tests {
     }
 
     #[test]
+    fn collect_jsonl_files_deduplicates_encodings_and_prefers_active_storage() {
+        let home = tempfile::tempdir().unwrap();
+        let provider = CodexProvider::with_home(home.path().to_path_buf());
+        for (root, filenames) in [
+            (
+                provider.sessions_dir(),
+                vec![
+                    "first.jsonl",
+                    "first.jsonl.zst",
+                    "second.jsonl.zst",
+                    "other.zst",
+                ],
+            ),
+            (
+                provider.archived_sessions_dir(),
+                vec!["first.jsonl.zst", "second.jsonl", "third.jsonl.zst"],
+            ),
+        ] {
+            std::fs::create_dir_all(&root).unwrap();
+            for name in filenames {
+                std::fs::write(root.join(name), "{}").unwrap();
+            }
+        }
+        assert_eq!(
+            provider.collect_jsonl_files(),
+            vec![
+                provider.sessions_dir().join("first.jsonl"),
+                provider.sessions_dir().join("second.jsonl.zst"),
+                provider.archived_sessions_dir().join("third.jsonl.zst"),
+            ]
+        );
+    }
+
+    #[test]
     fn session_uuid_from_filename_extracts_trailing_uuid() {
+        assert_eq!(
+            session_uuid_from_filename(
+                "/x/rollout-2026-07-13T21-21-26-11111111-1111-4111-a111-111111111111.jsonl.zst"
+            )
+            .as_deref(),
+            Some("11111111-1111-4111-a111-111111111111")
+        );
         assert_eq!(
             session_uuid_from_filename(
                 "/x/rollout-2026-07-13T21-21-26-019F5BA3-c290-79d2-9a89-370b905ec017.jsonl"
@@ -306,6 +352,25 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn truncated_compressed_stream_does_not_return_partial_session() {
+        let home = tempfile::tempdir().unwrap();
+        let plain = write_rollout(
+            home.path(),
+            "11111111-1111-4111-a111-111111111111",
+            "complete message",
+        );
+        let path = plain.with_extension("jsonl.zst");
+        let mut encoder = zstd::stream::write::Encoder::new(Vec::new(), 0).unwrap();
+        encoder.include_checksum(true).unwrap();
+        std::io::copy(&mut std::fs::File::open(plain).unwrap(), &mut encoder).unwrap();
+        let mut bytes = encoder.finish().unwrap();
+        bytes.truncate(bytes.len() - 1);
+        std::fs::write(&path, bytes).unwrap();
+        let provider = CodexProvider::with_home(home.path().to_path_buf());
+        assert!(provider.parse_session_file(&path).is_none());
     }
 
     #[test]

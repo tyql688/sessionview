@@ -1,4 +1,4 @@
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{BufRead, Read};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
@@ -236,7 +236,7 @@ impl CodexScanAccum {
     /// the messages / tool-call pairings / first-occurrence trackers it
     /// observes. Called by both `parse_session_file` (full-file) and
     /// `parse_session_tail` (mmap-seeked) — they share the same loop body.
-    fn scan_lines<R: BufRead>(&mut self, reader: R, path: &Path) {
+    fn scan_lines<R: BufRead>(&mut self, reader: R, path: &Path) -> bool {
         let stats =
             crate::provider::util::for_each_jsonl_record(reader, path, |_, entry: CodexLine| {
                 self.scan_line(&entry, path);
@@ -281,6 +281,7 @@ impl CodexScanAccum {
             .saturating_add(stats.parse_error_count)
             .saturating_add(unmatched_tool_events)
             .saturating_add(unresolved_usage_events);
+        stats.read_error_count == 0
     }
 
     /// Handle a top-level `compacted` line. Carries the post-compaction
@@ -345,7 +346,7 @@ impl CodexProvider {
                 return None;
             }
         };
-        let metadata = match fs::metadata(path) {
+        let metadata = match file.metadata() {
             Ok(metadata) => metadata,
             Err(error) => {
                 log::warn!(
@@ -383,7 +384,9 @@ impl CodexProvider {
             accum.set_history_header(header);
         }
         accum.history_segment_headers = history.segment_headers;
-        accum.scan_lines(history.reader, path);
+        if !accum.scan_lines(history.reader, path) {
+            return None;
+        }
 
         // Hoist accumulator fields back to locals so the existing post-loop
         // finalization (title, project_path, content_text, meta assembly)
@@ -600,6 +603,10 @@ pub struct CodexTailResult {
 ///   partial windows, using the canonical physical file header.
 /// - No token-total computation: the caller pulls totals from the DB.
 pub(crate) fn parse_session_tail(path: &Path, target_messages: usize) -> Option<CodexTailResult> {
+    // Compressed byte offsets do not address JSONL lines; use the full reader.
+    if super::reader::is_compressed(path) {
+        return None;
+    }
     // Codex JSONL lines are noticeably bigger than Claude's (each turn
     // is ~10-20 KB of `response_item.message` content + tool calls),
     // and an event_msg.token_count plus its enclosing turn_context can
@@ -648,7 +655,9 @@ pub(crate) fn parse_session_tail(path: &Path, target_messages: usize) -> Option<
     // Codex process may append another record while this reader is active;
     // consuming beyond the captured size would reintroduce a partial-line race.
     let stable_tail_bytes = window.file_size.saturating_sub(window.start_offset);
-    accum.scan_lines(reader.take(stable_tail_bytes), path);
+    if !accum.scan_lines(reader.take(stable_tail_bytes), path) {
+        return None;
+    }
 
     flush_pending_user_message(
         &mut accum.pending_user_message,

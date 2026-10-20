@@ -23,7 +23,7 @@ use memmap2::Mmap;
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::CodexProvider;
+use super::{CodexProvider, reader};
 
 #[derive(Clone, Deserialize)]
 struct HistoryBase {
@@ -57,7 +57,7 @@ impl Header {
 
 pub(super) fn read_header(path: &Path) -> anyhow::Result<Option<Header>> {
     let mut first = String::new();
-    BufReader::new(File::open(path)?).read_line(&mut first)?;
+    reader::open(path)?.read_line(&mut first)?;
     let Ok(row) = serde_json::from_str::<Value>(&first) else {
         return Ok(None); // The ordinary parser owns malformed-record warnings.
     };
@@ -112,6 +112,31 @@ fn headers(files: &[PathBuf]) -> anyhow::Result<HashMap<PathBuf, Header>> {
 }
 
 fn boundary_matches(path: &Path, base: &HistoryBase) -> anyhow::Result<bool> {
+    if reader::is_compressed(path) {
+        let mut prefix = BufReader::new(reader::open(path)?.take(base.end_byte_offset));
+        let mut last = Vec::new();
+        let mut consumed = 0u64;
+        loop {
+            last.clear();
+            let bytes = prefix.read_until(b'\n', &mut last)?;
+            if bytes == 0 {
+                return Ok(false);
+            }
+            consumed += bytes as u64;
+            if consumed == base.end_byte_offset {
+                break;
+            }
+        }
+        if last.last() != Some(&b'\n') {
+            return Ok(false);
+        }
+        let row: Value = serde_json::from_slice(&last)?;
+        return Ok(row
+            .get("ordinal")
+            .and_then(Value::as_u64)
+            .and_then(|n| n.checked_add(1))
+            == Some(base.end_ordinal_exclusive));
+    }
     let file = File::open(path)?;
     if file.metadata()?.len() == 0 {
         return Ok(false);
@@ -212,7 +237,8 @@ pub(super) fn leaf_paths(files: Vec<PathBuf>) -> anyhow::Result<Vec<PathBuf>> {
 }
 
 fn rollout_order_key(path: &Path, thread_id: &str) -> Option<(chrono::NaiveDateTime, String)> {
-    let stem = path.file_stem()?.to_str()?.strip_prefix("rollout-")?;
+    let plain = reader::plain_path(path);
+    let stem = plain.file_stem()?.to_str()?.strip_prefix("rollout-")?;
     let timestamp =
         chrono::NaiveDateTime::parse_from_str(stem.get(..19)?, "%Y-%m-%dT%H-%M-%S").ok()?;
     let ids = stem.get(19..)?.strip_prefix('-')?;
@@ -240,14 +266,19 @@ pub(super) fn open_reader(
             .into_iter()
             .collect();
         return Ok(ResolvedHistory {
-            reader: Box::new(BufReader::new(file.take(file_size))),
+            reader: reader::from_file(path, file, file_size)?,
             segment_headers,
             header,
         });
     }
     let catalog = headers(&provider.collect_jsonl_files())?;
     let mut parts = Vec::new();
-    history_parts(path, file_size, &catalog, &mut parts)?;
+    let leaf_limit = if reader::is_compressed(path) {
+        u64::MAX
+    } else {
+        file_size
+    };
+    history_parts(path, leaf_limit, &catalog, &mut parts)?;
     let segment_headers = parts
         .iter()
         .filter_map(|(part, _)| {
@@ -258,7 +289,12 @@ pub(super) fn open_reader(
         .collect();
     let mut reader: Box<dyn Read> = Box::new(std::io::empty());
     for (part, limit) in parts.into_iter().rev() {
-        reader = Box::new(reader.chain(File::open(&part)?.take(limit)));
+        let segment = if part == path {
+            reader::from_file(&part, file.try_clone()?, file_size)?
+        } else {
+            reader::open(&part)?
+        };
+        reader = Box::new(reader.chain(segment.take(limit)));
     }
     Ok(ResolvedHistory {
         reader: Box::new(BufReader::new(reader)),

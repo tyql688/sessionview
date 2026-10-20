@@ -111,6 +111,83 @@ fn pagination_preserves_prefix_and_continuation_once_across_scans_and_loads() {
 }
 
 #[test]
+fn compressed_pagination_preserves_decoded_boundaries_and_physical_sizes() {
+    for (compress_root, compress_leaf) in [(true, false), (false, true), (true, true)] {
+        let (_home, provider, root, mut leaf) = fixture();
+        for path in [
+            compress_root.then_some(root),
+            compress_leaf.then_some(leaf.clone()),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let compressed = path.with_extension("jsonl.zst");
+            fs::write(
+                &compressed,
+                zstd::stream::encode_all(fs::read(&path).unwrap().as_slice(), 0).unwrap(),
+            )
+            .unwrap();
+            // Only generated fixture files in this test's temporary home.
+            fs::remove_file(&path).unwrap();
+            if path == leaf {
+                leaf = compressed;
+            }
+        }
+        let sessions = provider.scan_all().unwrap();
+        assert_eq!(sessions.len(), 1);
+        let session = &sessions[0];
+        assert_eq!(session.parse_warning_count, 0);
+        assert_eq!(Path::new(&session.meta.source_path), leaf.as_path());
+        assert_eq!(
+            session.meta.file_size_bytes,
+            fs::metadata(&leaf).unwrap().len()
+        );
+        assert!(session.content_text.contains("retained history"));
+        assert!(session.content_text.contains("new history"));
+        assert!(!session.content_text.contains("discarded branch"));
+        let loaded = provider
+            .load_messages(THREAD_ID, &session.meta.source_path)
+            .unwrap();
+        assert_eq!(loaded.token_totals.input_tokens, 120);
+        assert_eq!(loaded.token_totals.cache_read_tokens, 80);
+        assert_eq!(loaded.token_totals.output_tokens, 20);
+        assert!(super::super::parser::parse_session_tail(&leaf, 100).is_none());
+        let known = HashMap::from([(
+            session.meta.source_path.clone(),
+            SourceState {
+                size: session.meta.file_size_bytes,
+                mtime: session.source_mtime,
+                title: Some(session.meta.title.clone()),
+            },
+        )]);
+        let next = provider.scan_incremental(&known).unwrap();
+        assert!(next.parsed.is_empty());
+        assert_eq!(next.unchanged_source_paths.len(), 1);
+    }
+}
+
+#[test]
+fn compressed_pagination_rejects_invalid_decoded_boundary() {
+    let (_home, provider, root, leaf) = fixture();
+    let compressed = root.with_extension("jsonl.zst");
+    fs::write(
+        &compressed,
+        zstd::stream::encode_all(fs::read(&root).unwrap().as_slice(), 0).unwrap(),
+    )
+    .unwrap();
+    fs::remove_file(&root).unwrap();
+    for boundary in [0, 1, u64::MAX] {
+        fs::write(
+            &leaf,
+            rows(4, Some((THREAD_ID, 4, boundary)), "bad boundary"),
+        )
+        .unwrap();
+        assert!(provider.scan_all().is_err());
+        assert!(provider.parse_session_file(&leaf).is_none());
+    }
+}
+
+#[test]
 fn pagination_revert_resolves_physical_rollout_id_and_preserves_logical_thread() {
     let (home, provider, _root, leaf) = fixture();
     let next = home.path().join(format!(
