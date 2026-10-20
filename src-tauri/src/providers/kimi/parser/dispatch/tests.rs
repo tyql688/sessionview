@@ -781,6 +781,45 @@ fn abnormal_lifecycle_records_surface_status_details() {
 }
 
 #[test]
+fn retry_status_accepts_fractional_millisecond_delays() {
+    let mut accum = ScanAccum::new();
+    dispatch_line(
+        &mut accum,
+        &json!({
+            "type": "turn.step.retrying",
+            "nextAttempt": 2,
+            "maxAttempts": 5,
+            "delayMs": 750.25,
+            "errorName": "ProviderError",
+            "time": 1779701196501i64
+        }),
+    );
+    assert_eq!(accum.parse_warning_count, 0);
+    assert_eq!(accum.messages.len(), 1);
+    assert!(accum.messages[0].content.contains("after 750.25 ms"));
+}
+
+#[test]
+fn retry_status_rejects_negative_and_non_numeric_delays() {
+    for delay in [json!(-0.5), json!("750"), json!(null)] {
+        let mut accum = ScanAccum::new();
+        dispatch_line(
+            &mut accum,
+            &json!({
+                "type": "turn.step.retrying",
+                "nextAttempt": 2,
+                "maxAttempts": 5,
+                "delayMs": delay,
+                "errorName": "ProviderError",
+                "time": 1779701196501i64
+            }),
+        );
+        assert_eq!(accum.parse_warning_count, 1);
+        assert!(accum.messages.is_empty());
+    }
+}
+
+#[test]
 fn malformed_abnormal_lifecycle_record_remains_a_warning() {
     let mut accum = ScanAccum::new();
 

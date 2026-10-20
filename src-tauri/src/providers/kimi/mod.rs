@@ -43,7 +43,7 @@ impl crate::provider::ProviderDescriptor for Descriptor {
         "kimi"
     }
     fn parser_revision(&self) -> Option<&'static str> {
-        Some("1")
+        Some("2")
     }
 }
 

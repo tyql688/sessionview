@@ -604,7 +604,10 @@ fn handle_step_retrying(accum: &mut ScanAccum, entry: &Value, line_time_ms: Opti
     let fields = (
         entry.get("nextAttempt").and_then(Value::as_u64),
         entry.get("maxAttempts").and_then(Value::as_u64),
-        entry.get("delayMs").and_then(Value::as_u64),
+        entry
+            .get("delayMs")
+            .and_then(Value::as_f64)
+            .filter(|delay| delay.is_finite() && *delay >= 0.0),
         entry
             .get("errorName")
             .and_then(Value::as_str)
